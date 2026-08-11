@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ✅ done（2026-08-12）
+**Status:** ✅ done（2026-08-12，commit f66759c，14 單元＋1 smoke 全綠）
 
 - [x] Adapter 以 CLI 旗標傳 `--siliconflow-api-key`／`--siliconflow-base-url`（預設 `https://api.siliconflow.com/v1`）與 DeepSeek key
 - [x] 引擎錯誤（401、CSV 格式錯）轉成領域錯誤訊息，不透傳原始 traceback 給 UI
