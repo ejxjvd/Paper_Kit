@@ -4,9 +4,9 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** ✅ done（2026-08-12）
 
-- [ ] Adapter 以 CLI 旗標傳 `--siliconflow-api-key`／`--siliconflow-base-url`（預設 `https://api.siliconflow.com/v1`）與 DeepSeek key
-- [ ] 引擎錯誤（401、CSV 格式錯）轉成領域錯誤訊息，不透傳原始 traceback 給 UI
-- [ ] 整合 smoke（標 slow）：fixture 2 頁公式密集 PDF → 產出 mono+dual → 抽樣文字斷言公式原樣、可搜尋
-- [ ] glossary CSV（標頭列）正確帶入 `--glossaries`
+- [x] Adapter 以 CLI 旗標傳 `--siliconflow-api-key`／`--siliconflow-base-url`（預設 `https://api.siliconflow.com/v1`）與 DeepSeek key
+- [x] 引擎錯誤（401、CSV 格式錯）轉成領域錯誤訊息，不透傳原始 traceback 給 UI
+- [x] 整合 smoke（標 slow）：fixture 2 頁公式密集 PDF → 產出 mono+dual → 抽樣文字斷言公式原樣、可搜尋
+- [x] glossary CSV（標頭列）正確帶入 `--glossaries`

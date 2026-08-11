@@ -37,6 +37,10 @@ _LEGAL_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
 class TranslationJob:
     job_id: str
     status: JobStatus = JobStatus.QUEUED
+    source_path: str | None = None
+    target_lang: str = "zh-TW"
+    pages: str | None = None          # "1-2" 形式；None = 全文
+    glossary_files: list[str] = field(default_factory=list)
     result: JobResult | None = None
     error: str | None = None
 
