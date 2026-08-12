@@ -18,7 +18,7 @@ from paper_kit.domain.translation_job import JobStatus, TranslationJob
 _COLUMNS = (
     "job_id", "created_at", "status", "source_path", "target_lang", "pages",
     "output_dir", "glossary_files", "auto_extract", "engine_id",
-    "estimated_cost", "sensitive", "result", "error",  # 票 10：機密標記隨任務記錄
+    "estimated_cost", "sensitive", "ocr", "result", "error",  # 票 10/12：機密／掃描件標記隨任務記錄
 )
 _PLACEHOLDERS = ", ".join("?" for _ in _COLUMNS)
 
@@ -98,6 +98,7 @@ class SqliteJobRepository:
             job.engine_id,
             str(job.estimated_cost) if job.estimated_cost is not None else None,
             int(job.sensitive),
+            int(job.ocr),
             json.dumps(asdict(job.result)) if job.result else None,
             job.error,
         )
@@ -121,6 +122,7 @@ class SqliteJobRepository:
             estimated_cost=Decimal(data["estimated_cost"]) if data["estimated_cost"] else None,
             # int()：TEXT 欄位存 "0"/"1" 字串，bool("0") 是 True（陷阱）
             sensitive=bool(int(data.get("sensitive") or 0)),  # .get：舊 DB 無此欄位 → 預設非機密
+            ocr=bool(int(data.get("ocr") or 0)),  # 票 12：同款遷移防護（舊 DB 無此欄位）
             result=result,
             error=data["error"],
         )

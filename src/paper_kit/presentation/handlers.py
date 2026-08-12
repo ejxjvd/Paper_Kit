@@ -39,6 +39,7 @@ class JobCardView:
     can_retry: bool = False          # 票 08：失敗任務可重試
     can_cancel: bool = False         # 票 08：進行中任務可取消
     sensitive: bool = False          # 票 10：機密文件（卡片顯示 🔒）
+    ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -92,4 +93,5 @@ def build_job_card(
         can_retry=job.can_retry,   # 規則單一真相＝領域轉換表（review 修正）
         can_cancel=job.can_cancel,
         sensitive=job.sensitive,   # 票 10：機密標記顯示（🔒）
+        ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
     )

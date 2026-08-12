@@ -3,6 +3,7 @@
 Ports & Adapters 架構保證：換引擎＝換插頭，UI 與業務邏輯零改動。
 """
 
+from pathlib import Path
 from typing import Protocol
 
 from paper_kit.domain.job_result import JobResult
@@ -36,4 +37,15 @@ class JobRepository(Protocol):
 
     def list(self) -> list[TranslationJob]:
         """票 08：全部任務（建立順序）——重啟後 JobService 由此載入歷史。"""
+        ...
+
+
+class OcrPort(Protocol):
+    """票 12：OCR 埠——掃描 PDF 每頁 → 文字（本機執行，不上雲端視覺 API）。
+
+    實作：RapidOcrAdapter（onnxruntime）。機密文件與 OCR 相容——本機直接看圖。
+    """
+
+    def extract_pages(self, pdf_path: str | Path) -> dict[int, str]:
+        """把無文字層 PDF 每頁 OCR 成文字；失敗丟 EngineError。"""
         ...

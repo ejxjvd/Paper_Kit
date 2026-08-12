@@ -1,0 +1,49 @@
+"""OcrService（application）：掃描件預處理——把無文字層 PDF 變成有文字層。
+
+垂直切片設計（票 12）：OCR 的產出是「有文字層的 PDF」——既有翻譯管線
+（pdf2zh）零改動接手。文字層只要存在且順序正確即可，排版交給 pdf2zh
+的版面分析（ocrmypdf 同款做法的簡化版，不需精確 bbox 對位）。
+
+紅線：OCR 走本機 onnxruntime（RapidOCR）——不碰雲端視覺 API，
+機密文件反而相容（本機直接看圖）。
+"""
+
+from collections.abc import Callable
+from pathlib import Path
+
+import pypdf
+
+from paper_kit.application.ports import EngineError, OcrPort
+from paper_kit.infrastructure.pdf_overlay import overlay_text_layer
+
+# overlay 可注入（測試換 fake，不碰 pymupdf）；正式 = 隱形文字層內嵌
+OverlayFn = Callable[[Path, dict[int, str], Path], Path]
+
+
+def has_text_layer(pdf_path: str | Path) -> bool:
+    """掃描件偵測（AC1）：任一頁有非空白文字 → 有文字層（回 True）。"""
+    reader = pypdf.PdfReader(str(pdf_path))
+    for page in reader.pages:
+        text = (page.extract_text() or "").strip()
+        if text:
+            return True
+    return False
+
+
+class OcrService:
+    """OCR 服務：偵測 → OCR → 內嵌文字層 → 回傳 OCR 版 PDF（或 None＝有文字層）。"""
+
+    def __init__(self, ocr: OcrPort, overlay: OverlayFn = overlay_text_layer):
+        self._ocr = ocr
+        self._overlay = overlay
+
+    def ensure_text_layer(self, pdf_path: str | Path) -> Path | None:
+        """確保 PDF 有文字層；無則 OCR 並回傳 OCR 版路徑（原檔不動）。"""
+        src = Path(pdf_path)
+        if has_text_layer(src):
+            return None
+        pages = self._ocr.extract_pages(src)
+        if not any(pages.values()):  # spec review：空 OCR → 拒絕產出空白文字層
+            raise EngineError("掃描件 OCR 無結果——可能不是可辨識的掃描件")
+        out = src.with_name(f"ocr-{src.name}")
+        return self._overlay(src, pages, out)

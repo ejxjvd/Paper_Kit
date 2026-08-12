@@ -563,3 +563,96 @@ def test_sensitive_job_retry_rejected_keeps_failed_state(tmp_path: Path, upload_
         service.retry(job.job_id, FakeEngine(), engine_id="siliconflow", engine_allows_sensitive=False)
     assert repo.get(job.job_id).status is JobStatus.FAILED, "被拒的重試維持 FAILED"
     assert repo.get(job.job_id).error is not None
+
+
+# ── 票 12：掃描件 OCR 接線 ──────────────────────────────────
+
+class FakeOcrService:
+    """JobService 注入的 OcrService 替身（record 呼叫、可指定產出／失敗）。"""
+
+    def __init__(self, prepared: Path | None = None, error: str | None = None):
+        self._prepared = prepared
+        self._error = error
+        self.called_with: list[str] = []
+
+    def ensure_text_layer(self, pdf_path) -> Path | None:
+        self.called_with.append(str(pdf_path))
+        if self._error:
+            raise EngineError(self._error)
+        return self._prepared
+
+
+def make_service_with_ocr(tmp_path: Path, ocr) -> tuple[JobService, InMemoryJobRepository]:
+    repo = InMemoryJobRepository()
+    return JobService(jobs=repo, outputs_dir=tmp_path / "outputs", ocr=ocr), repo
+
+
+def test_create_job_records_ocr_flag(tmp_path: Path, upload_pdf: Path):
+    """ocr=True 記在任務上（歷史與顯示用），預設 False。"""
+    service, _ = make_service_with_ocr(tmp_path, FakeOcrService())
+    job = service.create_job(upload_path=upload_pdf, ocr=True)
+    assert job.ocr is True
+    plain = service.create_job(upload_path=upload_pdf)
+    assert plain.ocr is False
+
+
+def test_ocr_job_prepares_text_layer_before_translation(tmp_path: Path, upload_pdf: Path):
+    """ocr=True：worker 先 ensure_text_layer，引擎收到 OCR 版 PDF（既有管線零改動）。"""
+    ocr_path = tmp_path / "ocr-paper.pdf"
+    ocr_path.write_bytes(b"%PDF-1.4 ocr version")
+    ocr_svc = FakeOcrService(prepared=ocr_path)
+    service, repo = make_service_with_ocr(tmp_path, ocr_svc)
+    job = service.create_job(upload_path=upload_pdf, ocr=True)
+
+    engine = FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf"))
+    service.start(job.job_id, engine, engine_id="siliconflow")
+    service.wait(job.job_id, timeout=5)
+
+    assert repo.get(job.job_id).status is JobStatus.COMPLETED
+    assert ocr_svc.called_with, "OCR 服務必須被呼叫"
+    assert engine.received[0].source_path == str(ocr_path), "引擎收到 OCR 版 PDF"
+
+
+def test_plain_job_does_not_touch_ocr(tmp_path: Path, upload_pdf: Path):
+    """未勾 OCR → OCR 服務不被呼叫。"""
+    ocr_svc = FakeOcrService()
+    service, repo = make_service_with_ocr(tmp_path, ocr_svc)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(
+        job.job_id, FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="siliconflow",
+    )
+    service.wait(job.job_id, timeout=5)
+    assert ocr_svc.called_with == []
+    assert repo.get(job.job_id).status is JobStatus.COMPLETED
+
+
+def test_ocr_failure_fails_job_with_friendly_message(tmp_path: Path, upload_pdf: Path):
+    """OCR 失敗 → 任務 FAILED＋友善訊息（既有失敗路徑接手）。"""
+    ocr_svc = FakeOcrService(error="模型下載失敗")
+    service, repo = make_service_with_ocr(tmp_path, ocr_svc)
+    job = service.create_job(upload_path=upload_pdf, ocr=True)
+    service.start(
+        job.job_id, FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="siliconflow",
+    )
+    service.wait(job.job_id, timeout=5)
+    got = repo.get(job.job_id)
+    assert got.status is JobStatus.FAILED
+    assert "模型下載失敗" in got.error
+
+
+def test_ocr_job_without_ocr_service_fails_explicitly(tmp_path: Path, upload_pdf: Path):
+    """spec review：ocr=True 但 JobService 未注入 OCR（無頭模式）→ 明確失敗，
+    不靜默照翻無文字層 PDF。"""
+    repo = InMemoryJobRepository()
+    service = JobService(jobs=repo, outputs_dir=tmp_path / "outputs")  # 無 ocr 注入
+    job = service.create_job(upload_path=upload_pdf, ocr=True)
+    service.start(
+        job.job_id, FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="siliconflow",
+    )
+    service.wait(job.job_id, timeout=5)
+    got = repo.get(job.job_id)
+    assert got.status is JobStatus.FAILED
+    assert "OCR" in got.error

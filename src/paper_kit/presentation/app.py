@@ -16,10 +16,11 @@ from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
+from paper_kit.application.ocr import OcrService, has_text_layer  # 票 12：掃描件 OCR
 from paper_kit.application.pages import parse_pages
-from paper_kit.domain.translation_job import InvalidTransition
 from paper_kit.application.ports import EngineError
 from paper_kit.application.settings_service import SettingsService
+from paper_kit.domain.translation_job import InvalidTransition
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
 from paper_kit.domain.translation_job import JobStatus
@@ -27,6 +28,7 @@ from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
+from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import JobCardView, build_job_card
 from paper_kit.presentation.theme import apply_theme
@@ -59,6 +61,7 @@ def _start_job(
     e,
     pages_text: str = "",
     sensitive: bool = False,
+    ocr: bool = False,
 ) -> None:
     # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於寫暫存檔）
     try:
@@ -91,7 +94,14 @@ def _start_job(
         pages=pages,
         output_dir=settings.output_dir(),
         sensitive=sensitive,
+        ocr=ocr,
     )
+    # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）
+    if not ocr and job.source_path and not has_text_layer(job.source_path):
+        ui.notify(
+            "⚠️ 偵測為掃描件（無文字層）——翻譯可能產出空白；建議勾選 🔍 OCR 重試",
+            type="warning",
+        )
     # 票 05：挑選的術語表組合＋自動提取開關隨任務記錄（之後改設定不影響舊任務）
     names = settings.selected_glossary_names(glossaries.list_glossaries())  # 預設全選
     job.glossary_files = glossaries.paths_for(names)
@@ -174,6 +184,8 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                     ui.label(view.file_name).classes("text-lg font-semibold")
                     if view.sensitive:  # 票 10：機密標記顯示
                         ui.badge("🔒 機密").props("outline color=orange")
+                    if view.ocr:  # 票 12：掃描件標記顯示
+                        ui.badge("🔍 掃描件").props("outline color=teal")
                 # 票 08：歷史卡片顯示建立時間＋引擎
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
@@ -619,7 +631,12 @@ def main() -> None:
     app.add_static_files(FILES_BASE, str(OUTPUTS_DIR))
     repo = SqliteSettingsRepository(DB_PATH)
     # 票 08：SQLite 任務歷史——重啟 app 後任務仍在（InMemory 只留給無頭執行）
-    service = JobService(jobs=SqliteJobRepository(DB_PATH), outputs_dir=OUTPUTS_DIR)
+    # 票 12：注入 OcrService（RapidOCR 本機引擎）——掃描件預處理用
+    service = JobService(
+        jobs=SqliteJobRepository(DB_PATH),
+        outputs_dir=OUTPUTS_DIR,
+        ocr=OcrService(RapidOcrAdapter()),
+    )
     settings = SettingsService(repo)
     cost = CostService(repo)
     glossaries = GlossaryService(GlossaryRepository(GLOSSARIES_DIR))
@@ -648,6 +665,8 @@ def main() -> None:
                 "機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理"
             ).classes("text-xs text-amber-7")
             sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
+            # 票 12：掃描件 OCR（本機 onnxruntime，不上雲——機密文件相容）
+            ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
             memo: dict[str, str | None] = {}
             cards = ui.column().classes("w-full gap-4")
             # 票 07：頁面範圍（空白=全部；1-2／3-5／1-2,4-6 區間格式）
@@ -660,6 +679,7 @@ def main() -> None:
                 on_upload=lambda e: _start_job(
                     service, settings, cost, glossaries, e,
                     pages_text=pages_input.value, sensitive=sensitive_input.value,
+                    ocr=ocr_input.value,
                 ),
             ).classes("w-full")
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))

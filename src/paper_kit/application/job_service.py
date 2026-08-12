@@ -10,7 +10,8 @@ import uuid
 from pathlib import Path
 
 from paper_kit.application.errors import to_user_message
-from paper_kit.application.ports import JobRepository, TranslationEnginePort
+from paper_kit.application.ocr import OcrService
+from paper_kit.application.ports import EngineError, JobRepository, TranslationEnginePort
 from paper_kit.application.start_translation import StartTranslation
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
 from paper_kit.infrastructure.logging_setup import format_error_chain
@@ -21,12 +22,14 @@ logger = logging.getLogger("paper_kit.application.job_service")  # 票 09：事�
 class JobService:
     """任務服務：建立（複製上傳檔進 outputs/<job_id>/）、背景執行、等待。"""
 
-    def __init__(self, jobs: JobRepository, outputs_dir: str | Path):
+    def __init__(self, jobs: JobRepository, outputs_dir: str | Path,
+                 ocr: OcrService | None = None):
         self._jobs = jobs
         self._outputs = Path(outputs_dir)
         self._threads: dict[str, threading.Thread] = {}
         self._engines: dict[str, TranslationEnginePort] = {}  # 票 08：cancel 要摸得到引擎
         self._lock = threading.Lock()  # 票 08：cancel vs worker 終態判定互斥（review 修正）
+        self._ocr = ocr  # 票 12：掃描件 OCR（None＝未啟用；呼叫端組裝注入）
         # 票 08：重啟後從 repo 載入歷史（SQLite 才有記憶；InMemory 回傳空）
         self._order = [job.job_id for job in jobs.list()]
         self._reclaim_stuck_jobs(jobs)
@@ -38,12 +41,14 @@ class JobService:
         pages: str | None = None,
         output_dir: str = "",
         sensitive: bool = False,
+        ocr: bool = False,
     ) -> TranslationJob:
         """把上傳檔複製進任務資料夾，建立 queued 任務。
 
         pages：頁面範圍（票 07，None=全部）；output_dir：完成後產出複製到的目錄
         （票 07，空白=留在預設 outputs/<job_id>/）；sensitive：機密文件
-        （票 10——只准純文字引擎，start 時強制檢查）。
+        （票 10——只准純文字引擎，start 時強制檢查）；ocr：掃描件
+        （票 12——執行前先本機 OCR 內嵌文字層，既有翻譯管線零改動）。
         """
         job_id = uuid.uuid4().hex
         src = Path(upload_path)
@@ -58,6 +63,7 @@ class JobService:
             pages=pages,
             output_dir=output_dir,
             sensitive=sensitive,
+            ocr=ocr,
         )
         self._jobs.add(job)
         self._order.append(job_id)
@@ -161,8 +167,23 @@ class JobService:
                 job.error = "應用重啟，翻譯中斷（請重試）"
                 jobs.save(job)
 
+    def _prepare_ocr(self, job: TranslationJob) -> None:
+        """票 12：掃描件執行前先本機 OCR——把無文字層 PDF 變成有文字層。
+
+        OCR 產出（ocr-*.pdf）放任務資料夾；有文字層時 ensure_text_layer
+        回 None（不動原檔）。失敗丟 EngineError → 既有 FAILED 路徑接手。
+        """
+        if not job.ocr:
+            return
+        if self._ocr is None:  # spec review：未注入（無頭模式）→ 明確失敗，不靜默照翻
+            raise EngineError("掃描件 OCR 未啟用（無頭模式未注入 OCR 服務）")
+        prepared = self._ocr.ensure_text_layer(Path(job.source_path))
+        if prepared is not None:
+            job.source_path = str(prepared)  # 引擎翻 OCR 版；完成時 save 一併持久化
+
     def _run(self, job: TranslationJob, engine: TranslationEnginePort) -> None:
         try:
+            self._prepare_ocr(job)
             done = StartTranslation(
                 engine=engine, jobs=self._jobs, lock=self._lock
             ).run(job)

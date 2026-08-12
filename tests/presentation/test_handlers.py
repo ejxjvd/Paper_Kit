@@ -108,3 +108,15 @@ def test_sensitive_job_carries_flag_to_card():
 def test_plain_job_card_not_sensitive():
     view = build_job_card(TranslationJob(job_id="p1", source_path="/outputs/p1/a.pdf"))
     assert view.sensitive is False
+
+
+def test_ocr_job_carries_flag_to_card():
+    job = TranslationJob(job_id="o1", source_path="/outputs/o1/a.pdf", ocr=True)
+    view = build_job_card(job, files_base="/files")
+    assert view.ocr is True
+
+
+def test_plain_job_card_not_ocr():
+    job = TranslationJob(job_id="p1", source_path="/outputs/p1/a.pdf")
+    view = build_job_card(job, files_base="/files")
+    assert view.ocr is False

@@ -146,3 +146,23 @@ def test_old_schema_migrates_missing_column(tmp_path: Path):
 
     assert repo.get("legacy1").sensitive is False  # 舊列讀取安全
     assert repo.get("new1").sensitive is True
+
+
+def test_ocr_flag_survives_roundtrip_and_restart(tmp_path: Path):
+    """票 12：掃描件標記隨任務記錄（SQLite 欄位），重啟也在。"""
+    job = sample_job()
+    job.ocr = True
+
+    db = tmp_path / "app.db"
+    repo1 = SqliteJobRepository(db)
+    repo1.add(job)
+    assert repo1.get("abc123").ocr is True
+
+    repo2 = SqliteJobRepository(db)  # 重啟
+    assert repo2.get("abc123").ocr is True
+
+
+def test_ocr_defaults_false_in_db(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
+    assert repo.get("plain").ocr is False

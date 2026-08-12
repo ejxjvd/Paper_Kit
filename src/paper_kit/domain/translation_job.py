@@ -50,6 +50,7 @@ class TranslationJob:
     engine_id: str | None = None      # 用哪個引擎（票 06 計價用）
     estimated_cost: Decimal | None = None  # 票 06：上傳時的前置估算（完成後比對用）
     sensitive: bool = False           # 票 10：機密文件（R18／隱私）——只准純文字引擎
+    ocr: bool = False                 # 票 12：掃描件（無文字層）——執行前先本機 OCR
     result: JobResult | None = None
     error: str | None = None
 
