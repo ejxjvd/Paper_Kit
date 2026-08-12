@@ -337,6 +337,34 @@ def test_engine_receives_glossary_selection_and_auto_extract(tmp_path: Path, upl
 # ── 票 08：重試＋取消 ───────────────────────────────────────────
 
 
+def test_engine_progress_callback_writes_throttled_job_progress(tmp_path, upload_pdf):
+    """#72：引擎有進度回調（CliAdapterBase）→ translate 期間 job.progress 寫回。
+
+    throttle 驗證：同值（0.1→0.1）2s 內被掉；差值 ≥0.02（0.1→0.5）寫入。
+    """
+    class ProgressEngine(FakeEngine):
+        def __init__(self):
+            super().__init__(result=JobResult(mono_path="/o/m.pdf", dual_path="/o/d.pdf"))
+            self.callback = None
+
+        def set_progress_callback(self, cb):
+            self.callback = cb
+
+        def translate(self, job):
+            self.callback(0.1)
+            self.callback(0.1)  # 同值 → throttle 掉（不重寫）
+            self.callback(0.5)
+            return self._result
+
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_pdf)
+    service.start(job.job_id, ProgressEngine(), engine_id="siliconflow")
+    service.wait(job.job_id, timeout=5.0)
+    got = repo.get(job.job_id)
+    assert got.status is JobStatus.COMPLETED
+    assert got.progress == 0.5
+
+
 def test_retry_failed_job_runs_again_without_reupload(tmp_path: Path, upload_pdf: Path):
     service, repo = make_service(tmp_path)
     job = service.create_job(upload_path=upload_pdf)

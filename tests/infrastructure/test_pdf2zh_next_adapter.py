@@ -6,6 +6,7 @@ POC 教訓入測：.com 國際站端點預設、key 走 CLI 旗標（不吃 proc
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -51,15 +52,19 @@ def test_uv_falls_back_to_home_local_bin(monkeypatch, tmp_path):
 
     captured: dict = {}
 
-    class FakeProc:
+    class FakeProc:  # 流式介面（#73）：stdout 迭代逐行＋poll/wait，不再用 communicate
         returncode = 0
 
         def __init__(self, cmd, **kwargs):
             captured["cmd"] = cmd
             captured["kwargs"] = kwargs
+            self.stdout = _LineStream(LOG)
 
-        def communicate(self, timeout=None):
-            return (LOG, None)
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
 
     monkeypatch.setattr(
         "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", FakeProc
@@ -103,6 +108,19 @@ LOG = (
     "INFO Dual PDF: /out/paper.zh.dual.pdf\n"
     "Total Token Usage: Total 9346, Prompt 7127, Cache Hit Prompt 1664, Completion 2219\n"
 )
+
+
+class _LineStream:
+    """流式 runner 的 stdout 替身：逐行 yield 文字，最後 StopIteration＝EOF。"""
+
+    def __init__(self, text: str):
+        self._lines = iter(text.splitlines(keepends=True))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        return next(self._lines)
 
 
 # ── build_command：旗標組裝 ──────────────────────────────
@@ -289,6 +307,49 @@ def test_non_transient_error_no_retry():
 def test_timeout_maps_to_timeout_message():
     runner = FakeRunner(subprocess.TimeoutExpired("pdf2zh_next", 600))
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=runner)
+    with pytest.raises(EngineError, match="逾時"):
+        adapter.translate(make_job())
+
+
+def test_inactivity_timeout_raises_when_no_output(monkeypatch, tmp_path):
+    """#73（CH4 真因）：引擎還活著但超過 inactivity_seconds 無輸出行 → 逾時。
+
+    舊機制死守 600s 總牆鐘——CH4 正在逐段翻譯（SiliconFlow 每段 API 呼叫間隔
+    5–20s，段落 warning 行＝活性信號），卻被牆鐘硬殺。新機制改以「最後一行的
+    時間」判 hang：有輸出就續命，只剩真的卡住才逾時。
+    """
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / ".local" / "bin" / "uv").touch()
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
+                        lambda _: None)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    class NeverStream:
+        """永不產出行（模擬 rich bar 佔住 stdout、\n 行杳無蹤影的卡住段）。"""
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            time.sleep(3600)
+
+    class SilentProc:
+        returncode = 0
+        pid = 99999  # kill_tree 會 killpg → ProcessLookupError → 放行
+
+        def __init__(self, cmd, **kwargs):
+            self.stdout = NeverStream()
+
+        def poll(self):
+            return None  # 一直活著（不退出也不輸出）
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", SilentProc
+    )
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY", inactivity_seconds=1))
     with pytest.raises(EngineError, match="逾時"):
         adapter.translate(make_job())
 

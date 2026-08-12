@@ -33,7 +33,9 @@ class BabelDocConfig:
     api_key: str = ""
     base_url: str = DEFAULT_BABELDOC_BASE_URL
     retries: int = 2          # 暫時性錯誤重試次數
-    timeout_seconds: int = 600  # 引擎 hang 保護
+    # #73：總牆鐘只是保險（拉高）；inactivity_seconds 判 hang（無輸出行才逾時）
+    timeout_seconds: int = 3600
+    inactivity_seconds: int = 300
 
 
 def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str]:
@@ -83,7 +85,12 @@ class BabelDocAdapter(CliAdapterBase):
     _transient_signatures = ("50507", "Unknown error")
 
     def __init__(self, config: BabelDocConfig, runner=None):
-        super().__init__(config.retries, config.timeout_seconds, runner=runner)
+        super().__init__(
+            config.retries,
+            config.timeout_seconds,
+            inactivity_seconds=config.inactivity_seconds,
+            runner=runner,
+        )
         self._config = config
 
     def _api_key(self) -> str:

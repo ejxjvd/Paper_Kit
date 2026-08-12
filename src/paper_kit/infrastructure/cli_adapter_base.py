@@ -11,6 +11,8 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
@@ -63,12 +65,24 @@ class CliAdapterBase:
     # 暫時性錯誤簽名（重試判定；standards review：引擎特有→子類可覆寫）
     _transient_signatures: tuple[str, ...] = ()
 
-    def __init__(self, retries: int, timeout_seconds: int, runner=None):
+    def __init__(
+        self,
+        retries: int,
+        timeout_seconds: int,
+        inactivity_seconds: int | None = None,
+        runner=None,
+    ):
         self._retries = retries
         self._timeout_seconds = timeout_seconds
+        # #73：無輸出行判定（CH4 真因——死守總牆鐘硬殺正在逐段翻譯的引擎）。
+        # None → 退到總牆鐘（保守：只靠總 cap）。
+        self._inactivity_seconds = (
+            inactivity_seconds if inactivity_seconds is not None else timeout_seconds
+        )
         self._runner = runner or self._default_runner(self)
         self._proc: subprocess.Popen | None = None  # 票 08：cancel 要殺得掉子程序
         self._cancelled = False
+        self._on_progress: "Callable[[float], None] | None" = None  # 票 25：#72 進度回調
 
     # ── 子類插頭 ──────────────────────────────────────────
 
@@ -84,11 +98,35 @@ class CliAdapterBase:
     def _is_transient(self, output: str) -> bool:
         return any(sig in output for sig in self._transient_signatures)
 
+    def _on_line(self, line: str) -> None:
+        """流式 runner 每行輸出回調（子類覆寫以解析進度）。基線 no-op。
+
+        #73 實測：pdf2zh_next 的 rich progress bar 用 \\r 覆寫、readline 讀不到
+        \n 行；可解析的只有段落 warning 行（`paragraph id: X`，無總數）→
+        無可靠百分比 → 不發確定進度（UI 以 indeterminate 呈現）。引擎支援
+        overall_progress 時在此解析並 _emit_progress。
+        """
+
+    def set_progress_callback(self, callback: "Callable[[float], None] | None" = None) -> None:
+        """#72：job_service 注入進度回調（0.0–1.0）。None＝清除。"""
+        self._on_progress = callback
+
+    def _emit_progress(self, value: float) -> None:
+        if self._on_progress is not None:
+            self._on_progress(value)
+
     # ── 共用骨架 ──────────────────────────────────────────
 
     @staticmethod
     def _default_runner(adapter: "CliAdapterBase"):
-        """Popen 版 runner：子程序 handle 掛回 adapter，cancel() 才能 kill。"""
+        """Popen 版 runner（#73 流式）：子程序 handle 掛回 adapter，cancel() 才能 kill。
+
+        舊版 `proc.communicate(timeout=600)` 是總牆鐘——CH4 實測（58 頁，265.8s
+        完成）證明：SiliconFlow 逐段 API 呼叫間隔 5–20s，翻譯中「段落 warning 行」
+        就是活性信號；死守總牆鐘會在翻譯進行到一半硬殺（真實 FAILED 案例）。
+        新版改以 **inactivity deadline** 判 hang：最後一行的時間超過
+        inactivity_seconds 才逾時；有輸出行就續命。總牆鐘只剩保險（拉高）。
+        """
 
         def runner(cmd: list[str], timeout: int, cwd: str | None = None):
             if cmd[0] == "uv" and shutil.which("uv") is None:
@@ -116,15 +154,42 @@ class CliAdapterBase:
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs
             )
             adapter._proc = proc
+            lines: list[str] = []
+            # reader thread 讀 stdout（rich bar 佔住 pipe 時 readline 會 block，
+            # 主 thread 才能做 inactivity 輪詢——communicate 做不到的關鍵）。
+            last_output = [time.monotonic()]  # 共享：reader thread 更新、主 thread 判定
+
+            def read() -> None:
+                for line in proc.stdout:
+                    lines.append(line)
+                    last_output[0] = time.monotonic()
+                    if adapter._on_line is not None:
+                        adapter._on_line(line)
+
+            reader = threading.Thread(target=read, daemon=True)
+            reader.start()
+            deadline = time.monotonic() + timeout
             try:
-                out, _ = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _kill_tree(proc)  # 樹殺：只 kill 中介 uv，孫程序會握住管道卡到死（review）
-                proc.communicate()
-                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+                while True:
+                    reader.join(0.25)
+                    if not reader.is_alive():
+                        break  # EOF：子程序關閉 stdout（正常結束或已被 kill）
+                    if proc.poll() is not None:
+                        reader.join(5.0)  # 已退出，給 reader 排空剩餘緩衝
+                        break
+                    now = time.monotonic()
+                    if now - last_output[0] > adapter._inactivity_seconds:
+                        _kill_tree(proc)
+                        reader.join(2.0)
+                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+                    if now > deadline:
+                        _kill_tree(proc)
+                        reader.join(2.0)
+                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
             finally:
                 adapter._proc = None
-            return proc.returncode, out
+            rc = proc.wait()
+            return rc, "".join(lines)
 
         return runner
 
@@ -163,7 +228,8 @@ class CliAdapterBase:
                     },
                 )
                 raise EngineError(
-                    f"翻譯逾時（超過 {self._timeout_seconds} 秒無回應，上游可能掛了）"
+                    # #73：逾時主因＝無輸出行（inactivity），不是總牆鐘
+                    f"翻譯逾時（超過 {self._inactivity_seconds} 秒無輸出行，上游可能掛了）"
                 ) from timeout_exc
             if self._cancelled:
                 raise EngineError("已取消")  # 子程序被 kill 後回傳的雜訊不算數

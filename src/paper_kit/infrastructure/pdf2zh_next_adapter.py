@@ -39,7 +39,10 @@ class EngineConfig:
     api_key: str = ""
     base_url: str = DEFAULT_BASE_URL        # SiliconFlow 國際站
     retries: int = 2                        # 暫時性錯誤重試次數
-    timeout_seconds: int = 600              # 引擎 hang 保護
+    # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
+    # 才是「判 hang」——最後一行輸出超過此秒數無新行才逾時（翻譯中有段落行=續命）。
+    timeout_seconds: int = 3600
+    inactivity_seconds: int = 300           # 段落活性信號間隔 5–20s；300s 有餘裕
 
 
 def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
@@ -105,7 +108,12 @@ class Pdf2zhNextAdapter(CliAdapterBase):
     _transient_signatures = ("50507", "Unknown error")
 
     def __init__(self, config: EngineConfig, runner=None):
-        super().__init__(config.retries, config.timeout_seconds, runner=runner)
+        super().__init__(
+            config.retries,
+            config.timeout_seconds,
+            inactivity_seconds=config.inactivity_seconds,
+            runner=runner,
+        )
         self._config = config
 
     def _api_key(self) -> str:

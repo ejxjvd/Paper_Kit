@@ -53,6 +53,7 @@ class TranslationJob:
     ocr: bool = False                 # 票 12：掃描件（無文字層）——執行前先本機 OCR
     result: JobResult | None = None
     error: str | None = None
+    progress: float | None = None     # #72：翻譯進度 0.0–1.0（None＝無確定進度→UI 用 indeterminate）
 
     def transition(self, new_status: JobStatus) -> None:
         """依轉換表嘗試遷移；非法轉換丟 InvalidTransition 且狀態不變。"""
@@ -71,3 +72,12 @@ class TranslationJob:
     def can_cancel(self) -> bool:
         """票 08：能否取消——由領域轉換表推導（CANCELLED 在合法目標中）。"""
         return JobStatus.CANCELLED in _LEGAL_TRANSITIONS[self.status]
+
+    @property
+    def can_delete(self) -> bool:
+        """#74：能否刪除——非執行中（排隊/翻譯中不可刪，service.delete 的紅線）。
+
+        執行中任務有 live worker 在寫檔，刪除會讓輸出目錄消失；終態
+        （完成/失敗/取消）已無 worker → 可刪（清掉舊任務不堆積主頁）。
+        """
+        return self.status not in (JobStatus.QUEUED, JobStatus.TRANSLATING)

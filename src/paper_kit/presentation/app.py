@@ -238,6 +238,33 @@ def _delete_jobs(service: JobService, ids: list[str]) -> tuple[int, int]:
     return deleted, blocked
 
 
+def _confirm_delete_one(service: JobService, job_id: str) -> None:
+    """#74：主頁卡片單一刪除——二次確認 dialog（破壞性操作：含輸出檔）。
+
+    對齊歷史頁批量刪除的確認樣式；執行中任務理論上不會出現此按鈕
+    （view.can_delete 已擋），但 service.delete 紅線仍會兜底。
+    """
+    with ui.dialog() as dialog, ui.card().classes("p-4 gap-2"):
+        ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
+        ui.label("此操作無法復原").classes("text-xs text-grey-6")
+        with ui.row().classes("gap-2"):
+            ui.button("取消", on_click=dialog.close).props("outline")
+            ui.button(
+                "確認刪除",
+                on_click=lambda: (_do_delete_one(service, job_id), dialog.close()),
+            ).props("color=negative")
+    dialog.open()
+
+
+def _do_delete_one(service: JobService, job_id: str) -> None:
+    """#74：單一刪除執行——重用 _delete_jobs 的 (deleted, blocked) 語義。"""
+    deleted, blocked = _delete_jobs(service, [job_id])
+    if blocked:
+        ui.notify("執行中的任務無法刪除", type="warning")
+    elif deleted:
+        ui.notify("已刪除任務", type="positive")
+
+
 def _batch_retry(service: JobService, settings: SettingsService, ids: list[str]) -> int:
     """票 18：批量重試——只處理可重試任務（can_retry），回傳重試數。"""
     retried = 0
@@ -289,9 +316,17 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                     meta += f" · {view.engine_label}"
                 ui.label(meta).classes("text-xs pk-meta")  # 票 11：muted 變數
             ui.badge(view.status_label).props(f"color={BADGE_COLORS[view.status]}")
-        if view.is_running:
-            # 票 11：進度條納入主題變數（深色下保持對比）
-            ui.linear_progress(value=0.5).props("indeterminate").classes("w-full pk-progress")
+        # #72：排隊中＝還沒開始（不顯示進度條，與翻譯中明確區分——使用者要求
+        # 「排隊中跟翻譯中完全不同」）；翻譯中＝有引擎進度顯示確定值、無則
+        # indeterminate（動畫＝正在跑）；完成＝100%。
+        if view.status is JobStatus.QUEUED:
+            pass
+        elif view.status is JobStatus.TRANSLATING:
+            if view.progress is not None:
+                # 票 11：進度條納入主題變數（深色下保持對比）
+                ui.linear_progress(value=view.progress).classes("w-full pk-progress")
+            else:
+                ui.linear_progress(value=0.5).props("indeterminate").classes("w-full pk-progress")
         elif view.status is JobStatus.COMPLETED:
             ui.linear_progress(value=1.0).classes("w-full pk-progress")
         if view.error:
@@ -322,6 +357,11 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                         on_click=lambda: ui.download(str(_real_path(view.dual_url))),
                     ).props("outline")
                 ui.button("瀏覽器內預覽", on_click=lambda: _preview(view.preview_url))
+            if view.can_delete:  # #74：終態任務可刪除——清掉舊任務不堆積主頁
+                ui.button(
+                    "🗑 刪除",
+                    on_click=lambda: _confirm_delete_one(service, view.job_id),
+                ).props("outline color=negative")
 
 
 def _preview(url: str) -> None:

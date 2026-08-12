@@ -49,6 +49,16 @@ def test_translating_job_shows_in_progress():
     assert view.progress is None  # 引擎尚無顆粒度進度 → 不確定進度
 
 
+def test_translating_job_passes_engine_progress_through():
+    """#72：引擎有顆粒度進度時，翻譯中任務顯示確定進度（非 indeterminate）。"""
+    job = TranslationJob(job_id="t2", source_path="/outputs/t2/a.pdf")
+    job.transition(JobStatus.TRANSLATING)
+    job.progress = 0.4
+    view = build_job_card(job)
+    assert view.progress == 0.4
+    assert view.is_running
+
+
 def test_completed_job_links_to_outputs():
     view = build_job_card(completed_job())
     assert view.status_label == "完成"

@@ -40,6 +40,7 @@ class JobCardView:
     engine_label: str | None = None  # 票 08：顯示用哪個引擎
     can_retry: bool = False          # 票 08：失敗任務可重試
     can_cancel: bool = False         # 票 08：進行中任務可取消
+    can_delete: bool = False         # #74：終態任務可刪除（清掉舊任務不堆積）
     sensitive: bool = False          # 票 10：機密文件（卡片顯示 🔒）
     ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
     pages_label: str = "全文"        # 票 17：歷史表格「頁數」欄（None→「全文」對映在 build_job_card）
@@ -64,6 +65,13 @@ def build_job_card(
     未知 id（如引擎已下架）回退 raw id。
     """
     running = job.status in (JobStatus.QUEUED, JobStatus.TRANSLATING)
+    # #72：QUEUED 無進度（還沒開始）；TRANSLATING 有引擎進度就顯示、無則 None
+    # （UI 對 None 渲染 indeterminate bar）；COMPLETED 固定 100%。
+    progress = (
+        1.0
+        if job.status is JobStatus.COMPLETED
+        else (job.progress if job.status is JobStatus.TRANSLATING else None)
+    )
     urls = None
     if job.result is not None:
         mono_url = _result_url(files_base, job.job_id, job.result.mono_path)
@@ -82,7 +90,7 @@ def build_job_card(
         status=job.status,
         status_label=STATUS_LABELS[job.status],
         is_running=running,
-        progress=1.0 if job.status is JobStatus.COMPLETED else None,
+        progress=progress,
         mono_url=urls[0] if urls else None,
         dual_url=urls[1] if urls else None,
         preview_url=urls[2] if urls else None,
@@ -95,6 +103,7 @@ def build_job_card(
         ),
         can_retry=job.can_retry,   # 規則單一真相＝領域轉換表（review 修正）
         can_cancel=job.can_cancel,
+        can_delete=job.can_delete,  # #74：非執行中任務可刪除
         sensitive=job.sensitive,   # 票 10：機密標記顯示（🔒）
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
         pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）

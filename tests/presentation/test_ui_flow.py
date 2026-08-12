@@ -103,6 +103,27 @@ def test_completed_job_card_offers_no_actions():
     assert view.can_cancel is False
 
 
+# ── #74：終態卡片可刪除（執行中不可刪）────────────────────
+
+
+def test_terminal_job_card_offers_delete():
+    """#74：完成/失敗/取消＝終態，可刪除（清掉舊任務不堆積）。"""
+    for status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+        job = TranslationJob(
+            job_id="j1", source_path="/in/a.pdf", status=status
+        )
+        assert build_job_card(job).can_delete is True, f"{status} 應可刪除"
+
+
+def test_running_job_card_forbids_delete():
+    """#74：排隊/翻譯中＝執行中，不可刪除（delete 會對齊 service 的紅線）。"""
+    for status in (JobStatus.QUEUED, JobStatus.TRANSLATING):
+        job = TranslationJob(
+            job_id="j1", source_path="/in/a.pdf", status=status
+        )
+        assert build_job_card(job).can_delete is False, f"{status} 不可刪除"
+
+
 def test_card_shows_created_time_and_engine(tmp_path: Path):
     import re
 

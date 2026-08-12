@@ -6,6 +6,7 @@ UI 薄層只依賴 JobService；引擎換插頭＝換 engine 參數（Ports & Ad
 import logging
 import shutil
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -198,6 +199,29 @@ class JobService:
                 job.error = "應用重啟，翻譯中斷（請重試）"
                 jobs.save(job)
 
+    def _progress_writer(self, job: TranslationJob):
+        """#72：引擎進度回調 → 寫回 DB（throttle：值變動≥0.02 或 ≥2s 才存）。
+
+        流式 runner 的 reader thread 每行輸出都會觸發；逐行寫 SQLite 太重，
+        值跳動也不值得——UI 1s 輪詢，throttle 到 0.02/2s 綽綽有餘。
+        """
+        last = {"value": -1.0, "t": 0.0}
+
+        def write(progress: float) -> None:
+            now = time.monotonic()
+            if (
+                progress is None
+                or (abs(progress - last["value"]) < 0.02 and now - last["t"] < 2.0)
+            ):
+                return
+            job.progress = progress
+            with self._lock:
+                self._jobs.save(job)
+            last["value"] = progress
+            last["t"] = now
+
+        return write
+
     def _prepare_ocr(self, job: TranslationJob) -> None:
         """票 12：掃描件執行前先本機 OCR——把無文字層 PDF 變成有文字層。
 
@@ -221,6 +245,11 @@ class JobService:
                 if hit is not None:
                     self._apply_cache_hit(job, hit)
                     return
+            # #72：引擎有進度回調（CliAdapterBase）就接上——流式 runner 每行觸發，
+            # throttle 後寫回 DB（UI 輪詢才看得到進度條）。port 相容：無此方法
+            # 的引擎（mock／未來插頭）走 hasattr 檢查，不強制。
+            if hasattr(engine, "set_progress_callback"):
+                engine.set_progress_callback(self._progress_writer(job))
             done = StartTranslation(
                 engine=engine, jobs=self._jobs, lock=self._lock
             ).run(job)
