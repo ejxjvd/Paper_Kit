@@ -20,6 +20,19 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
 )
 
 
+def test_uv_missing_gives_friendly_error(monkeypatch):
+    """2026-08-12 UI 實測：環境缺 uv 時使用者看到「發生未預期錯誤：No such file
+    or directory: 'uv'」——應是「可操作」訊息（安裝指令）而非裸 Errno。
+
+    檢查在真實 runner（_default_runner）層——FakeRunner 注入的測試不受影響。
+    """
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
+                        lambda _: None)
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 真 runner，不注入
+    with pytest.raises(EngineError, match="uv"):
+        adapter.translate(make_job())
+
+
 def make_job(**kw) -> TranslationJob:
     base = dict(
         job_id="job-1",

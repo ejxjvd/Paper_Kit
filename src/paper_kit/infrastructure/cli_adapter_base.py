@@ -7,6 +7,7 @@ Pdf2zhNextAdapter 與 BabelDocAdapter 共用同一 translate 循環——retry �
 
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -90,6 +91,13 @@ class CliAdapterBase:
         """Popen 版 runner：子程序 handle 掛回 adapter，cancel() 才能 kill。"""
 
         def runner(cmd: list[str], timeout: int, cwd: str | None = None):
+            if cmd[0] == "uv" and shutil.which("uv") is None:
+                # 2026-08-12 UI 實測：PATH 缺 ~/.local/bin 時裸 Errno 爆給使用者
+                # ——給可操作訊息（安裝指令），不是「發生未預期錯誤」
+                raise EngineError(
+                    "系統缺少 uv 工具（引擎中介）：執行 "
+                    "`curl -LsSf https://astral.sh/uv/install.sh | sh` 安裝後重試"
+                )
             kwargs = {"cwd": cwd}
             if sys.platform != "win32":
                 kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
