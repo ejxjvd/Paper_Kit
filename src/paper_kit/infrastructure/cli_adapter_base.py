@@ -92,12 +92,23 @@ class CliAdapterBase:
 
         def runner(cmd: list[str], timeout: int, cwd: str | None = None):
             if cmd[0] == "uv" and shutil.which("uv") is None:
-                # 2026-08-12 UI 實測：PATH 缺 ~/.local/bin 時裸 Errno 爆給使用者
-                # ——給可操作訊息（安裝指令），不是「發生未預期錯誤」
-                raise EngineError(
-                    "系統缺少 uv 工具（引擎中介）：執行 "
-                    "`curl -LsSf https://astral.sh/uv/install.sh | sh` 安裝後重試"
-                )
+                # 2026-08-12 實機 e2e：非登入 shell（wsl -e bash script.sh、
+                # systemd、無頭）PATH 缺 ~/.local/bin → which 找不到 uv →
+                # 翻譯 1 秒 FAILED。回退 uv 官方安裝位置（~/.local/bin/uv；
+                # Windows 為 uv.exe）——存在就改用絕對路徑執行，任何啟動
+                # 方式免疫；兩者皆無才給可操作訊息（安裝指令），不是裸 Errno。
+                fallback: Path | None = None
+                for name in ("uv", "uv.exe"):
+                    candidate = Path.home() / ".local" / "bin" / name
+                    if candidate.is_file():
+                        fallback = candidate
+                        break
+                if fallback is None:
+                    raise EngineError(
+                        "系統缺少 uv 工具（引擎中介）：執行 "
+                        "`curl -LsSf https://astral.sh/uv/install.sh | sh` 安裝後重試"
+                    )
+                cmd = [str(fallback), *cmd[1:]]
             kwargs = {"cwd": cwd}
             if sys.platform != "win32":
                 kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹

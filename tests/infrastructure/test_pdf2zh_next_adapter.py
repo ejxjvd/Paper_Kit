@@ -6,6 +6,7 @@ POC 教訓入測：.com 國際站端點預設、key 走 CLI 旗標（不吃 proc
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,7 +21,7 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
 )
 
 
-def test_uv_missing_gives_friendly_error(monkeypatch):
+def test_uv_missing_gives_friendly_error(monkeypatch, tmp_path):
     """2026-08-12 UI 實測：環境缺 uv 時使用者看到「發生未預期錯誤：No such file
     or directory: 'uv'」——應是「可操作」訊息（安裝指令）而非裸 Errno。
 
@@ -28,9 +29,46 @@ def test_uv_missing_gives_friendly_error(monkeypatch):
     """
     monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
                         lambda _: None)
+    # 家目錄也隔離（回退檢查 ~/.local/bin/uv 不存在）→ 仍是安裝指引
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 真 runner，不注入
     with pytest.raises(EngineError, match="uv"):
         adapter.translate(make_job())
+
+
+def test_uv_falls_back_to_home_local_bin(monkeypatch, tmp_path):
+    """2026-08-12 實機 e2e：`wsl -e bash script.sh`（非登入 shell）PATH 缺
+    ~/.local/bin → which("uv") 找不到 → 翻譯 1 秒 FAILED（「系統缺少 uv 工具」）。
+    修正：which 找不到時回退 uv 官方安裝位置 ~/.local/bin/uv（Windows 為
+    uv.exe）——存在就改用絕對路徑執行，任何啟動方式（systemd/手動/無頭）
+    都免疫；兩者皆無才給安裝指引。檢查在真實 runner 層。
+    """
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / ".local" / "bin" / "uv").touch()
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
+                        lambda _: None)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    captured: dict = {}
+
+    class FakeProc:
+        returncode = 0
+
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+
+        def communicate(self, timeout=None):
+            return (LOG, None)
+
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", FakeProc
+    )
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 真 runner，不注入
+    result = adapter.translate(make_job())
+    # 用的絕對路徑 uv，不是裸 "uv"（PATH 找不到時裸名直接 Errno）
+    assert captured["cmd"][0] == str(tmp_path / ".local" / "bin" / "uv")
+    assert isinstance(result, JobResult)
 
 
 def make_job(**kw) -> TranslationJob:
