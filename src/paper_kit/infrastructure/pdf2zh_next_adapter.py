@@ -67,7 +67,15 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
             # 自動提取開啟時不禁用（與既有術語表並存，UI 兩開關可同開；票 13 統一兩插頭）
             cmd += ["--no-auto-extract-glossary"]
     if job.auto_extract:
-        cmd += ["--term-siliconflow"]  # 票 05：Kimi 角色原生版自動術語提取
+        # 票 05：Kimi 角色原生版自動術語提取。Bug 1（2026-08-13）：term 引擎是獨立
+        # settings 模型，驗證只檢查自身的 api_key → 缺 --term-siliconflow-api-key 會
+        # 丟「SiliconFlow API key is required」；model/base-url 一併對齊主引擎。
+        cmd += [
+            "--term-siliconflow",
+            "--term-siliconflow-model", cfg.model,
+            "--term-siliconflow-api-key", cfg.api_key,
+            "--term-siliconflow-base-url", cfg.base_url,
+        ]
     return cmd
 
 

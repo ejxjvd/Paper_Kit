@@ -159,9 +159,17 @@ def test_build_command_no_glossary_omits_flags():
 
 
 def test_build_command_term_siliconflow_when_auto_extract_on():
-    """票 05：自動術語提取開關 → --term-siliconflow（Kimi 角色原生版）。"""
-    cmd = build_command(make_job(auto_extract=True), EngineConfig(api_key="KEY"))
+    """票 05＋Bug 1：自動術語提取開關 → term 引擎旗標齊全（key/model/base-url）。
+
+    真因（2026-08-13）：adapter 只送 --term-siliconflow、漏送 --term-siliconflow-api-key，
+    引擎 term settings validate 丟「SiliconFlow API key is required」→ UI 4 筆任務全滅。
+    """
+    cfg = EngineConfig(api_key="KEY")
+    cmd = build_command(make_job(auto_extract=True), cfg)
     assert "--term-siliconflow" in cmd
+    assert cmd[cmd.index("--term-siliconflow-api-key") + 1] == "KEY"
+    assert cmd[cmd.index("--term-siliconflow-model") + 1] == "google/gemma-4-31B-it"
+    assert cmd[cmd.index("--term-siliconflow-base-url") + 1] == DEFAULT_BASE_URL
 
 
 def test_build_command_term_siliconflow_absent_by_default():
