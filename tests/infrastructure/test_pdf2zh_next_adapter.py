@@ -118,6 +118,16 @@ def test_build_command_term_siliconflow_absent_by_default():
     assert "--term-siliconflow" not in cmd
 
 
+def test_build_command_glossary_with_auto_extract_keeps_extraction_enabled():
+    """票 13 統一：UI 兩開關可同開 → 有術語表＋自動提取時不禁用提取。"""
+    cmd = build_command(
+        make_job(glossary_files=["/gl/a.csv"], auto_extract=True),
+        EngineConfig(api_key="KEY"),
+    )
+    assert "--glossaries" in cmd
+    assert "--no-auto-extract-glossary" not in cmd
+
+
 # ── translate：成功解析 ──────────────────────────────────
 
 

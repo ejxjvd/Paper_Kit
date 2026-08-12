@@ -6,34 +6,23 @@ POC 教訓（2026-08-12 實測）：
 - 暫時性 50507（Unknown error）→ retry（預設 2 次）
 - 引擎 hang → subprocess 逾時（預設 600s）視為失敗
 - 錯誤對映：401/術語表格式 → 友善訊息，不透傳原始 traceback
+
+票 13：translate 循環（retry/逾時/取消/redact）已抽到 CliAdapterBase 共用，
+本檔只剩引擎特有的命令組裝與輸出解析。
 """
 
-import logging
-import os
 import re
-import signal
-import subprocess
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 
-from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
-from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
-
-logger = logging.getLogger("paper_kit.infrastructure.pdf2zh_next_adapter")
+from paper_kit.infrastructure.cli_adapter_base import (
+    _kill_tree as _base_kill_tree,
+    CliAdapterBase,
+)
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
 DEFAULT_MODEL = "google/gemma-4-31B-it"
-
-_TRANSIENT_SIGNATURES = ("50507", "Unknown error")
-_KNOWN_ERRORS = [
-    (("401", "Api key is invalid", "AuthenticationError"),
-     "API key 無效或已過期（檢查 key 與端點：國際站用 .com）"),
-    (("'source' and 'target'", "must contain"),
-     "術語表 CSV 格式錯誤：標頭列必須含 source,target"),
-]
 
 # babeldoc log 有欄位式折行（路徑/token 行會斷行）→ 先移除全部空白再搜
 _RE_MONO = re.compile(r"MonoPDF:(.*?\.pdf)")
@@ -73,46 +62,21 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
         # 免費引擎：旗標名＝provider（--google／--bing／--siliconflowfree），不需 key
         cmd += [f"--{cfg.provider}"]
     if job.glossary_files:
-        cmd += ["--glossaries", ",".join(job.glossary_files), "--no-auto-extract-glossary"]
+        cmd += ["--glossaries", ",".join(job.glossary_files)]
+        if not job.auto_extract:
+            # 自動提取開啟時不禁用（與既有術語表並存，UI 兩開關可同開；票 13 統一兩插頭）
+            cmd += ["--no-auto-extract-glossary"]
     if job.auto_extract:
         cmd += ["--term-siliconflow"]  # 票 05：Kimi 角色原生版自動術語提取
     return cmd
 
 
-def _is_transient(output: str) -> bool:
-    return any(sig in output for sig in _TRANSIENT_SIGNATURES)
+# re-export：測試 import 位置不因重構改變（_is_transient/_friendly_error 已併入基底，
+# 私有且無外部引用——移除；_kill_tree 有測試直接 import）
+_kill_tree = _base_kill_tree
 
 
-def _friendly_error(output: str) -> str:
-    for signatures, message in _KNOWN_ERRORS:
-        if any(sig in output for sig in signatures):
-            return message
-    lines = [l for l in output.splitlines() if l.strip()]
-    return f"引擎執行失敗：{lines[-1][-200:] if lines else '(無輸出)'}"
-
-
-def _kill_tree(proc: subprocess.Popen) -> None:
-    """樹殺：uv 只是中介，只 kill 它孫程序照跑、管道還握著（review 硬問題）。
-
-    零依賴方案（psutil 未裝）：POSIX 用進程組（Popen start_new_session 保證組長），
-    Windows 用 taskkill /T /F 遞迴殺整棵樹。殺不到的（已退場）直接放行。
-    """
-    if proc.poll() is not None:
-        return
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-            capture_output=True,
-            text=True,
-        )
-    else:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # 進程組已退場
-
-
-def _parse_output(output: str, job: TranslationJob) -> JobResult:
+def parse_output(output: str, job: TranslationJob) -> JobResult:
     normalized = re.sub(r"\s+", "", output)
     mono = _RE_MONO.search(normalized)
     dual = _RE_DUAL.search(normalized)
@@ -126,91 +90,22 @@ def _parse_output(output: str, job: TranslationJob) -> JobResult:
     )
 
 
-class Pdf2zhNextAdapter:
-    """實作 TranslationEnginePort。runner 可注入（測試用 FakeRunner）。"""
+class Pdf2zhNextAdapter(CliAdapterBase):
+    """實作 TranslationEnginePort（換插頭＝換子類＋registry 分派）。runner 可注入。"""
+
+    # POC 教訓：SiliconFlow 上游暫時性 50507（Unknown error）→ 重試
+    _transient_signatures = ("50507", "Unknown error")
 
     def __init__(self, config: EngineConfig, runner=None):
+        super().__init__(config.retries, config.timeout_seconds, runner=runner)
         self._config = config
-        self._runner = runner or self._default_runner(self)
-        self._proc: subprocess.Popen | None = None  # 票 08：cancel 要殺得掉子程序
-        self._cancelled = False
 
-    @staticmethod
-    def _default_runner(adapter: "Pdf2zhNextAdapter"):
-        """Popen 版 runner：子程序 handle 掛回 adapter，cancel() 才能 kill。"""
+    def _api_key(self) -> str:
+        return self._config.api_key
 
-        def runner(cmd: list[str], timeout: int, cwd: str | None = None):
-            kwargs = {"cwd": cwd}
-            if sys.platform != "win32":
-                kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs
-            )
-            adapter._proc = proc
-            try:
-                out, _ = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _kill_tree(proc)  # 樹殺：只 kill 中介 uv，孫程序會握住管道卡到死（review）
-                proc.communicate()
-                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
-            finally:
-                adapter._proc = None
-            return proc.returncode, out
+    def _build_command(self, job: TranslationJob) -> list[str]:
+        # module 層查詢：測試 monkeypatch build_command 仍生效
+        return build_command(job, self._config)
 
-        return runner
-
-    def cancel(self) -> None:
-        """票 08：取消——樹殺正在跑的引擎子程序；之後的 translate 一律拒絕。"""
-        self._cancelled = True
-        proc = self._proc
-        if proc is not None and proc.poll() is None:
-            _kill_tree(proc)
-
-    def translate(self, job: TranslationJob) -> JobResult:
-        if not self._config.api_key:
-            raise EngineError("尚未設定 API key（設定頁填入後再翻譯）")
-        if self._cancelled:
-            raise EngineError("已取消")
-        cmd = build_command(job, self._config)
-        # babeldoc 輸出走子程序 CWD → 以任務資料夾為 cwd，產出才落在該處（票 03 實測教訓）
-        cwd = str(Path(job.source_path).parent) if job.source_path else None
-        last_error = ""
-        for attempt in range(self._config.retries + 1):
-            if self._cancelled:
-                raise EngineError("已取消")
-            if attempt:
-                import time
-
-                time.sleep(2**attempt)  # 退避 2s, 4s
-            try:
-                rc, output = self._runner(cmd, timeout=self._config.timeout_seconds, cwd=cwd)
-            except subprocess.TimeoutExpired as timeout_exc:
-                logger.error(
-                    "翻譯逾時",
-                    extra={
-                        "job_id": job.job_id,
-                        "error_chain": format_error_chain(timeout_exc),  # 票 09 review：真實鏈
-                        "command": redact_command(cmd),  # 票 09：命令含 key → 遮罩
-                    },
-                )
-                raise EngineError(
-                    f"翻譯逾時（超過 {self._config.timeout_seconds} 秒無回應，上游可能掛了）"
-                ) from timeout_exc
-            if self._cancelled:
-                raise EngineError("已取消")  # 子程序被 kill 後回傳的雜訊不算數
-            if rc == 0:
-                return _parse_output(output, job)
-            last_error = output
-            if not _is_transient(output):
-                break
-        # 票 09：失敗 log 記錯誤＋遮罩 key；toast 同樣 redact（review：不只有 log 要守）
-        safe_error = redact(last_error, [self._config.api_key])
-        logger.error(
-            "翻譯失敗",
-            extra={
-                "job_id": job.job_id,
-                "error": _friendly_error(safe_error),
-                "command": redact_command(cmd),
-            },
-        )
-        raise EngineError(_friendly_error(safe_error))
+    def _parse_output(self, output: str, job: TranslationJob) -> JobResult:
+        return parse_output(output, job)

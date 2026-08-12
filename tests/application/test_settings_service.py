@@ -37,6 +37,22 @@ def test_set_unknown_engine_rejected(tmp_path):
         svc.set_engine("no-such-engine")
 
 
+def test_babeldoc_engine_resolves_through_registry(tmp_path):
+    """票 13：換插頭不破壞——babeldoc 走同一 resolve 路徑（needs_key 守證）。"""
+    from paper_kit.infrastructure.babeldoc_adapter import BabelDocAdapter
+
+    svc = make_service(tmp_path)
+    with pytest.raises(EngineError, match="API key"):
+        svc.resolve_engine()  # 預設 siliconflow 也缺 key——先設 babeldoc
+    svc.set_engine("babeldoc")
+    with pytest.raises(EngineError, match="API key"):
+        svc.resolve_engine()  # babeldoc needs_key：缺 key 友善錯誤
+    svc.set_api_key("babeldoc", "BK")
+    engine = svc.resolve_engine()
+    assert isinstance(engine, BabelDocAdapter)
+    assert engine._config.api_key == "BK"
+
+
 def test_resolve_engine_missing_key_gives_friendly_error(tmp_path):
     svc = make_service(tmp_path)
     with pytest.raises(EngineError, match="API key"):

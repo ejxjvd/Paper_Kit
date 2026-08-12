@@ -1,14 +1,18 @@
-"""引擎註冊表：spec → adapter 工廠。換引擎＝換插頭（票 04 核心）。
+"""引擎註冊表：spec → adapter 工廠。換引擎＝換插頭（票 04/13 核心）。
 
 驗證：spec 完整性（免費引擎、機密紅線 flag）、build_engine 對映正確 provider、
-未知引擎 KeyError、free 引擎的 CLI 旗標正確。
+未知引擎 KeyError、free 引擎的 CLI 旗標正確、票 13 第二支插頭（BabelDoc）。
 """
 
 import pytest
 
 from paper_kit.application.ports import EngineError
-from paper_kit.infrastructure.pdf2zh_next_adapter import DEFAULT_BASE_URL
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, EngineSpec, build_engine
+from paper_kit.infrastructure.babeldoc_adapter import (
+    BabelDocAdapter,
+    DEFAULT_BABELDOC_BASE_URL,
+    DEFAULT_BABELDOC_MODEL,
+)
 from paper_kit.infrastructure.pdf2zh_next_adapter import (
     DEFAULT_BASE_URL,
     Pdf2zhNextAdapter,
@@ -72,5 +76,32 @@ def test_key_required_at_resolve_time_not_registry():
     spec = ENGINE_SPECS["siliconflow"]
     assert spec.needs_key is True
     adapter = build_engine(spec, api_key="")
+    with pytest.raises(EngineError, match="API key"):
+        adapter.translate(TranslationJob(job_id="j", source_path="/in/a.pdf"))
+
+
+# ── 票 13：BabelDOC 第二支插頭 ─────────────────────────────
+
+
+def test_registry_has_babeldoc_spec():
+    """AC2：引擎註冊表新增 → UI 下拉（registry-driven）立即可選。"""
+    spec = ENGINE_SPECS["babeldoc"]
+    assert spec.label
+    assert spec.needs_key is True
+    assert spec.sensitive_ok is False  # 送雲端 LLM：機密模式不可用（紅線）
+    assert spec.model == DEFAULT_BABELDOC_MODEL
+    assert spec.base_url == DEFAULT_BABELDOC_BASE_URL
+
+
+def test_build_engine_babeldoc_returns_babeldoc_adapter():
+    adapter = build_engine(ENGINE_SPECS["babeldoc"], api_key="BK")
+    assert isinstance(adapter, BabelDocAdapter)
+    assert adapter._config.api_key == "BK"
+    assert adapter._config.model == DEFAULT_BABELDOC_MODEL
+
+
+def test_build_engine_babeldoc_missing_key_fails_at_translate():
+    """換插頭不破壞：缺 key 的錯誤時點/訊息與既有引擎一致（基底共用）。"""
+    adapter = build_engine(ENGINE_SPECS["babeldoc"], api_key="")
     with pytest.raises(EngineError, match="API key"):
         adapter.translate(TranslationJob(job_id="j", source_path="/in/a.pdf"))
