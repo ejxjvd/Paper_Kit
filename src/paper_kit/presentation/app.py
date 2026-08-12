@@ -69,6 +69,21 @@ def _real_path(view_url: str) -> Path:
     return OUTPUTS_DIR / view_url.split(FILES_BASE + "/", 1)[1]
 
 
+def _download_output(view_url: str) -> None:
+    """#83：產出檔不存在 → 不下載、改 ui.notify 警示。
+
+    真因鏈末端（2026-08-13 實測）：ghost COMPLETED（引擎零產出＋假路徑）或
+    產出遺失時，ui.download(缺檔路徑) → NiceGUI helpers.is_file=False → fallback
+    from_url → 瀏覽器 fetch 失敗、服務端回 HTML →「失敗 - 沒有檔案」+ .htm。
+    守衛：檔案真實存在才下載（mono/dual 皆經此函）。
+    """
+    path = _real_path(view_url)
+    if not path.is_file():
+        ui.notify(f"檔案不存在：{path.name}（產出遺失或未生成）", type="warning")
+        return
+    ui.download(str(path))
+
+
 def _resolve_task_engine(
     settings: SettingsService, engine_id: str | None
 ) -> tuple[str, TranslationEnginePort]:
@@ -365,12 +380,12 @@ def _render_card(
             if view.mono_url:
                 ui.button(
                     "下載 mono",
-                    on_click=lambda: ui.download(str(_real_path(view.mono_url))),
+                    on_click=lambda: _download_output(view.mono_url),  # #83 守衛
                 ).props("outline")
                 if view.dual_url:  # 票 14：視覺路徑單一產出（mono=注記版，無 dual）
                     ui.button(
                         "下載 dual",
-                        on_click=lambda: ui.download(str(_real_path(view.dual_url))),
+                        on_click=lambda: _download_output(view.dual_url),  # #83 守衛
                     ).props("outline")
                 ui.button(
                     "瀏覽器內預覽",

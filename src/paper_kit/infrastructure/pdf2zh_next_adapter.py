@@ -14,6 +14,7 @@ POC 教訓（2026-08-12 實測）：
 import re
 from dataclasses import dataclass
 
+from paper_kit.application.ports import EngineError
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 from paper_kit.infrastructure.cli_adapter_base import (
@@ -69,10 +70,17 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
         if not job.auto_extract:
             # 自動提取開啟時不禁用（與既有術語表並存，UI 兩開關可同開；票 13 統一兩插頭）
             cmd += ["--no-auto-extract-glossary"]
-    if job.auto_extract:
+    if job.auto_extract and cfg.provider == "siliconflow":
         # 票 05：Kimi 角色原生版自動術語提取。Bug 1（2026-08-13）：term 引擎是獨立
         # settings 模型，驗證只檢查自身的 api_key → 缺 --term-siliconflow-api-key 會
         # 丟「SiliconFlow API key is required」；model/base-url 一併對齊主引擎。
+        # #83（2026-08-13）：term 引擎＝SiliconFlow，deepseek provider 送 term 旗標
+        # = 把 deepseek key 給 SiliconFlow → 401 → rc=0 零產出 → ghost COMPLETED →
+        # 下載「失敗 - 沒有檔案」。引擎源碼實證：無 --term-* 旗標時
+        # term_extraction_engine_settings=None → get_term_translator=None → 提取
+        # 整個跳過（不需 key、不呼叫、不上雲）。敏感任務（sensitive_ok 只有
+        # deepseek，票 10 紅線）因此同時守護：機密內容不上 SiliconFlow 雲端。
+        # term 引擎 key 獨立化（EngineConfig.term_api_key）留待 #84/#85。
         cmd += [
             "--term-siliconflow",
             "--term-siliconflow-model", cfg.model,
@@ -92,6 +100,13 @@ def parse_output(output: str, job: TranslationJob) -> JobResult:
     mono = _RE_MONO.search(normalized)
     dual = _RE_DUAL.search(normalized)
     tokens = _RE_TOKENS.search(normalized)
+    if mono is None and dual is None:
+        # #83（2026-08-13 實測）：引擎子進程失敗（401）時 rc=0 靜默吞掉、零產出、
+        # log 無任何產出宣告。舊行為靜默 fallback 慣例檔名 → ghost COMPLETED →
+        # 下載 404「失敗 - 沒有檔案」。log 沒有產出宣告＝明確失敗，不得製造假路徑。
+        raise EngineError(
+            "引擎未產出任何 PDF（log 無 MonoPDF/DualPDF 行）——上游可能失敗但回傳成功"
+        )
     stem = job.source_path.rsplit(".", 1)[0] if job.source_path else "output"
     return JobResult(
         mono_path=mono.group(1) if mono else f"{stem}.zh.mono.pdf",

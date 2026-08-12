@@ -19,6 +19,7 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
     EngineConfig,
     Pdf2zhNextAdapter,
     build_command,
+    parse_output,
 )
 
 
@@ -195,6 +196,24 @@ def test_build_command_term_siliconflow_absent_by_default():
     assert "--term-siliconflow" not in cmd
 
 
+def test_build_command_deepseek_auto_extract_no_term_flags():
+    """#83（紅）：deepseek provider＋auto_extract → 不得送任何 --term-* 旗標。
+
+    真因鏈（2026-08-13 實測）：term 引擎＝SiliconFlow，收到 deepseek key →
+    401「Token is invalid」（code 30014）→ 引擎 rc=0 靜默吞掉子進程失敗 → 零
+    產出 → parse_output 假路徑 COMPLETED → 下載 404「失敗 - 沒有檔案」。
+    引擎源碼實證：無 --term-* 旗標 → term_extraction_engine_settings=None →
+    get_term_translator=None → 提取整個跳過（不需 key、不呼叫、不上雲）。
+
+    敏感紅線回歸：sensitive_ok=True 只有 deepseek（票 10）→ 機密內容
+    不得送 SiliconFlow 雲端做術語提取——本測試同時守住這條。
+    """
+    cfg = EngineConfig(provider="deepseek", api_key="DSKEY")
+    cmd = build_command(make_job(auto_extract=True), cfg)
+    assert "--deepseek" in cmd
+    assert not any(flag.startswith("--term-") for flag in cmd), cmd
+
+
 def test_build_command_glossary_with_auto_extract_keeps_extraction_enabled():
     """票 13 統一：UI 兩開關可同開 → 有術語表＋自動提取時不禁用提取。"""
     cmd = build_command(
@@ -218,14 +237,24 @@ def test_translate_success_parses_outputs_and_tokens():
     assert result.output_tokens == 2219
 
 
-def test_translate_fallback_paths_when_log_lacks_paths():
+def test_translate_no_path_lines_raises_engine_error():
+    """#83（紅→綠主角）：log 無 MonoPDF/DualPDF 行＝引擎零產出（子進程失敗被
+    rc=0 靜默吞掉，2026-08-13 實測 401 場景）→ 不得靜默 fallback 慣例檔名製造
+    ghost COMPLETED（下載「失敗 - 沒有檔案」+ .htm 的根因層二）→ EngineError。
+    """
     adapter = Pdf2zhNextAdapter(
         EngineConfig(api_key="KEY"),
         runner=FakeRunner((0, "Total Token Usage: Total 1, Prompt 1, Cache Hit Prompt 0, Completion 1\n")),
     )
-    result = adapter.translate(make_job())
-    assert result.mono_path == "/in/paper.zh.mono.pdf"  # 慣例路徑
-    assert result.dual_path == "/in/paper.zh.dual.pdf"
+    with pytest.raises(EngineError, match="產出"):
+        adapter.translate(make_job())
+
+
+def test_parse_output_no_path_lines_raises_engine_error():
+    """#83：parse_output 直接層——任何產出宣告都沒有 → 拒絕製造假路徑。"""
+    out = "Total Token Usage: Total 1, Prompt 1, Cache Hit Prompt 0, Completion 1\n"
+    with pytest.raises(EngineError, match="產出"):
+        parse_output(out, make_job())
 
 
 # ── translate：錯誤對映 ──────────────────────────────────
@@ -442,3 +471,28 @@ def test_kill_tree_kills_grandchildren():
     time.sleep(0.2)
     found = subprocess.run(["pgrep", "-f", "sleep 30"], capture_output=True, text=True)
     assert found.returncode != 0, f"孫程序還活著（只殺父的舊行為）：{found.stdout.strip()}"
+
+def test_timeout_log_error_chain_redacts_api_key(tmp_path):
+    """#83 安全（紅）：TimeoutExpired 的 cmd 含明文 key → 逾時 log 的
+    error_chain 必須 redact（實測：~/.paper_kit/logs 曾寫入明文 SF key）。"""
+    import logging
+
+    from paper_kit.infrastructure.logging_setup import setup_logging
+
+    log_path = setup_logging(tmp_path)
+    try:
+        cmd = build_command(
+            make_job(auto_extract=True),
+            EngineConfig(provider="deepseek", api_key="sk-TOPSECRET"),
+        )
+        runner = FakeRunner(subprocess.TimeoutExpired(cmd, 60))
+        adapter = Pdf2zhNextAdapter(
+            EngineConfig(provider="deepseek", api_key="sk-TOPSECRET"),
+            runner=runner,
+        )
+        with pytest.raises(EngineError, match="逾時"):
+            adapter.translate(make_job(auto_extract=True))
+        text = log_path.read_text(encoding="utf-8")
+        assert "sk-TOPSECRET" not in text, "逾時 log 的 error_chain 不得含明文 key"
+    finally:
+        logging.getLogger("paper_kit").handlers.clear()

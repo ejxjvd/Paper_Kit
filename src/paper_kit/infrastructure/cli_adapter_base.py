@@ -219,11 +219,14 @@ class CliAdapterBase:
             try:
                 rc, output = self._runner(cmd, timeout=self._timeout_seconds, cwd=cwd)
             except subprocess.TimeoutExpired as timeout_exc:
+                # #83 安全：error_chain 內嵌 exc.cmd（含明文 --*-api-key）——
+                # 只遮 command 欄位不夠，error_chain 也要 redact（實測 log 曾寫入
+                # 明文 SF key）。command 欄位維持 redact_command（結構遮罩）。
                 logger.error(
                     "翻譯逾時",
                     extra={
                         "job_id": job.job_id,
-                        "error_chain": format_error_chain(timeout_exc),  # 票 09 review：真實鏈
+                        "error_chain": redact(format_error_chain(timeout_exc), [self._api_key()]),
                         "command": redact_command(cmd),  # 票 09：命令含 key → 遮罩
                     },
                 )
