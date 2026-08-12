@@ -45,9 +45,8 @@ def test_legal_transitions(src, dst):
 @pytest.mark.parametrize(
     "src,dst",
     [
-        # 從 queued 直接跳到終態（必須經過 translating）
+        # 從 queued 直接跳到終態（必須經過 translating；FAILED 例外＝系統中斷合法，票 08 review）
         (JobStatus.QUEUED, JobStatus.COMPLETED),
-        (JobStatus.QUEUED, JobStatus.FAILED),
         (JobStatus.QUEUED, JobStatus.CANCELLED),
         # 終態不可再動
         (JobStatus.COMPLETED, JobStatus.QUEUED),

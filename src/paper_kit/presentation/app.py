@@ -16,6 +16,7 @@ from paper_kit.application.cost_service import CostService
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
 from paper_kit.application.pages import parse_pages
+from paper_kit.domain.translation_job import InvalidTransition
 from paper_kit.application.ports import EngineError
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.domain.cost_calculator import CostEstimate
@@ -23,7 +24,7 @@ from paper_kit.domain.glossary import GlossaryFormatError
 from paper_kit.domain.translation_job import JobStatus
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
-from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
+from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import JobCardView, build_job_card
 
@@ -110,12 +111,39 @@ def _notify_estimate(
         )
 
 
-def _render_card(view: JobCardView) -> None:
+def _retry_job(service: JobService, settings: SettingsService, job_id: str) -> None:
+    """票 08：失敗任務重試（回 queued 再跑，不需重新上傳）。"""
+    try:
+        engine = settings.resolve_engine()
+    except EngineError as exc:
+        ui.notify(str(exc), type="negative")
+        return
+    try:
+        service.retry(job_id, engine, engine_id=settings.engine_id())
+        ui.notify("已重新排隊", type="positive")
+    except InvalidTransition:
+        ui.notify("此任務狀態無法重試", type="negative")
+
+
+def _cancel_job(service: JobService, job_id: str) -> None:
+    """票 08：進行中任務取消（狀態→cancelled、產出拋棄）。"""
+    try:
+        service.cancel(job_id)
+        ui.notify("已取消", type="warning")
+    except InvalidTransition:
+        ui.notify("此任務狀態無法取消", type="negative")
+
+
+def _render_card(view: JobCardView, service: JobService, settings: SettingsService) -> None:
     with ui.card().classes("w-full"):
         with ui.row().classes("items-center justify-between w-full"):
             with ui.column().classes("gap-0"):
                 ui.label(view.file_name).classes("text-lg font-semibold")
-                ui.label(f"任務 {view.job_id[:8]}").classes("text-xs text-grey-6")
+                # 票 08：歷史卡片顯示建立時間＋引擎
+                meta = f"任務 {view.job_id[:8]} · {view.created_label}"
+                if view.engine_label:
+                    meta += f" · {view.engine_label}"
+                ui.label(meta).classes("text-xs text-grey-6")
             ui.badge(view.status_label).props(f"color={BADGE_COLORS[view.status]}")
         if view.is_running:
             ui.linear_progress(value=0.5).props("indeterminate").classes("w-full")
@@ -123,10 +151,22 @@ def _render_card(view: JobCardView) -> None:
             ui.linear_progress(value=1.0).classes("w-full")
         if view.error:
             ui.label(f"錯誤：{view.error}").classes("text-red-7")
-        if view.usage_label:
-            ui.label(view.usage_label).classes("text-grey-8 text-sm")
-        if view.mono_url:
-            with ui.row().classes("items-center"):
+        # 票 08 review：完成任務顯示「估算 vs 實際」，未完成顯示上傳時估價
+        cost_label = view.usage_label or view.estimated_label
+        if cost_label:
+            ui.label(cost_label).classes("text-grey-8 text-sm")
+        with ui.row().classes("items-center"):
+            if view.can_retry:
+                ui.button(
+                    "↻ 重試",
+                    on_click=lambda: _retry_job(service, settings, view.job_id),
+                ).props("outline")
+            if view.can_cancel:
+                ui.button(
+                    "✕ 取消",
+                    on_click=lambda: _cancel_job(service, view.job_id),
+                ).props("outline negative")
+            if view.mono_url:
                 ui.button(
                     "下載 mono",
                     on_click=lambda: ui.download(str(_real_path(view.mono_url))),
@@ -144,13 +184,23 @@ def _preview(url: str) -> None:
     dialog.open()
 
 
-def _refresh(cards, service: JobService, cost: CostService, memo: dict) -> None:
+def _refresh(
+    cards, service: JobService, cost: CostService, settings: SettingsService, memo: dict
+) -> None:
     cards.clear()
+    # spec review：引擎欄顯示 label（「DeepSeek（純文字…）」）不是 raw id
+    engine_labels = {eid: spec.label for eid, spec in ENGINE_SPECS.items()}
     for job in service.list_jobs():
         # memo：完成任務只算一次成本標籤（1s 輪詢下避免每輪重讀 PDF 頁數）
         if job.status is JobStatus.COMPLETED and job.job_id not in memo:
             memo[job.job_id] = cost.usage_label(job)
-        _render_card(build_job_card(job, usage_label=memo.get(job.job_id)))
+        _render_card(
+            build_job_card(
+                job, usage_label=memo.get(job.job_id), engine_labels=engine_labels
+            ),
+            service,
+            settings,
+        )
 
 
 def _save_engine(settings: SettingsService, engine_id: str, api_key: str) -> None:
@@ -478,7 +528,8 @@ def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.add_static_files(FILES_BASE, str(OUTPUTS_DIR))
     repo = SqliteSettingsRepository(DB_PATH)
-    service = JobService(jobs=InMemoryJobRepository(), outputs_dir=OUTPUTS_DIR)
+    # 票 08：SQLite 任務歷史——重啟 app 後任務仍在（InMemory 只留給無頭執行）
+    service = JobService(jobs=SqliteJobRepository(DB_PATH), outputs_dir=OUTPUTS_DIR)
     settings = SettingsService(repo)
     cost = CostService(repo)
     glossaries = GlossaryService(GlossaryRepository(GLOSSARIES_DIR))
@@ -506,7 +557,7 @@ def main() -> None:
                     service, settings, cost, glossaries, e, pages_input.value
                 ),
             ).classes("w-full")
-        ui.timer(1.0, lambda: _refresh(cards, service, cost, memo))
+        ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
 
     _settings_page(settings, cost, glossaries)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)

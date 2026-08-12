@@ -6,6 +6,7 @@
                     ↘ cancelled
 """
 
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum, auto
@@ -26,7 +27,8 @@ class InvalidTransition(Exception):
 
 
 _LEGAL_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
-    JobStatus.QUEUED: frozenset({JobStatus.TRANSLATING}),
+    # FAILED 合法：應用重啟時排隊中的任務被系統中斷（spec review——重啟復原用）
+    JobStatus.QUEUED: frozenset({JobStatus.TRANSLATING, JobStatus.FAILED}),
     JobStatus.TRANSLATING: frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}),
     JobStatus.FAILED: frozenset({JobStatus.QUEUED}),  # retry 回 queued
     JobStatus.COMPLETED: frozenset(),  # 終態
@@ -38,6 +40,7 @@ _LEGAL_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
 class TranslationJob:
     job_id: str
     status: JobStatus = JobStatus.QUEUED
+    created_at: float = field(default_factory=time.time)  # 票 08：歷史列表顯示時間
     source_path: str | None = None
     target_lang: str = "zh-TW"
     pages: str | None = None          # "1-2" 形式；None = 全文
@@ -56,3 +59,13 @@ class TranslationJob:
                 f"Illegal transition: {self.status.name} -> {new_status.name}"
             )
         self.status = new_status
+
+    @property
+    def can_retry(self) -> bool:
+        """票 08：能否重試——完全由領域轉換表推導（QUEUED 在合法目標中）。"""
+        return JobStatus.QUEUED in _LEGAL_TRANSITIONS[self.status]
+
+    @property
+    def can_cancel(self) -> bool:
+        """票 08：能否取消——由領域轉換表推導（CANCELLED 在合法目標中）。"""
+        return JobStatus.CANCELLED in _LEGAL_TRANSITIONS[self.status]

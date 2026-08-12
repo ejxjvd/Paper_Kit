@@ -8,8 +8,11 @@ POC 教訓（2026-08-12 實測）：
 - 錯誤對映：401/術語表格式 → 友善訊息，不透傳原始 traceback
 """
 
+import os
 import re
+import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,6 +87,27 @@ def _friendly_error(output: str) -> str:
     return f"引擎執行失敗：{lines[-1][-200:] if lines else '(無輸出)'}"
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """樹殺：uv 只是中介，只 kill 它孫程序照跑、管道還握著（review 硬問題）。
+
+    零依賴方案（psutil 未裝）：POSIX 用進程組（Popen start_new_session 保證組長），
+    Windows 用 taskkill /T /F 遞迴殺整棵樹。殺不到的（已退場）直接放行。
+    """
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True,
+            text=True,
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # 進程組已退場
+
+
 def _parse_output(output: str, job: TranslationJob) -> JobResult:
     normalized = re.sub(r"\s+", "", output)
     mono = _RE_MONO.search(normalized)
@@ -103,21 +127,53 @@ class Pdf2zhNextAdapter:
 
     def __init__(self, config: EngineConfig, runner=None):
         self._config = config
-        self._runner = runner or self._default_runner
+        self._runner = runner or self._default_runner(self)
+        self._proc: subprocess.Popen | None = None  # 票 08：cancel 要殺得掉子程序
+        self._cancelled = False
 
     @staticmethod
-    def _default_runner(cmd: list[str], timeout: int, cwd: str | None = None):
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
-        return proc.returncode, proc.stdout + proc.stderr
+    def _default_runner(adapter: "Pdf2zhNextAdapter"):
+        """Popen 版 runner：子程序 handle 掛回 adapter，cancel() 才能 kill。"""
+
+        def runner(cmd: list[str], timeout: int, cwd: str | None = None):
+            kwargs = {"cwd": cwd}
+            if sys.platform != "win32":
+                kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs
+            )
+            adapter._proc = proc
+            try:
+                out, _ = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)  # 樹殺：只 kill 中介 uv，孫程序會握住管道卡到死（review）
+                proc.communicate()
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+            finally:
+                adapter._proc = None
+            return proc.returncode, out
+
+        return runner
+
+    def cancel(self) -> None:
+        """票 08：取消——樹殺正在跑的引擎子程序；之後的 translate 一律拒絕。"""
+        self._cancelled = True
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            _kill_tree(proc)
 
     def translate(self, job: TranslationJob) -> JobResult:
         if not self._config.api_key:
             raise EngineError("尚未設定 API key（設定頁填入後再翻譯）")
+        if self._cancelled:
+            raise EngineError("已取消")
         cmd = build_command(job, self._config)
         # babeldoc 輸出走子程序 CWD → 以任務資料夾為 cwd，產出才落在該處（票 03 實測教訓）
         cwd = str(Path(job.source_path).parent) if job.source_path else None
         last_error = ""
         for attempt in range(self._config.retries + 1):
+            if self._cancelled:
+                raise EngineError("已取消")
             if attempt:
                 import time
 
@@ -128,6 +184,8 @@ class Pdf2zhNextAdapter:
                 raise EngineError(
                     f"翻譯逾時（超過 {self._config.timeout_seconds} 秒無回應，上游可能掛了）"
                 )
+            if self._cancelled:
+                raise EngineError("已取消")  # 子程序被 kill 後回傳的雜訊不算數
             if rc == 0:
                 return _parse_output(output, job)
             last_error = output

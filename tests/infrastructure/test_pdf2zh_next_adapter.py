@@ -5,6 +5,7 @@ POC 教訓入測：.com 國際站端點預設、key 走 CLI 旗標（不吃 proc
 """
 
 import subprocess
+import sys
 
 import pytest
 
@@ -204,3 +205,83 @@ def test_translate_runs_engine_in_job_source_directory():
     adapter.translate(job)
     _, _, cwd = runner.calls[0]
     assert cwd == "/in", f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
+
+
+# ── 票 08：取消 ─────────────────────────────────────────────
+
+
+def test_translate_after_cancel_raises_without_running_engine():
+    """取消後 translate 一律拒絕，不再啟動引擎。"""
+    def runner(cmd, timeout=None, cwd=None):
+        raise AssertionError("取消後不該再跑引擎")
+
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=runner)
+    adapter.cancel()
+    with pytest.raises(EngineError, match="已取消"):
+        adapter.translate(make_job())
+
+
+def test_cancel_kills_running_subprocess(monkeypatch):
+    """真實子程序：cancel() 要真的殺掉在跑的引擎（Popen handle 掛回 adapter）。"""
+    import threading
+    import time
+
+    # 讓引擎命令變成 sleep 30（build_command 換成假指令，保持預設 Popen runner）
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.pdf2zh_next_adapter.build_command",
+        lambda job, cfg: ["sleep", "30"],
+    )
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 預設 runner（真 Popen）
+    job = make_job(source_path="/tmp/slow.pdf")
+    errors = []
+
+    def run():
+        try:
+            adapter.translate(job)
+        except EngineError as exc:
+            errors.append(str(exc))
+
+    t = threading.Thread(target=run, daemon=True)
+    t0 = time.monotonic()
+    t.start()
+    time.sleep(0.3)  # 等子程序跑起來
+    adapter.cancel()
+    t.join(timeout=10)
+    elapsed = time.monotonic() - t0
+
+    assert t.is_alive() is False, "cancel 後引擎要立刻結束（不會等完 sleep 30）"
+    assert elapsed < 10
+    assert errors == ["已取消"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="killpg 是 POSIX 機制")
+def test_kill_tree_kills_grandchildren():
+    """樹殺回歸（review 硬問題）：只殺中介父程序，孫程序照跑＝管道卡死。
+
+    父（python -c 扮演 uv 中介）→ 孫（sleep 30 扮演真正翻譯程序）。
+    舊行為 proc.kill() 只殺父 → pgrep 還找得到孫；_kill_tree 後一棵不剩。
+    """
+    import time
+
+    from paper_kit.infrastructure.pdf2zh_next_adapter import _kill_tree
+
+    code = (
+        "import subprocess, time;"
+        "subprocess.Popen(['sleep', '30']);"
+        "time.sleep(30)"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,  # 比照 adapter 的 runner
+    )
+    time.sleep(0.5)  # 等孫程序誕生
+    _kill_tree(proc)
+    deadline = time.monotonic() + 2
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)  # SIGKILL 傳遞有微小延遲，輪詢等 reaped
+    assert proc.poll() is not None, "父（中介）必須已死"
+    time.sleep(0.2)
+    found = subprocess.run(["pgrep", "-f", "sleep 30"], capture_output=True, text=True)
+    assert found.returncode != 0, f"孫程序還活著（只殺父的舊行為）：{found.stdout.strip()}"

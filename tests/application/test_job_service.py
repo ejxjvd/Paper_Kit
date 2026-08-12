@@ -14,34 +14,36 @@ from paper_kit.application.pages import page_count_in_range, parse_pages
 from paper_kit.application.ports import EngineError
 from paper_kit.application.start_translation import StartTranslation
 from paper_kit.domain.job_result import JobResult
-from paper_kit.domain.translation_job import JobStatus, TranslationJob
-
-
-class InMemoryJobRepository:
-    def __init__(self):
-        self._jobs = {}
-
-    def add(self, job: TranslationJob) -> None:
-        self._jobs[job.job_id] = job
-
-    def get(self, job_id: str) -> TranslationJob | None:
-        return self._jobs.get(job_id)
-
-    def save(self, job: TranslationJob) -> None:
-        self._jobs[job.job_id] = job
+from paper_kit.domain.translation_job import InvalidTransition, JobStatus, TranslationJob
+from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
 
 
 class FakeEngine:
-    def __init__(self, result: JobResult | None = None, error: str | None = None):
+    def __init__(
+        self,
+        result: JobResult | None = None,
+        error: str | None = None,
+        delay: float = 0.0,
+        honor_cancel: bool = True,
+    ):
         self._result = result
         self._error = error
+        self._delay = delay
+        self._honor_cancel = honor_cancel
         self.received: list[TranslationJob] = []
+        self.cancelled = False
 
     def translate(self, job: TranslationJob) -> JobResult:
         self.received.append(job)
+        time.sleep(self._delay)
+        if self.cancelled and self._honor_cancel:
+            raise EngineError("已取消")  # 真實引擎取消後會失敗
         if self._error:
             raise EngineError(self._error)
         return self._result
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
 
 @pytest.fixture()
@@ -217,6 +219,45 @@ def test_output_dir_equals_job_dir_skips_copy(tmp_path: Path, upload_pdf: Path):
     assert mono.read_bytes() == b"mono"
 
 
+# ── 票 08：歷史持久化（重啟存活） ──────────────────────────────
+
+
+def test_history_survives_restart(tmp_path: Path, upload_pdf: Path):
+    """票 08：SQLite 歷史——重啟 app 後任務仍在（含結果與成本）。"""
+    from paper_kit.infrastructure.job_repo import SqliteJobRepository
+
+    db = tmp_path / "app.db"
+    service = JobService(
+        jobs=SqliteJobRepository(db), outputs_dir=tmp_path / "outputs"
+    )
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(
+        job.job_id,
+        FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf", input_tokens=100)),
+        engine_id="deepseek",
+    )
+    service.wait(job.job_id, timeout=5)
+
+    restarted = JobService(
+        jobs=SqliteJobRepository(db), outputs_dir=tmp_path / "outputs"
+    )
+    jobs = restarted.list_jobs()
+    assert [j.job_id for j in jobs] == [job.job_id]
+    done = jobs[0]
+    assert done.status == JobStatus.COMPLETED
+    assert done.result.input_tokens == 100
+    assert done.engine_id == "deepseek"
+
+
+def test_job_records_created_at(tmp_path: Path, upload_pdf: Path):
+    """票 08：歷史列表要顯示時間——任務建立即記錄。"""
+    service, _ = make_service(tmp_path)
+    j1 = service.create_job(upload_path=upload_pdf)
+    j2 = service.create_job(upload_path=upload_pdf)
+    assert j1.created_at > 0
+    assert j2.created_at >= j1.created_at
+
+
 # ── slice B：start（背景執行） ───────────────────────────────────────
 
 
@@ -257,7 +298,7 @@ def test_start_is_non_blocking(tmp_path: Path, upload_pdf: Path):
     """start 要立即回傳（背景執行），等太久代表沒上 thread。"""
     service, _ = make_service(tmp_path)
     job = service.create_job(upload_path=upload_pdf)
-    slow = _SlowEngine(delay=0.3)
+    slow = FakeEngine(delay=0.3, result=JobResult(mono_path="/out/a.mono.pdf"))
     t0 = time.monotonic()
     service.start(job.job_id, slow)
     assert time.monotonic() - t0 < 0.2, "start 不能阻塞"
@@ -293,10 +334,113 @@ def test_engine_receives_glossary_selection_and_auto_extract(tmp_path: Path, upl
     assert received.auto_extract is True
 
 
-class _SlowEngine:
-    def __init__(self, delay: float):
-        self._delay = delay
+# ── 票 08：重試＋取消 ───────────────────────────────────────────
 
-    def translate(self, job: TranslationJob) -> JobResult:
-        time.sleep(self._delay)
-        return JobResult(mono_path="/out/a.mono.pdf")
+
+def test_retry_failed_job_runs_again_without_reupload(tmp_path: Path, upload_pdf: Path):
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(job.job_id, FakeEngine(error="SiliconFlow 上游 500"))
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).status == JobStatus.FAILED
+
+    engine = FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf"))
+    service.retry(job.job_id, engine, engine_id="deepseek")
+    service.wait(job.job_id, timeout=5)
+
+    done = repo.get(job.job_id)
+    assert done.status == JobStatus.COMPLETED
+    assert done.result.mono_path == "/out/a.mono.pdf"
+    assert done.engine_id == "deepseek"
+    assert engine.received[0].source_path == job.source_path  # 不需重新上傳
+    assert done.error is None  # 舊錯誤清除
+
+
+def test_retry_non_failed_job_raises(tmp_path: Path, upload_pdf: Path):
+    service, _ = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)  # QUEUED，非 FAILED
+    with pytest.raises(InvalidTransition):
+        service.retry(job.job_id, FakeEngine())
+
+
+def test_cancel_translating_job_notifies_engine(tmp_path: Path, upload_pdf: Path):
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    engine = FakeEngine(delay=0.5, result=JobResult(mono_path="/out/a.mono.pdf"))
+    service.start(job.job_id, engine)
+    time.sleep(0.1)  # 等 worker 進 translating（delay 0.5 ≫ 0.1）
+
+    service.cancel(job.job_id)
+
+    assert repo.get(job.job_id).status is JobStatus.CANCELLED
+    assert engine.cancelled is True
+    service.wait(job.job_id, timeout=5)  # thread 收尾不崩
+    assert repo.get(job.job_id).status is JobStatus.CANCELLED
+
+
+def test_cancel_after_engine_completes_drops_result(tmp_path: Path, upload_pdf: Path):
+    """取消後引擎才完成 → 維持 cancelled、產出拋棄（無 crash）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    engine = FakeEngine(
+        delay=0.3,
+        honor_cancel=False,  # 這引擎無視取消、照常回結果
+        result=JobResult(mono_path="/out/a.mono.pdf"),
+    )
+    service.start(job.job_id, engine)
+    time.sleep(0.1)
+    service.cancel(job.job_id)
+    service.wait(job.job_id, timeout=5)
+
+    done = repo.get(job.job_id)
+    assert done.status is JobStatus.CANCELLED
+    assert done.result is None  # 產出拋棄
+
+
+def test_cancel_unknown_job_raises(tmp_path: Path):
+    service, _ = make_service(tmp_path)
+    with pytest.raises(KeyError):
+        service.cancel("no-such-job")
+
+
+# ── spec review 修正回歸 ────────────────────────────────────────
+
+
+def test_init_reclaims_stuck_jobs(tmp_path: Path):
+    """spec review：重啟時回收卡死的進行中任務（進度條永不結束、cancel 殺不到）。
+
+    翻譯程序隨 app 死亡 → queued/translating 標 FAILED＋說明；完成任務不受影響。
+    """
+    repo = InMemoryJobRepository()
+    stuck_translating = TranslationJob(
+        job_id="t1", source_path="a.pdf", status=JobStatus.TRANSLATING
+    )
+    stuck_queued = TranslationJob(job_id="q1", source_path="b.pdf")
+    finished = TranslationJob(
+        job_id="c1", source_path="c.pdf", status=JobStatus.COMPLETED
+    )
+    for j in (stuck_translating, stuck_queued, finished):
+        repo.add(j)
+
+    service = JobService(jobs=repo, outputs_dir=tmp_path / "outputs")
+
+    assert repo.get("t1").status is JobStatus.FAILED
+    assert repo.get("t1").error == "應用重啟，翻譯中斷（請重試）"
+    assert repo.get("q1").status is JobStatus.FAILED
+    assert repo.get("c1").status is JobStatus.COMPLETED  # 完成任務不受影響
+    assert service.list_jobs()[0].can_retry is True  # 回收後可重試
+
+
+def test_retry_without_engine_id_keeps_original_engine(tmp_path: Path, upload_pdf: Path):
+    """spec review：retry 不帶 engine_id 時沿用任務原本引擎（不覆寫成 None）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(job.job_id, FakeEngine(error="上游 500"))
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).status is JobStatus.FAILED
+
+    service.retry(job.job_id, FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")))
+    service.wait(job.job_id, timeout=5)
+
+    assert repo.get(job.job_id).status is JobStatus.COMPLETED
+    assert repo.get(job.job_id).engine_id == job.engine_id

@@ -20,6 +20,10 @@ class TranslationEnginePort(Protocol):
         """翻譯任務；失敗丟 EngineError（job 狀態由 application 處理）。"""
         ...
 
+    def cancel(self) -> None:
+        """票 08：中止進行中的翻譯（殺子程序；之後的 translate 應拋 EngineError）。"""
+        ...
+
 
 class JobRepository(Protocol):
     """任務儲存埠。實作：InMemoryJobRepository（測試）、SQLite repository（正式）。"""
@@ -29,3 +33,7 @@ class JobRepository(Protocol):
     def get(self, job_id: str) -> TranslationJob | None: ...
 
     def save(self, job: TranslationJob) -> None: ...
+
+    def list(self) -> list[TranslationJob]:
+        """票 08：全部任務（建立順序）——重啟後 JobService 由此載入歷史。"""
+        ...
