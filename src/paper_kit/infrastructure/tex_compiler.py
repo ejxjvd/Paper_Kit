@@ -71,9 +71,13 @@ class TeXCompiler:
 
     def __init__(self, xelatex: str | None = None, runner=None):
         self._xelatex = xelatex if xelatex is not None else (find_xelatex() or "")
-        self._runner = runner or (lambda cmd: run_command(cmd, 180, "xelatex"))
+        self._runner = runner or (
+            lambda cmd, cwd=None: run_command(cmd, 180, "xelatex", cwd=cwd)
+        )
 
-    def compile(self, tex_path: str | Path, out_dir: str | Path) -> Path:
+    def compile(
+        self, tex_path: str | Path, out_dir: str | Path, include_dirs: list = ()
+    ) -> Path:
         if not self._xelatex:
             raise EngineError(_MIKTEX_GUIDANCE)
         src = Path(tex_path)
@@ -82,7 +86,12 @@ class TeXCompiler:
         work = Path(out_dir)
         work.mkdir(parents=True, exist_ok=True)
         cmd = build_xelatex_command(self._xelatex, str(src), str(work))
-        rc, output = self._runner(cmd)
+        # 多檔論文（sty/Figures 在源碼目錄）：cwd = 源碼目錄——TeX 對 .sty/
+        # includegraphics 的第一順位搜尋就是 cwd（TEXINPUTS 環境變數會因
+        # WSL→Windows interop 白名單遺失，不能用）。run_command 是 Linux
+        # 程序 → cwd 傳 Linux 路徑原樣；interop 啟動 xelatex.exe 時自動轉換。
+        cwd = str(include_dirs[0]) if include_dirs else None
+        rc, output = self._runner(cmd, cwd)
         if rc != 0:
             raise EngineError(f"LaTeX 編譯失敗：{output.strip()[-200:] or '(無輸出)'}")
         pdf = work / f"{src.stem}.pdf"

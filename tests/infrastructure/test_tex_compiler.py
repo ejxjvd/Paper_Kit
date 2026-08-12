@@ -73,7 +73,7 @@ def test_compile_success_returns_pdf_path(tmp_path):
     tex.write_text("\\documentclass{article}\\begin{document}hi\\end{document}")
     calls: list[list[str]] = []
 
-    def fake_runner(cmd: list[str]) -> tuple[int, str]:
+    def fake_runner(cmd: list[str], cwd=None) -> tuple[int, str]:
         calls.append(cmd)
         (tmp_path / "out").mkdir(parents=True, exist_ok=True)
         (tmp_path / "out" / "paper.pdf").write_bytes(b"%PDF-fake")
@@ -92,7 +92,7 @@ def test_compile_failure_gives_friendly_error(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
 
-    def fake_runner(cmd: list[str]) -> tuple[int, str]:
+    def fake_runner(cmd: list[str], cwd=None) -> tuple[int, str]:
         return 1, "! Undefined control sequence. l.12 \\badcmd"
 
     compiler = TeXCompiler(xelatex="/usr/bin/xelatex", runner=fake_runner)
@@ -106,10 +106,47 @@ def test_compile_timeout_gives_friendly_error(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
 
-    def fake_runner(cmd: list[str]) -> tuple[int, str]:
+    def fake_runner(cmd: list[str], cwd=None) -> tuple[int, str]:
         # _default_runner 的逾時合約：回傳 rc 124＋逾時說明
         return 124, "xelatex 逾時（超過 180 秒無回應）"
 
     compiler = TeXCompiler(xelatex="/usr/bin/xelatex", runner=fake_runner)
     with pytest.raises(EngineError, match="逾時"):
         compiler.compile(tex, out)
+
+
+# ── 真論文 e2e 補（2026-08-12）：源碼目錄 cwd（附屬檔搜尋）──────────────────
+
+
+def test_compile_runs_in_source_dir_cwd(tmp_path):
+    """多檔論文（sty/Figures 在源碼目錄）→ cwd = 源碼目錄（TeX 第一順位搜尋）。"""
+    tex = tmp_path / "paper.tex"
+    tex.write_text("\\begin{document}x\\end{document}", encoding="utf-8")
+    captured = {}
+
+    def fake_runner(cmd, cwd=None):
+        captured["cwd"] = cwd
+        (tmp_path / "paper.pdf").write_bytes(b"%PDF")
+        return 0, "ok"
+
+    TeXCompiler(xelatex="/usr/bin/xelatex", runner=fake_runner).compile(
+        tex, tmp_path, include_dirs=[tmp_path / "src"]
+    )
+    # windowsify 可能已把路徑轉 Windows 形式（WSL 內 wslpath 是活的）——斷言目錄名
+    assert captured["cwd"] is not None
+    assert "src" in captured["cwd"]
+
+
+def test_compile_without_include_dirs_default_cwd(tmp_path):
+    """無 include_dirs → cwd=None（繼承呼叫端目錄）。"""
+    tex = tmp_path / "paper.tex"
+    tex.write_text("x", encoding="utf-8")
+    captured = {}
+
+    def fake_runner(cmd, cwd=None):
+        captured["cwd"] = cwd
+        (tmp_path / "paper.pdf").write_bytes(b"%PDF")
+        return 0, "ok"
+
+    TeXCompiler(xelatex="/usr/bin/xelatex", runner=fake_runner).compile(tex, tmp_path)
+    assert captured["cwd"] is None

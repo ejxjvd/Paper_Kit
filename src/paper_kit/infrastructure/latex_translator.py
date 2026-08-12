@@ -7,6 +7,7 @@ deepseek-reasoner（40s）——同端點雙模型（防模型級整顆掛事件
 槽位；失敗訊息不外洩 key。
 """
 
+import re
 import urllib.request
 
 from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
@@ -36,6 +37,23 @@ def build_latex_prompt(chunk: str, target_lang: str) -> str:
         "---\n"
         f"{chunk}"
     )
+
+
+_FENCE_START_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n?")
+_FENCE_END_RE = re.compile(r"\n?\s*```\s*$")
+
+
+def strip_markdown_fence(text: str) -> str:
+    """LLM 偶發把譯文包在 markdown 程式碼圍欄（```latex ... ```）——剝離。
+
+    真論文 e2e 補（2026-08-12）：圍欄標記原樣注入源碼 → xelatex
+    Undefined control sequence（``` 被當指令）。無圍欄輸入位元組原樣
+    回傳——L1 無損性質（IdentityTranslator 輸出==原文）不得被破壞。
+    """
+    if not _FENCE_START_RE.match(text):
+        return text
+    text = _FENCE_START_RE.sub("", text, count=1)
+    return _FENCE_END_RE.sub("", text, count=1)
 
 
 def _friendly_latex_error(detail: str) -> str:
@@ -85,4 +103,8 @@ class LatexTranslator:
         text, in_tokens, out_tokens = chat_completion(
             self._base_url, self._api_key, payload, timeout=LATEX_TIMEOUT
         )
-        return TextTranslation(text=text, input_tokens=in_tokens, output_tokens=out_tokens)
+        return TextTranslation(
+            text=strip_markdown_fence(text),
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+        )

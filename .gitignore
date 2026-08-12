@@ -15,3 +15,9 @@ htmlcov/
 
 # babeldoc 自動提取術語表等產出副產物
 *.glossary.csv
+
+# LaTeX 編譯垃圾（e2e/attention 真論文實測）
+e2e/**/*.aux
+e2e/**/*.log
+e2e/**/*.out
+e2e/**/*.tar.gz

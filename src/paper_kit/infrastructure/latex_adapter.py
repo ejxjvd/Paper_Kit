@@ -13,6 +13,7 @@ CostService 記錄入歷史（UI 零改動）。
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.text_translation import TextTranslation
 from paper_kit.domain.translation_job import TranslationJob
 from paper_kit.infrastructure.latex_parser import (
+    inject_cjk_support,
     protect_tex_inline,
     restore_tex_inline,
     split_item_command,
@@ -38,6 +40,10 @@ from paper_kit.infrastructure.latex_translator import (
 from paper_kit.infrastructure.tex_compiler import TeXCompiler
 
 logger = logging.getLogger("paper_kit.infrastructure.latex_adapter")
+
+# 譯文異常偵測：restore 後仍含 \PKP{n} = LLM 譯文有無效佔位（e2e 實測：偶發
+# 幻覺回傳虛構證明＋憑空 \PKP 編號）→ 原樣留會讓 xelatex undefined，改重試。
+_PLACEHOLDER_LEFT_RE = re.compile(r"\\PKP\s*\{\d+\}")
 
 
 @dataclass(frozen=True)
@@ -103,8 +109,11 @@ class LatexAdapter:
         work = source.parent / "latex"
         work.mkdir(parents=True, exist_ok=True)
         out_tex = work / f"{source.stem}-{job.target_lang}.tex"
-        out_tex.write_text("".join(out_parts), encoding="utf-8")
-        pdf = self._compiler.compile(out_tex, work)
+        # 真論文 e2e 補：譯文含中文且原文無 xeCJK → 自動注入 CJK 支援
+        assembled = inject_cjk_support("".join(out_parts))
+        out_tex.write_text(assembled, encoding="utf-8")
+        # 多檔論文：sty/Figures 附屬檔在源碼目錄 → TEXINPUTS 附加
+        pdf = self._compiler.compile(out_tex, work, include_dirs=[source.parent])
         logger.info(
             "LaTeX 翻譯完成",
             extra={
@@ -121,11 +130,20 @@ class LatexAdapter:
         )
 
     def _translate_chunk(self, chunk: str, target_lang: str) -> TextTranslation:
-        """一段可譯文字：標題/item 指令只翻其後內文；其餘整段翻。"""
+        """一段可譯文字：純標題/item 指令只翻其後內文；其餘整段翻。
+
+        真論文 e2e 補（2026-08-12）：「\\paragraph{Decoder:}The decoder...」
+        （標題＋行內正文）若只送 content「Decoder:」——超短無上下文 → LLM
+        幻覺補全（實測連續兩次虛構證明段＋編造 \\PKP 編號）——閉括後有實質
+        內容時整段（含指令）送翻譯，實測回傳完美（指令保真＋正文全譯）。
+        """
         for splitter in (split_title_command, split_item_command):
             parts = splitter(chunk)
             if parts:
                 prefix, content, suffix = parts
+                if suffix.strip("}\\n \\t\\r"):
+                    inner = self._translate_core(chunk, target_lang)
+                    return inner
                 inner = self._translate_core(content, target_lang)
                 return TextTranslation(
                     text=prefix + inner.text + suffix,
@@ -135,11 +153,29 @@ class LatexAdapter:
         return self._translate_core(chunk, target_lang)
 
     def _translate_core(self, text: str, target_lang: str) -> TextTranslation:
-        """保護行內公式/引用 → 翻譯 → 還原佔位（AC2 公式 100% 原樣）。"""
+        """保護行內公式/引用 → 翻譯 → 還原佔位（AC2 公式 100% 原樣）。
+
+        真論文 e2e 補：restore 後仍含 \\PKP{n}（無效佔位）＝LLM 譯文異常——
+        重試一次；仍異常才失敗（不產出壞 PDF）。
+        """
         protected, placeholders = protect_tex_inline(text)
-        translation = self._translator.translate_chunk(protected, target_lang)
+        first = self._translator.translate_chunk(protected, target_lang)
+        restored = restore_tex_inline(first.text, placeholders)
+        if not _PLACEHOLDER_LEFT_RE.search(restored):
+            return TextTranslation(
+                text=restored,
+                input_tokens=first.input_tokens,
+                output_tokens=first.output_tokens,
+            )
+        second = self._translator.translate_chunk(protected, target_lang)
+        restored = restore_tex_inline(second.text, placeholders)
+        if _PLACEHOLDER_LEFT_RE.search(restored):
+            # 含原文摘要（前 60 字元，無 key）——診斷哪段出問題
+            raise EngineError(
+                f"翻譯結果異常（佔位符未還原）於段落：{text[:60]!r}——請重試"
+            )
         return TextTranslation(
-            text=restore_tex_inline(translation.text, placeholders),
-            input_tokens=translation.input_tokens,
-            output_tokens=translation.output_tokens,
+            text=restored,
+            input_tokens=first.input_tokens + second.input_tokens,
+            output_tokens=first.output_tokens + second.output_tokens,
         )

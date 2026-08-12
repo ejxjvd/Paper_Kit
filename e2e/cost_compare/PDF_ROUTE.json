@@ -1,0 +1,11 @@
+{
+  "route": "pdf（pdf2zh_next + DeepSeek）",
+  "source": "e2e/attention/original.pdf",
+  "input_tokens": 76706,
+  "output_tokens": 26867,
+  "elapsed_s": 119.0,
+  "cost_usd": "0.05026432",
+  "cost_ntd_at_32": "1.60845824",
+  "mono": "/mnt/c/Users/qaref/Code/Paper_Kit/e2e/attention/original.zh-TW.mono.pdf",
+  "dual": "/mnt/c/Users/qaref/Code/Paper_Kit/e2e/attention/original.zh-TW.dual.pdf"
+}

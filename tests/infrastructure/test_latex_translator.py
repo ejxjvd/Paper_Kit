@@ -11,6 +11,7 @@ from paper_kit.infrastructure.latex_translator import (
     DEFAULT_LATEX_MODEL,
     LatexTranslator,
     build_latex_prompt,
+    strip_markdown_fence,
 )
 
 
@@ -111,3 +112,29 @@ def test_translate_chunk_missing_key_early_error(monkeypatch):
     install(monkeypatch, {})
     with pytest.raises(EngineError, match="API key"):
         LatexTranslator("").translate_chunk("Text.", "zh-TW")
+
+
+# ── 真論文 e2e 補（2026-08-12）：LLM 回傳 markdown 圍欄剝離 ──────────────
+
+
+def test_strip_markdown_fence_removes_latex_fence():
+    """LLM 偶發把譯文包在 ```latex ... ``` 圍欄——需剝離（e2e 實測根因）。"""
+    assert strip_markdown_fence("```latex\n譯文內容\n```") == "譯文內容"
+
+
+def test_strip_markdown_fence_without_lang_tag():
+    assert strip_markdown_fence("```\n譯文內容\n```") == "譯文內容"
+
+
+def test_strip_markdown_fence_no_fence_returns_identical():
+    """無圍欄輸入位元組原樣——L1 無損性質（IdentityTranslator）不得被破壞。"""
+    chunk = "plain \\PKP{0} text\n"
+    assert strip_markdown_fence(chunk) == chunk
+
+
+def test_translate_chunk_strips_fence_from_response(monkeypatch):
+    """端到端：translate_chunk 回傳的譯文不得含 ``` 圍欄（xelatex undefined 根因）。"""
+    install(monkeypatch, {DEFAULT_LATEX_MODEL: "```latex\n譯文內容\n```"})
+    result = LatexTranslator("KEY").translate_chunk("Text.", "zh-TW")
+    assert result.text == "譯文內容"
+    assert "```" not in result.text

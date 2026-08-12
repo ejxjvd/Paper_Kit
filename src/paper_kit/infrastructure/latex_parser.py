@@ -17,9 +17,12 @@ SegmentKind = Literal["keep", "translate"]
 # 標題型指令：花括號內文可譯（指令字首原封，adapter 分離）
 _TITLE_COMMANDS = (
     "section", "subsection", "subsubsection", "paragraph",
-    "caption", "title", "author",
+    "caption", "title",
 )
 _TITLE_RE = re.compile(rf"^\s*\\(?:{'|'.join(_TITLE_COMMANDS)})\b")
+# \author 區塊（含 \AND/\And/\thanks/\texttt 分隔結構）整段 keep——
+# 真論文 e2e（2026-08-12）實測：送 LLM 會被重排（\AND 移出括號→undefined）。
+_AUTHOR_RE = re.compile(r"^\s*\\author\{")
 # 條列項（itemize/enumerate 內）：指令字首原封、內文可譯（spec review 補——原被
 # 「\ 開頭行 keep」擋住、內容永不翻譯）
 _ITEM_RE = re.compile(r"^\s*\\item\b\s*")
@@ -69,6 +72,7 @@ def split_tex_segments(source: str) -> list[TexSegment]:
     segments: list[TexSegment] = []
     pending: list[str] = []
     env_depth = 0  # 環境巢狀深度
+    author_depth = 0  # \author{...} 括號配對深度（>0 = 區塊內）
 
     def flush() -> None:
         if pending:
@@ -77,6 +81,19 @@ def split_tex_segments(source: str) -> list[TexSegment]:
 
     for line in source.splitlines(keepends=True):
         stripped = line.lstrip()
+        if author_depth == 0 and _AUTHOR_RE.match(stripped):
+            # \author 區塊起點：整區塊 keep（括號配對直到閉括）——
+            # \AND/\And/\thanks 等分隔結構送 LLM 會被重排（e2e 實測）
+            flush()
+            author_depth = stripped.count("{") - stripped.count("}")
+            segments.append(TexSegment("keep", line))
+            continue
+        if author_depth > 0:
+            # 區塊內：keep 並追蹤括號深度
+            author_depth += line.count("{") - line.count("}")
+            flush()
+            segments.append(TexSegment("keep", line))
+            continue
         env_match = _ENV_RE.match(stripped)
         if env_match:
             flush()
@@ -143,6 +160,28 @@ def split_item_command(line: str) -> tuple[str, str, str] | None:
     return match.group(0), line[match.end():], ""
 
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_XECJK_RE = re.compile(r"\\usepackage(\[[^\]]*\])?\{xeCJK\}")
+_CJK_INJECTION = (
+    "% Paper_Kit: 譯文含中文——自動加入 CJK 支援（xeCJK + 中文字型）\n"
+    "\\usepackage{xeCJK}\n"
+    "\\setCJKmainfont{Microsoft JhengHei}\n"
+)
+
+
+def inject_cjk_support(tex: str) -> str:
+    """組裝後源碼：含 CJK 字元且前置區無 xeCJK → 於 \\begin{document} 前注入。
+
+    真論文 e2e 補（2026-08-12）：英文原文（無 xeCJK）翻譯注入中文後，
+    xelatex 預設字型無法渲染 CJK——自動補套件＋字型（Microsoft JhengHei
+    為 Windows 內建，MiKTeX 環境必定存在）。已含 xeCJK 或無中文則原樣。
+    """
+    if not _CJK_RE.search(tex) or _XECJK_RE.search(tex):
+        return tex
+    injection = _CJK_INJECTION + "\\begin{document}"
+    return tex.replace("\\begin{document}", injection, 1)
+
+
 def protect_tex_inline(text: str) -> tuple[str, list[str]]:
     """行內公式/引用 → \\PKP{n} 佔位符（LLM 不該改動），回傳保護後文字＋佔位清單。"""
     placeholders: list[str] = []
@@ -162,4 +201,4 @@ def restore_tex_inline(translated: str, placeholders: list[str]) -> str:
             return placeholders[index]
         return match.group(0)  # 未知佔位符原樣留（不製造損壞）
 
-    return re.sub(rf"{re.escape(_PLACEHOLDER_PREFIX)}\{{(\d+)\}}", _restore, translated)
+    return re.sub(rf"{re.escape(_PLACEHOLDER_PREFIX)}\s*\{{(\d+)\}}", _restore, translated)

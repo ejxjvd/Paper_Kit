@@ -7,6 +7,7 @@
 import pytest
 
 from paper_kit.infrastructure.latex_parser import (
+    inject_cjk_support,
     protect_tex_inline,
     restore_tex_inline,
     split_tex_segments,
@@ -138,3 +139,68 @@ def test_split_keeps_label_figures_and_tables():
     )
     segments = split_tex_segments(source)
     assert all(s.kind == "keep" for s in segments)
+
+
+# ── 真論文 e2e 補（2026-08-12）：CJK 支援自動注入 ──────────────────
+
+
+def test_inject_cjk_into_english_preamble():
+    """原文無 xeCJK（英文論文）＋譯文含中文 → 前置區注入 xeCJK＋中文字型。"""
+    src = (
+        "\\documentclass{article}\n"
+        "\\usepackage[utf8]{inputenc}\n"
+        "\\begin{document}\n"
+        "轉換器基於純注意力機制。\n"  # 組裝後：譯文已含中文
+        "\\end{document}\n"
+    )
+    out = inject_cjk_support(src)
+    assert "\\usepackage{xeCJK}" in out
+    assert "\\setCJKmainfont" in out
+    # 注入位置：\begin{document} 之前
+    assert out.index("\\usepackage{xeCJK}") < out.index("\\begin{document}")
+    # 原內容不破壞
+    assert "\\usepackage[utf8]{inputenc}" in out
+    assert "轉換器基於純注意力機制。" in out
+
+
+def test_inject_cjk_does_not_duplicate():
+    src = (
+        "\\documentclass{article}\n"
+        "\\usepackage{xeCJK}\n"
+        "\\begin{document}\n"
+        "\\end{document}\n"
+    )
+    assert inject_cjk_support(src) == src  # 已含 xeCJK → 原樣
+
+
+def test_inject_cjk_only_with_options_form():
+    src = (
+        "\\documentclass{article}\n"
+        "\\usepackage[boldfont]{xeCJK}\n"
+        "\\begin{document}\n"
+        "\\end{document}\n"
+    )
+    assert inject_cjk_support(src) == src
+
+
+def test_author_block_kept_whole():
+    """\\author 區塊（\\AND/\\thanks 分隔結構）整段 keep——送 LLM 會被重排。"""
+    source = (
+        "\\author{\n"
+        "  \\AND\n"
+        "  Ashish Vaswani\\thanks{Equal contribution.}\\\\\n"
+        "  Google Brain\\\\\n"
+        "  \\texttt{ava@google.com}\\\\\n"
+        "}\n"
+    )
+    segments = split_tex_segments(source)
+    assert all(s.kind == "keep" for s in segments)
+    assembled = "".join(s.content for s in segments)
+    assert assembled == source  # 位元組原樣
+
+
+def test_restore_tolerates_space_after_placeholder_prefix():
+    """LLM 偶發 \PKP {n}（多一個空格）——restore 需容忍（e2e 實測缺口）。"""
+    placeholders = ["$E = mc^2$"]
+    assert restore_tex_inline("譯文 \PKP {0} 結束", placeholders) == "譯文 $E = mc^2$ 結束"
+    assert restore_tex_inline("譯文 \PKP{0} 結束", placeholders) == "譯文 $E = mc^2$ 結束"

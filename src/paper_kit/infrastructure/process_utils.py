@@ -25,10 +25,16 @@ def windowsify(path: str) -> str:
     return path
 
 
-def run_command(cmd: list[str], timeout: int = 180, label: str = "程序") -> tuple[int, str]:
-    """跑子程序（逾時回 rc 124＋說明）；回傳 (rc, stdout+stderr)。"""
+def run_command(
+    cmd: list[str], timeout: int = 180, label: str = "程序", cwd: str | None = None
+) -> tuple[int, str]:
+    """跑子程序（逾時回 rc 124＋說明）；回傳 (rc, stdout+stderr)。
+
+    cwd：工作目錄（TeX 慣例 = 源碼目錄——多檔論文的 sty/Figures 在
+    cwd 的第一順位搜尋；WSL interop 執行 .exe 時自動轉換路徑）。
+    """
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired:
         return 124, f"{label} 逾時（超過 {timeout} 秒無回應）"
     return done.returncode, done.stdout + done.stderr

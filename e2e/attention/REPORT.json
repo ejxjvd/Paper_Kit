@@ -1,0 +1,13 @@
+{
+  "paper": "Attention Is All You Need (arXiv:1706.03762)",
+  "source": "ms_single.tex（7 個 \\input 展開合併，73,907 字元）",
+  "input_tokens": 15095,
+  "output_tokens": 5843,
+  "elapsed_total_s": 138.5,
+  "elapsed_translate_s": 132.8,
+  "cost_usd": "0.01050295",
+  "cost_ntd_at_32": "0.33609440",
+  "pdf_pages": 14,
+  "verify_ok": true,
+  "failures": []
+}

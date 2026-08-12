@@ -1,0 +1,884 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+ \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading nips_2017
+%
+% to avoid loading the natbib package, add option nonatbib:
+% \usepackage[nonatbib]{nips_2017}
+
+% Keep final for now to remove annoying line numbers.
+%\usepackage[final]{nips_2017}
+% Keep final for now to remove annoying line numbers.
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+\usepackage[final]{nips_2017}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{amsmath}
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{subfiles}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{enumerate}
+\usepackage{subfiles}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{subfiles}
+
+
+% % Custom Commands:
+% \newcommand\blfootnote[1]{%
+%   \begingroup
+%   \renewcommand\thefootnote{}\footnote{#1}%
+%   \addtocounter{footnote}{-1}%
+%   \endgroup
+% }
+
+\newcommand\todo[1]{\textcolor{red}{[[#1]]}}
+\newcommand\mc[1]{\mathcal{#1}}
+\newcommand*\samethanks[1][\value{footnote}]{\footnotemark[#1]}
+%keys for memory and values. Can be changed if needed
+\newcommand{\kq}{q}
+\newcommand{\km}{k}
+\newcommand{\vq}{o}
+\newcommand{\vm}{m}
+\newcommand{\Wkq}{W_q}
+\newcommand{\Wkm}{W_k}
+\newcommand{\Wvq}{W_o}
+\newcommand{\Wvm}{W_m}
+\newcommand{\dmodel}{d_{\text{model}}}
+\newcommand{\dffn}{d_{\text{ffn}}}
+\newcommand{\dff}{d_{\text{ff}}}
+\newcommand{\mbf}[1]{\mathbf{#1}}
+%\newcommand{\kq}{{q}_k}
+%\newcommand{\km}{{m}_k}
+%\newcommand{\vq}{{q}_v}
+%\newcommand{\vm}{{m}_v}
+%\newcommand{\Wkq}{{W_q}_k}
+%\newcommand{\Wkm}{{W_m}_k}
+%\newcommand{\Wvq}{{W_q}_v}
+%\newcommand{\Wvm}{{W_m}_v}
+\newcommand\concat[3]{\left[#1 \parallel_#3 #2\right]}
+
+\title{注意力就是你所需要的一切}
+% The \author macro works with any number of authors. There are two
+% commands used to separate the names and addresses of multiple
+% authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to
+% break the lines. Using \AND forces a line break at that point. So,
+% if LaTeX puts 3 of 4 authors names on the first line, and the last
+% on the second line, try using \AND instead of \And before the third
+% author name.
+\author{
+  \AND
+  Ashish Vaswani\thanks{Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started the effort to evaluate this idea.
+Ashish, with Illia, designed and implemented the first Transformer models and has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head attention and the parameter-free position representation and became the other person involved in nearly every detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and efficient inference and visualizations. Lukasz and Aidan spent countless long days designing various parts of and implementing tensor2tensor, replacing our earlier codebase, greatly improving results and massively accelerating our research.
+}\\
+  Google Brain\\
+  \texttt{avaswani@google.com}\\
+  \And
+  Noam Shazeer\footnotemark[1]\\
+  Google Brain\\
+  \texttt{noam@google.com}\\
+  \And
+  Niki Parmar\footnotemark[1]\\
+  Google Research\\
+  \texttt{nikip@google.com}\\  
+  \And
+  Jakob Uszkoreit\footnotemark[1]\\
+  Google Research\\
+  \texttt{usz@google.com}\\
+  \And  
+  Llion Jones\footnotemark[1]\\
+  Google Research\\
+  \texttt{llion@google.com}\\   
+  \And
+  Aidan N. Gomez\footnotemark[1] \hspace{1.7mm}\thanks{Work performed while at Google Brain.}\\
+  University of Toronto\\
+  \texttt{aidan@cs.toronto.edu}
+  \And
+  {\L}ukasz Kaiser\footnotemark[1]\\
+  Google Brain\\
+  \texttt{lukaszkaiser@google.com}\\
+  \And
+  Illia Polosukhin\footnotemark[1]\hspace{1.7mm} \thanks{Work performed while at Google Research.}\\
+  \texttt{illia.polosukhin@gmail.com}\\  
+}
+
+% Paper_Kit: 譯文含中文——自動加入 CJK 支援（xeCJK + 中文字型）
+\usepackage{xeCJK}
+\setCJKmainfont{Microsoft JhengHei}
+\begin{document}
+\begin{center}
+    \color{red}
+    \large Provided proper attribution is provided, Google hereby grants permission to reproduce the tables and figures in this paper solely for use in journalistic or scholarly works.
+\end{center}
+
+\maketitle
+
+\begin{abstract}
+主導性的序列轉導模型基於複雜的遞歸或卷積神經網路，這些網路包含編碼器和解碼器。表現最佳的模型也透過注意力機制連接編碼器和解碼器。我們提出了一種新的簡單網路架構，即 Transformer，僅基於注意力機制，完全摒棄遞歸和卷積。在兩個機器翻譯任務上的實驗顯示，這些模型在品質上更優越，同時更具可並行性，且訓練時間顯著減少。我們的模型在 WMT 2014 英德翻譯任務上達到 28.4 BLEU，比現有最佳結果（包括集成模型）提升了超過 2 BLEU。在 WMT 2014 英法翻譯任務上，我們的模型在八塊 GPU 上訓練 3.5 天後，建立了新的單模型最先進 BLEU 分數 41.8，僅為文獻中最佳模型訓練成本的一小部分。我們展示了 Transformer 能很好地泛化到其他任務，成功應用於英語成分句法分析，無論是大型還是有限的訓練資料。% \blfootnote{Code available at \url{https://github.com/tensorflow/tensor2tensor}}
+
+%TODO(noam): update results for new models.
+
+%llion@: FAIR's paper seems to concentrate solely on the convolutional aspect of their model and have the attention as an after thought almost, this gives us a good opportunity to differentiate ourselves from their paper.
+
+%We are simpler in a number of ways and should have the simplicity as a big selling point:
+%\begin{itemize}
+%\item No convolutions
+%\item No need for such careful initializations and %normalization.
+%\item Simpler non-lineararities, they use the gated linear %units.
+%\item Less layers?
+%\end{itemize}
+%One thing we do more is that we have self attention.
+%Another selling point is the increased interpretability as %shown with the visualizations. Which comes from the %simplicity and use of only attentions.
+\end{abstract}
+
+\section{引言}
+遞迴神經網路，特別是長短期記憶 \citep{hochreiter1997} 與閘控遞迴 \citep{gruEval14} 神經網路，已被確立為序列建模與轉換問題（如語言建模與機器翻譯 \citep{sutskever14, bahdanau2014neural, cho2014learning}）中的最先進方法。此後，眾多努力持續推動遞迴語言模型與編碼器-解碼器架構的界限 \citep{wu2016google,luong2015effective,jozefowicz2016exploring}。
+遞迴模型通常沿著輸入與輸出序列的符號位置來分解計算。透過將位置對齊到計算時間的步驟，它們會生成一串隱藏狀態 $h_t$，作為前一個隱藏狀態 $h_{t-1}$ 與位置 $t$ 輸入的函數。這種本質上的序列性質阻礙了訓練樣本內部的平行化，而這在序列長度較長時變得至關重要，因為記憶體限制限制了跨樣本的批次處理。%\marginpar{not sure if the memory constraints are understandable here}
+Recent work has achieved significant improvements in computational efficiency through factorization tricks \citep{Kuchaiev2017Factorization} and conditional computation \citep{shazeer2017outrageously}, while also improving model performance in case of the latter. The fundamental constraint of sequential computation, however, remains.
+%\marginpar{@all: there is work on analyzing what attention really does in seq2seq models, couldn't find it right away} 
+
+注意力機制已成為各種任務中引人注目的序列建模和轉導模型不可或缺的一部分，允許建模依賴關係而不考慮其在輸入或輸出序列中的距離\citep{bahdanau2014neural, structuredAttentionNetworks}。然而，在少數情況\citep{decomposableAttnModel}之外，此類注意力機制通常與遞歸網絡結合使用。
+%\marginpar{not sure if "cross-positional communication" is understandable without explanation}
+%\marginpar{insert exact training times and stats for the model that reaches sota earliest, maybe even a single GPU model?}
+
+在這項工作中，我們提出了Transformer，一種摒棄遞歸、完全依賴注意力機制來捕捉輸入與輸出之間全局依賴關係的模型架構。Transformer允許顯著更高的並行化程度，並且在八塊P100 GPU上僅訓練十二小時後，即可達到翻譯品質的新最佳水準。%\marginpar{you removed the constant number of repetitions part. I wrote it because I wanted to make it clear that the model does not only perform attention once, while it's also not recurrent. I thought that might be important to get across early.}
+
+% Just a standard paragraph with citations, rewrite.
+%After the seminal papers of \citep{sutskever14}, \citep{bahdanau2014neural}, and \citep{cho2014learning}, recurrent models have become the dominant solution for both sequence modeling and sequence-to-sequence transduction. Many efforts such as \citep{wu2016google,luong2015effective,jozefowicz2016exploring} have pushed the boundaries of machine translation and language modeling with recurrent sequence models. Recent effort \citep{shazeer2017outrageously} has combined the power of conditional computation with sequence models to train very large models for machine translation, pushing SOTA at lower computational cost. Recurrent models compute a vector of hidden states $h_t$, for each time step $t$ of computation. $h_t$ is a function of both the input at time $t$ and the previous hidden state $h_t$. This dependence on the previous hidden state encumbers recurrnet models to process multiple inputs at once, and their time complexity is a linear function of the length of the input and output, both during training and inference. [What I want to say here is that although this is fine during decoding, at training time, we are given both input and output and this linear nature does not allow the RNN to process all inputs and outputs simultaneously and haven't been used on datasets that are the of the scale of the web. What's the largest dataset we have ? . Talk about Nividia and possibly other's effors to speed up things, and possibly other efforts that alleviate this, but are still limited by it's comptuational nature]. Rest of the intro: What if you could construct the state based on the actual inputs and outputs, then you could construct them all at once. This has been the foundation of many promising recent efforts, bytenet,facenet (Also talk about quasi rnn here). Now we talk about attention!! Along with cell architectures such as long short-term meory (LSTM) \citep{hochreiter1997}, and gated recurrent units (GRUs) \citep{cho2014learning}, attention has emerged as an essential ingredient in successful sequence models, in particular for machine translation. In recent years, many, if not all, state-of-the-art (SOTA) results in machine translation have been achieved with attention-based sequence models \citep{wu2016google,luong2015effective,jozefowicz2016exploring}. Talk about the neon work on how it played with attention to do self attention! Then talk about what we do.
+
+\section{背景}
+減少序列計算的目標也構成了Extended Neural GPU \citep{extendedngpu}、ByteNet \citep{NalBytenet2017}和ConvS2S \citep{JonasFaceNet2017}的基礎，所有這些模型都使用卷積神經網絡作為基本構建塊，並行計算所有輸入和輸出位置的隱藏表示。在這些模型中，關聯兩個任意輸入或輸出位置的信號所需的操作數量隨位置之間的距離而增長，對於ConvS2S是線性增長，對於ByteNet則是对數增長。這使得學習遠距離位置之間的依賴關係更加困難\citep{hochreiter2001gradient}。在Transformer中，這被減少為恆定數量的操作，儘管代價是由於平均注意力加權位置而導致的有效分辨率降低，我們通過第~\ref{sec:attention}~節所述的多頭注意力來抵消這一影響。
+Self-attention，有時稱為intra-attention，是一種注意力機制，用於關聯單一序列中不同位置，以計算該序列的表示。Self-attention已成功應用於多種任務，包括閱讀理解、抽象式摘要、文本蘊涵以及學習與任務無關的句子表示 \citep{cheng2016long, decomposableAttnModel, paulus2017deep, lin2017structured}。
+端到端記憶網路是基於循環注意力機制而非序列對齊的循環，並且已被證明在簡單語言問答和語言建模任務上表現良好 \citep{sukhbaatar2015}。
+然而，據我們所知，Transformer是第一個完全依賴自注意力來計算其輸入和輸出表示，而不使用序列對齊的RNN或卷積的轉導模型。
+在以下章節中，我們將描述Transformer，闡述自注意力的動機，並討論其相對於諸如\citep{neural_gpu, NalBytenet2017}和\citep{JonasFaceNet2017}等模型的優勢。
+
+%\citep{JonasFaceNet2017} report new SOTA on machine translation for English-to-German (EnDe), Enlish-to-French (EnFr) and English-to-Romanian language pairs. 
+
+%For example,! in MT, we must draw information from both input and previous output words to translate an output word accurately. An attention layer \citep{bahdanau2014neural} can connect a very large number of positions at low computation cost, making it an essential ingredient in competitive recurrent models for machine translation.
+
+%A natural question to ask then is, "Could we replace recurrence with attention?". \marginpar{Don't know if it's the most natural question to ask given the previous statements. Also, need to say that the complexity table summarizes these statements} Such a model would be blessed with the computational efficiency of attention and the power of cross-positional communication. In this work, show that pure attention models work remarkably well for MT, achieving new SOTA results on EnDe and EnFr, and can be trained in under $2$ days on xyz architecture. 
+
+%After the seminal models introduced in \citep{sutskever14, bahdanau2014neural, cho2014learning}, recurrent models have become the dominant solution for both sequence modeling and sequence-to-sequence transduction. Many efforts such as \citep{wu2016google,luong2015effective,jozefowicz2016exploring} have pushed the boundaries of machine translation (MT) and language modeling with recurrent endoder-decoder and recurrent language models. Recent effort \citep{shazeer2017outrageously} has successfully combined the power of conditional computation with sequence models to train very large models for MT, pushing SOTA at lower computational cost.
+
+%Recurrent models compute a vector of hidden states $h_t$, for each time step $t$ of computation. $h_t$ is a function of both the input at time $t$ and the previous hidden state $h_t$. This dependence on the previous hidden state precludes processing all timesteps at once, instead requiring long sequences of sequential operations.  In practice, this results in greatly reduced computational efficiency, as on modern computing hardware, a single operation on a large batch is much faster than a large number of operations on small batches.  The problem gets worse at longer sequence lengths. Although sequential computation is not a severe bottleneck at inference time, as autoregressively generating each output requires all previous outputs, the inability to compute scores at all output positions at once hinders us from rapidly training our models over large datasets. Although impressive work such as \citep{Kuchaiev2017Factorization} is able to significantly accelerate the training of LSTMs with factorization tricks, we are still bound by the linear dependence on sequence length.
+
+%If the model could compute hidden states at each time step using only the inputs and outputs,  it would be liberated from the dependence on results from previous time steps during training. This line of thought is the foundation of recent efforts such as the Markovian neural GPU \citep{neural_gpu}, ByteNet \citep{NalBytenet2017} and ConvS2S \citep{JonasFaceNet2017}, all of which use convolutional neural networks as a building block to compute hidden representations simultaneously for all timesteps, resulting in $O(1)$ sequential time complexity. \citep{JonasFaceNet2017} report new SOTA on machine translation for English-to-German (EnDe), Enlish-to-French (EnFr) and English-to-Romanian language pairs. 
+
+%A crucial component for accurate sequence prediction is modeling cross-positional communication. For example, in MT, we must draw information from both input and previous output words to translate an output word accurately. An attention layer \citep{bahdanau2014neural} can connect a very large number of positions at a low computation cost, also $O(1)$ sequential time complexity, making it an essential ingredient in recurrent encoder-decoder architectures for MT. A natural question to ask then is, "Could we replace recurrence with attention?". \marginpar{Don't know if it's the most natural question to ask given the previous statements. Also, need to say that the complexity table summarizes these statements} Such a model would be blessed with the computational efficiency of attention and the power of cross-positional communication. In this work, show that pure attention models work remarkably well for MT, achieving new SOTA results on EnDe and EnFr, and can be trained in under $2$ days on xyz architecture. 
+
+
+
+%Note: Facebook model is no better than RNNs in this regard, since it requires a number of layers proportional to the distance you want to communicate.  Bytenet is more promising, since it requires a logarithmnic number of layers (does bytenet have SOTA results)?   
+
+%Note: An attention  layer can connect a very large number of positions at a low computation cost in O(1) sequential operations.  This is why encoder-decoder attention has been so successful in seq-to-seq models so far.  It is only natural, then, to also use attention to connect the timesteps of the same sequence.
+
+%Note: I wouldn't say that long sequences are not a problem during inference.  It would be great if we could infer with no long sequences.  We could just say later on that, while our training graph is constant-depth, our model still requires sequential operations in the decoder part during inference due to the autoregressive nature of the model.   
+
+%\begin{table}[h!]
+%\caption{Attention models are quite efficient for cross-positional communications when sequence length is smaller than channel depth. $n$ represents the sequence length and $d$ represents the channel depth.}
+%\label{tab:op_complexities}
+%\begin{center}
+%\vspace{-5pt}
+%\scalebox{0.75}{
+
+%\begin{tabular}{l|c|c|c}
+%\hline \hline
+%Layer Type & Receptive & Complexity & Sequential  \\
+%           & Field     &            & Operations  \\
+%\hline
+%Pointwise Feed-Forward & $1$ & $O(n \cdot d^2)$ & $O(1)$ \\
+%\hline
+%Recurrent & $n$ & $O(n \cdot d^2)$ & $O(n)$ \\
+%\hline
+%Convolutional & $r$ & $O(r \cdot n \cdot d^2)$ & $O(1)$ \\
+%\hline
+%Convolutional (separable) & $r$ & $O(r \cdot n \cdot d + n %\cdot d^2)$ & $O(1)$ \\
+%\hline
+%Attention & $r$ & $O(r \cdot n \cdot d)$ & $O(1)$ \\
+%\hline \hline
+%\end{tabular}
+%}
+%\end{center}
+%\end{table}
+
+\section{模型架構}
+\begin{figure}
+  \centering
+  \includegraphics[scale=0.6]{Figures/ModalNet-21}
+  \caption{The Transformer - model architecture.}
+  \label{fig:model-arch}
+\end{figure}
+
+% Although the primary workhorse of our model is attention, 
+%Our model maintains the encoder-decoder structure that is common to many so-called sequence-to-sequence models \citep{bahdanau2014neural,sutskever14}.  As in all such architectures, the encoder computes a representation of the input sequence, and the decoder consumes these representations along with the output tokens to autoregressively produce the output sequence.  Where, traditionally, the encoder and decoder contain stacks of recurrent or convolutional layers, our encoder and decoder stacks are composed of attention layers and position-wise feed-forward layers (Figure~\ref{fig:model-arch}).  The following sections describe the gross architecture and these particular components in detail.
+
+大多數競爭性的神經序列轉換模型都具有編碼器-解碼器結構 \citep{cho2014learning,bahdanau2014neural,sutskever14}。在這裡，編碼器將符號表示的輸入序列 $(x_1, ..., x_n)$ 映射為連續表示的序列 $\mathbf{z} = (z_1, ..., z_n)$。給定 $\mathbf{z}$，解碼器隨後一次生成一個元素的輸出符號序列 $(y_1,...,y_m)$。在每一步中，模型都是自回歸的 \citep{graves2013generating}，在生成下一個符號時，會將先前生成的符號作為額外輸入。
+Transformer 的整體架構採用堆疊的自注意力與逐點全連接層，分別用於編碼器與解碼器，如圖~\ref{fig:model-arch} 左半部與右半部所示。
+\subsection{編碼器與解碼器堆疊}
+\paragraph{編碼器：}編碼器由 $N=6$ 個相同層的堆疊組成。每一層有兩個子層。第一個是多頭自注意力機制，第二個是簡單的、位置逐點的全連接前饋網路。我們在兩個子層的每一層周圍使用殘差連接 \citep{he2016deep}，隨後進行層歸一化 \cite{layernorm2016}。也就是說，每個子層的輸出是 $\mathrm{LayerNorm}(x + \mathrm{Sublayer}(x))$，其中 $\mathrm{Sublayer}(x)$ 是子層本身實現的函數。為了促進這些殘差連接，模型中的所有子層以及嵌入層都產生維度為 $\dmodel=512$ 的輸出。
+\paragraph{解碼器：}解碼器同樣由一組 $N=6$ 個相同層組成。除了每個編碼器層中的兩個子層之外，解碼器還插入了第三個子層，該子層對編碼器堆疊的輸出執行多頭注意力。與編碼器類似，我們在每個子層周圍採用殘差連接，隨後進行層歸一化。我們還修改了解碼器堆疊中的自注意力子層，以防止位置關注後續位置。這種遮罩，加上輸出嵌入偏移一個位置的事實，確保了位置 $i$ 的預測只能依賴於位置小於 $i$ 的已知輸出。
+% In our model (Figure~\ref{fig:model-arch}), the encoder and decoder are composed of stacks of alternating self-attention layers (for cross-positional communication) and position-wise feed-forward layers (for in-place computation).  In addition, the decoder stack contains encoder-decoder attention layers.  Since attention is agnostic to the distances between words, our model requires a "positional encoding" to be added to the encoder and decoder input. The following sections describe all of these components in detail.
+
+\subsection{注意力機制} \label{sec:attention}An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors.  The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key.
+\subsubsection{縮放點積注意力} \label{sec:scaled-dot-prod}
+% \begin{figure}
+%   \centering
+%   \includegraphics[scale=0.6]{Figures/ModalNet-19}
+%   \caption{Scaled Dot-Product Attention.}
+%   \label{fig:multi-head-att}
+% \end{figure}
+
+我們將我們特別的注意力稱之為「縮放點積注意力」（圖~\ref{fig:multi-head-att}）。輸入由維度為$d_k$的查詢和鍵，以及維度為$d_v$的值組成。我們計算查詢與所有鍵的點積，將每個除以$\sqrt{d_k}$，並應用softmax函數以獲得值的權重。
+在實踐中，我們同時對一組查詢計算注意力函數，並將它們打包成一個矩陣 $Q$。鍵和值也分別打包成矩陣 $K$ 和 $V$。我們計算輸出矩陣如下：
+\begin{equation}
+   \mathrm{Attention}(Q, K, V) = \mathrm{softmax}(\frac{QK^T}{\sqrt{d_k}})V
+\end{equation}
+
+兩種最常用的注意力函數是加性注意力 \citep{bahdanau2014neural} 和點積（乘法）注意力。點積注意力與我們的演算法相同，除了縮放因子 $\frac{1}{\sqrt{d_k}}$ 之外。加性注意力使用具有單一隱藏層的前饋網路來計算相容性函數。雖然兩者在理論複雜度上相似，但點積注意力在實踐中更快且更節省空間，因為它可以使用高度最佳化的矩陣乘法程式碼來實現。
+%We scale the dot products by $1/\sqrt{d_k}$ to limit the magnitude of the dot products, which works well in practice. Otherwise, we found applying the softmax to often result in weights very close to 0 or 1, and hence minuscule gradients.
+
+% Already described in the subsequent section
+%When used as part of decoder self-attention, an optional mask function is applied just before the softmax to prevent positions from attending to subsequent positions.   This mask simply sets the logits corresponding to all illegal connections (those outside of the lower triangle) to $-\infty$.
+
+%\paragraph{Comparison to Additive Attention: } We choose dot product attention over additive attention \citep{bahdanau2014neural} since it can be computed using highly optimized matrix multiplication code.  This optimization is particularly important to us, as we employ many attention layers in our model.
+
+雖然對於較小的 $d_k$ 值，這兩種機制表現相似，但對於較大的 $d_k$ \citep{DBLP:journals/corr/BritzGLL17} 值，加性注意力優於未縮放的點積注意力。我們懷疑，對於較大的 $d_k$ 值，點積的幅度會變大，將 softmax 函數推入梯度極小的區域 \footnote{為了說明點積為何變大，假設 $q$ 和 $k$ 的分量是均值為 $0$、方差為 $1$ 的獨立隨機變數。則它們的點積 $q \cdot k = \sum_{i=1}^{d_k} q_ik_i$ 的均值為 $0$，方差為 $d_k$。}。為了抵消這種效應，我們將點積乘以 $\frac{1}{\sqrt{d_k}}$ 進行縮放。
+
+%We suspect this to be caused by the dot products growing too large in magnitude to result in useful gradients after applying the softmax function.  To counteract this, we scale the dot product by $1/\sqrt{d_k}$.
+
+
+\subsubsection{多頭注意力} \label{sec:multihead}
+\begin{figure}
+\begin{minipage}[t]{0.5\textwidth}
+  \centering
+  Scaled Dot-Product Attention \\
+  \vspace{0.5cm}
+  \includegraphics[scale=0.6]{Figures/ModalNet-19}
+\end{minipage}
+\begin{minipage}[t]{0.5\textwidth}
+  \centering 
+  Multi-Head Attention \\
+  \vspace{0.1cm}
+  \includegraphics[scale=0.6]{Figures/ModalNet-20}  
+\end{minipage}
+
+
+  % \centering
+
+  \caption{(left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several attention layers running in parallel.}
+  \label{fig:multi-head-att}
+\end{figure}
+
+與其使用單一的注意力函數搭配 $\dmodel$ 維度的鍵、值與查詢，我們發現將查詢、鍵與值分別以不同的、學習到的線性投影線性投影 $h$ 次至 $d_k$、$d_k$ 與 $d_v$ 維度是有益的。
+在這些投影後的查詢、鍵與值版本上，我們並行執行注意力函數，產生 $d_v$ 維度的輸出值。這些輸出值被串接起來並再次投影，最終得到最終值，如圖~\ref{fig:multi-head-att} 所示。
+Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this.
+\begin{align*}
+    \mathrm{MultiHead}(Q, K, V) &= \mathrm{Concat}(\mathrm{head_1}, ..., \mathrm{head_h})W^O\\
+%    \mathrm{where} \mathrm{head_i} &= \mathrm{Attention}(QW_Q_i^{\dmodel \times d_q}, KW_K_i^{\dmodel \times d_k}, VW^V_i^{\dmodel \times d_v})\\
+    \text{where}~\mathrm{head_i} &= \mathrm{Attention}(QW^Q_i, KW^K_i, VW^V_i)\\
+\end{align*}
+
+其中投影為參數矩陣 $W^Q_i \in \mathbb{R}^{\dmodel \times d_k}$、$W^K_i \in \mathbb{R}^{\dmodel \times d_k}$、$W^V_i \in \mathbb{R}^{\dmodel \times d_v}$ 和 $W^O \in \mathbb{R}^{hd_v \times \dmodel}$。
+
+%find it better (and no more expensive) to have multiple parallel attention layers (each over the full set of positions) with proportionally lower-dimensional keys, values and queries.  We call this "Multi-Head Attention" (Figure~\ref{fig:multi-head-att}).  The keys, values, and queries for each of these parallel attention layers are computed by learned linear transformations of the inputs to the multi-head attention.  We use different linear transformations across different parallel attention layers.  The output of the parallel attention layers are concatenated, and then passed through a final learned linear transformation. 
+
+在本工作中，我們採用 $h=8$ 個並行注意力層，或稱頭。對於每一個，我們使用 $d_k=d_v=\dmodel/h=64$。
+由於每個頭的維度降低，總計算成本與全維度的單頭注意力相似。
+\subsubsection{注意力在我們模型中的應用}
+Transformer 在多頭注意力中使用了三種不同的方式：\begin{itemize}
+ \item 在「編碼器-解碼器注意力」層中，查詢來自前一解碼器層，而記憶鍵和值來自編碼器的輸出。這使得解碼器中的每個位置都能關注輸入序列中的所有位置。這模仿了序列到序列模型中典型的編碼器-解碼器注意力機制，例如 \citep{wu2016google, bahdanau2014neural,JonasFaceNet2017}。
+ \item The encoder contains self-attention layers.  In a self-attention layer all of the keys, values and queries come from the same place, in this case, the output of the previous layer in the encoder.   Each position in the encoder can attend to all positions in the previous layer of the encoder.
+ \item 同樣地，解碼器中的自注意力層允許解碼器中的每個位置關注解碼器中直到並包括該位置的所有位置。我們需要防止解碼器中的左向資訊流動，以保持自回歸性質。我們在縮放點積注意力內部通過遮罩（設定為$-\infty$）softmax輸入中所有對應於非法連接的值來實現這一點。請參見圖~\ref{fig:multi-head-att}。
+\end{itemize}
+
+\subsection{位置逐點前饋網路}\label{sec:ffn}
+In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully connected feed-forward network, which is applied to each position separately and identically.  This consists of two linear transformations with a ReLU activation in between.
+\begin{equation}
+   \mathrm{FFN}(x)=\max(0, xW_1 + b_1) W_2 + b_2
+\end{equation}
+
+雖然線性變換在不同位置上是相同的，但它們在不同層之間使用不同的參數。另一種描述方式是將其視為兩個卷積核大小為1的卷積。輸入和輸出的維度為$\dmodel=512$，而內層的維度為$d_{ff}=2048$。
+
+
+%In the appendix, we describe how the position-wise feed-forward network can also be seen as a form of attention.
+
+%from Jakob: The number of operations required for the model to relate signals from two arbitrary input or output positions grows in the distance between positions in input or output, linearly for ConvS2S and logarithmically for ByteNet, making it harder to learn dependencies between these positions \citep{hochreiter2001gradient}. In the transformer this is reduced to a constant number of operations, albeit at the cost of effective resolution caused by averaging attention-weighted positions, an effect we aim to counteract with multi-headed attention.
+
+
+%Figure~\ref{fig:simple-att} presents a simple attention function, $A$, with a single head, that forms the basis of our multi-head attention. $A$ takes a query key vector $\kq$, matrices of memory keys $\km$ and memory values $\vm$ ,and produces a query value vector $\vq$ as 
+%\begin{equation*} \label{eq:attention}
+%    A(\kq, \km, \vm) = {\vm}^T (Softmax(\km \kq).
+%\end{equation*}
+%We linearly transform $\kq,\,\km$, and $\vm$ with learned matrices ${\Wkq \text{,} \, \Wkm}$, and ${\Wvm}$ before calling the attention function, and transform the output query with $\Wvq$ before handing it to the feed forward layer. Each attention layer has it's own set of transformation matrices, which are shared across all query positions. $A$ is applied in parallel for each query position, and is implemented very efficiently as a batch of matrix multiplies. The self-attention and encoder-decoder attention layers use $A$, but with different arguments. For example, in encdoder self-attention, queries in encoder layer $i$ attention to memories in encoder layer $i-1$. To ensure that decoder self-attention layers do not look at future words, we add $- \inf$ to the softmax logits in positions $j+1$ to query length for query position $l$.  
+
+%In simple attention, the query value is a weighted combination of the memory values where the attention weights sum to one. Although this function performs well in practice, the constraint on attention weights can restrict the amount of information that flows from memories to queries because the query cannot focus on multiple memory positions at once, which might be desirable when translating long sequences. \marginpar{@usz, could you think of an example of this ?} We remedy this by maintaining multiple attention heads at each query position that attend to all memory positions in parallel, with a different set of parameters  per attention head $h$. 
+%\marginpar{}
+
+\subsection{嵌入與 Softmax}與其他序列轉導模型類似，我們使用學習到的嵌入將輸入詞元與輸出詞元轉換為維度為 $\dmodel$ 的向量。我們也使用常見的學習線性變換與 softmax 函數，將解碼器輸出轉換為預測的下一個詞元機率。在我們的模型中，我們在兩個嵌入層與 pre-softmax 線性變換之間共享相同的權重矩陣，類似於 \citep{press2016using}。在嵌入層中，我們將這些權重乘以 $\sqrt{\dmodel}$。
+
+\subsection{位置編碼}由於我們的模型不包含遞迴和卷積，為了讓模型利用序列的順序，我們必須注入一些關於序列中詞元的相對或絕對位置的資訊。為此，我們在編碼器和解碼器堆疊的底部將「位置編碼」加到輸入嵌入中。位置編碼的維度與嵌入相同，皆為 $\dmodel$，因此兩者可以相加。位置編碼有許多選擇，包括學習式和固定式 \citep{JonasFaceNet2017}。
+在這項工作中，我們使用不同頻率的正弦和餘弦函數：
+\begin{align*}
+    PE_{(pos,2i)} = sin(pos / 10000^{2i/\dmodel}) \\
+    PE_{(pos,2i+1)} = cos(pos / 10000^{2i/\dmodel})
+\end{align*}
+
+where $pos$ is the position and $i$ is the dimension.  That is, each dimension of the positional encoding corresponds to a sinusoid.  The wavelengths form a geometric progression from $2\pi$ to $10000 \cdot 2\pi$.  We chose this function because we hypothesized it would allow the model to easily learn to attend by relative positions, since for any fixed offset $k$, $PE_{pos+k}$ can be represented as a linear function of $PE_{pos}$.
+We also experimented with using learned positional embeddings \citep{JonasFaceNet2017} instead, and found that the two versions produced nearly identical results (see Table~\ref{tab:variations} row (E)).  We chose the sinusoidal version because it may allow the model to extrapolate to sequence lengths longer than the ones encountered during training.
+ 
+\section{為什麼要使用自注意力}%We focus on the general task of mapping one variable-length sequence of symbol representations ${x_1, ..., x_n} \in \mathbb{R}^d$ to another sequence of the same length ${y_1, ..., y_n} \in \mathbb{R}^d$. \marginpar{should we use this notation? alternatively we can just say "d-dimensional vectors"}
+
+在此節中，我們將自注意力層的各個方面與常用於將一個可變長度的符號表示序列 $(x_1, ..., x_n)$ 映射到另一個等長序列 $(z_1, ..., z_n)$ 的遞迴層和卷積層進行比較，其中 $x_i, z_i \in \mathbb{R}^d$，例如典型序列轉換編碼器或解碼器中的隱藏層。為了激勵我們使用自注意力，我們考慮三個期望特性。
+One is the total computational complexity per layer.
+Another is the amount of computation that can be parallelized, as measured by the minimum number of sequential operations required.
+第三個是網路中長程依賴之間的路徑長度。學習長程依賴是許多序列轉換任務中的關鍵挑戰。影響學習此類依賴能力的一個關鍵因素是前向和後向信號在網路中必須穿越的路徑長度。輸入與輸出序列中任意位置組合之間的路徑越短，學習長程依賴就越容易 \citep{hochreiter2001gradient}。因此，我們也比較由不同層類型組成的網路中，任意兩個輸入與輸出位置之間的最大路徑長度。
+%\subsection{Computational Performance and Path Lengths}
+
+\begin{table}[t]
+\caption{
+  Maximum path lengths, per-layer complexity and minimum number of sequential operations for different layer types. $n$ is the sequence length, $d$ is the representation dimension, $k$ is the kernel size of convolutions and $r$ the size of the neighborhood in restricted self-attention.}
+  %Attention models are quite efficient for cross-positional communications when sequence length is smaller than channel depth.
+\label{tab:op_complexities}
+\begin{center}
+\vspace{-1mm}
+%\scalebox{0.75}{
+
+\begin{tabular}{lccc}
+\toprule
+Layer Type & Complexity per Layer & Sequential & Maximum Path Length  \\
+           &             & Operations &   \\
+\hline
+\rule{0pt}{2.0ex}Self-Attention & $O(n^2 \cdot d)$ & $O(1)$ & $O(1)$ \\
+Recurrent & $O(n \cdot d^2)$ & $O(n)$ & $O(n)$ \\
+
+Convolutional & $O(k \cdot n \cdot d^2)$ & $O(1)$ & $O(log_k(n))$ \\
+%\cmidrule
+Self-Attention (restricted)& $O(r \cdot n \cdot d)$ & $O(1)$ & $O(n/r)$ \\
+
+%Convolutional (separable) & $O(k \cdot n \cdot d + n \cdot d^2)$ & $O(1)$ & $O(log_k(n))$ \\
+
+%Position-wise Feed-Forward & $O(n \cdot d^2)$ & $O(1)$ & $\infty$ \\
+
+%Fully Connected & $O(n^2 \cdot d^2)$ & $O(1)$ & $O(1)$ \\
+%Convolutional (separable) & $O(k \cdot n \cdot d + n \cdot d^2)$ & $O(1)$ & $O(log_k(n))$ \\
+
+%Position-wise Feed-Forward & $O(n \cdot d^2)$ & $O(1)$ & $\infty$ \\
+
+%Fully Connected & $O(n^2 \cdot d^2)$ & $O(1)$ & $O(1)$ \\
+\bottomrule
+\end{tabular}
+%}
+\end{center}
+\end{table}
+
+
+%\begin{table}[b]
+%\caption{
+%  Maximum path lengths, per-layer complexity and minimum number of sequential operations for different layer types. $n$ is the sequence length, $d$ is the representation dimensionality, $k$ is the kernel size of convolutions and $r$ the size of the neighborhood in localized self-attention.}
+  %Attention models are quite efficient for cross-positional communications when sequence length is smaller than channel depth.
+%\label{tab:op_complexities}
+%\begin{center}
+%\vspace{-1mm}
+%%\scalebox{0.75}{
+%
+%\begin{tabular}{lccc}
+%\hline
+%Layer Type & Receptive & Complexity per Layer & Sequential  %\\
+%           & Field Size     &            & Operations  \\
+%\hline
+%Self-Attention & $n$ & $O(n^2 \cdot d)$ & $O(1)$ \\
+%Recurrent & $n$ & $O(n \cdot d^2)$ & $O(n)$ \\
+
+%Convolutional & $k$ & $O(k \cdot n \cdot d^2)$ & %$O(log_k(n))$ \\
+%\hline 
+%Self-Attention (localized)& $r$ & $O(r \cdot n \cdot d)$ & %$O(1)$ \\
+
+%Convolutional (separable) & $k$ & $O(k \cdot n \cdot d + n %\cdot d^2)$ & $O(log_k(n))$ \\
+
+%Position-wise Feed-Forward & $1$ & $O(n \cdot d^2)$ & $O(1)$ %\\
+
+%Fully Connected & $n$ & $O(n^2 \cdot d^2)$ & $O(1)$ \\
+
+%\end{tabular}
+%%}
+%\end{center}
+%\end{table}
+
+%The receptive field size of a layer is the number of different input representations that can influence any particular output representation. Recurrent layers and self-attention layers have a full receptive field equal to the sequence length $n$. Convolutional layers have a limited receptive field equal to their kernel width $k$, which is generally chosen to be small in order to limit computational cost.
+
+如表 \ref{tab:op_complexities} 所述，自注意力層以固定數量的順序執行操作連接所有位置，而遞迴層則需要 $O(n)$ 個順序操作。
+在計算複雜度方面，當序列長度 $n$ 小於表示維度 $d$ 時，自注意力層比遞迴層更快，這在機器翻譯中最新模型所使用的句子表示中通常如此，例如詞片 \citep{wu2016google} 和位元組對 \citep{sennrich2015neural} 表示。
+為了改善涉及非常長序列任務的計算效能，可以將自注意力限制為僅考慮輸入序列中以各自輸出位置為中心的大小為 $r$ 的鄰域。這會將最大路徑長度增加到 $O(n/r)$。我們計畫在未來的工作中進一步研究此方法。
+單一卷積層的核寬為$k < n$時，並不能連接所有輸入與輸出位置之間的配對。要做到這一點，需要堆疊$O(n/k)$層卷積層（在連續核的情況下），或在擴張卷積\citep{NalBytenet2017}的情況下需要$O(log_k(n))$層，這會增加網路中任意兩個位置之間最長路徑的長度。
+卷積層通常比遞迴層更昂貴，成本約為$k$倍。然而，可分離卷積\citep{xception2016}能大幅降低複雜度，降至$O(k \cdot n \cdot d + n \cdot d^2)$。即使如此，可分離卷積的複雜度仍等同於自注意力層與逐點前饋層的組合，而這正是我們模型所採用的方法。
+%\subsection{Unfiltered Bottleneck Argument}
+
+%An orthogonal argument can be made for self-attention layers based on when the layer imposes the bottleneck of mapping all of the information used to compute a given output position into a single, fixed-length vector. ...
+
+%There is a second argument for self-attention layers which we call the unfiltered bottleneck argument.   In both recurrent and the convolutional layers, the information that position $i$ receives from the other positions is compressed to a vector of dimension $d$ before it ever can be filtered by the content $x_i$.  More precisely, we can express $y_i = F(i, x_i, G(i, \{x_{j \neq i}\}))$, where $G(i, \{x_{j \neq i}\})$ is a vector of dimension $d$.  Intuitively, we would expect that this would cause a large amount of irrelevant information to crowd out the relevant information.  Self-attention does not suffer from the unfiltered bottleneck problem, since the aggregation happens after filtering, and so, intuitively, we have the chance of transmitting lots of relevant information.
+
+作為額外的好處，自注意力機制可以產生更具可解釋性的模型。我們檢查了模型中的注意力分佈，並在附錄中展示和討論了相關範例。不僅個別的注意力頭清楚地學會執行不同的任務，許多注意力頭似乎也表現出與句子的句法和語義結構相關的行為。
+
+
+\section{訓練}本節描述我們模型的訓練制度。
+%In order to speed up experimentation, our ablations are performed relative to a smaller base model described in detail in Section \ref{sec:results}.
+
+\subsection{訓練資料與批次處理}我們在標準的 WMT 2014 英德資料集上進行訓練，該資料集包含約 450 萬個句子對。句子使用位元組對編碼 \citep{DBLP:journals/corr/BritzGLL17} 進行編碼，該編碼具有約 37000 個詞元的共享來源-目標詞彙表。對於英法翻譯，我們使用了規模更大的 WMT 2014 英法資料集，該資料集包含 3600 萬個句子，並將詞元分割為 32000 個詞片詞彙表 \citep{wu2016google}。句子對根據近似序列長度進行批次處理。每個訓練批次包含一組句子對，其中包含約 25000 個來源詞元和 25000 個目標詞元。
+\subsection{硬體與時程}
+我們在配備8個NVIDIA P100 GPU的單一機器上訓練我們的模型。對於我們使用全文所述超參數的基礎模型，每個訓練步驟約需0.4秒。我們總共訓練基礎模型100,000步，即12小時。對於我們的大型模型（見表\ref{tab:variations}最底行），步驟時間為1.0秒。大型模型訓練了300,000步（3.5天）。
+\subsection{優化器} 我們使用了 Adam 優化器~\citep{kingma2014adam}，其中 $\beta_1=0.9$、$\beta_2=0.98$ 和 $\epsilon=10^{-9}$。我們在訓練過程中根據以下公式調整學習率：
+\begin{equation}
+lrate = \dmodel^{-0.5} \cdot
+  \min({step\_num}^{-0.5},
+    {step\_num} \cdot {warmup\_steps}^{-1.5})
+\end{equation}
+
+這對應於在前$warmup\_steps$個訓練步驟中線性增加學習率，之後則按步數的平方根倒數比例減少。我們使用了$warmup\_steps=4000$。
+\subsection{正則化} \label{sec:reg}
+我們在訓練期間採用三種正則化方式：\paragraph{殘差丟棄} 我們在每個子層的輸出上應用丟棄 \citep{srivastava2014dropout}，然後將其加到子層輸入並進行歸一化。此外，我們在編碼器和解碼器堆疊中，對嵌入和位置編碼的總和應用丟棄。對於基礎模型，我們使用比率 $P_{drop}=0.1$。
+% \paragraph{Attention Dropout} Query to key attentions are structurally similar to hidden-to-hidden weights in a feed-forward network, albeit across positions. The softmax activations yielding attention weights can then be seen as the analogue of hidden layer activations. A natural possibility is to extend dropout \citep{srivastava2014dropout} to attention. We implement attention dropout by dropping out attention weights as,
+% \begin{equation*}
+%   \mathrm{Attention}(Q, K, V) = \mathrm{dropout}(\mathrm{softmax}(\frac{QK^T}{\sqrt{d}}))V
+% \end{equation*}
+% In addition to residual dropout, we found attention dropout to be beneficial for our parsing experiments.  
+
+%\paragraph{Symbol Dropout} In the source and target embedding layers, we replace a random subset of the token ids with a sentinel id.  For the base model, we use a rate of $symbol\_dropout\_rate=0.1$.  Note that this applies only to the auto-regressive use of the target ids - not their use in the cross-entropy loss. 
+
+%\paragraph{Attention Dropout} Query to memory attentions are structurally similar to hidden-to-hidden weights in a feed-forward network, albeit across positions. The softmax activations yielding attention weights can then be seen as the analogue of hidden layer activations. A natural possibility is to extend dropout \citep{srivastava2014dropout} to attentions. We implement attention dropout by dropping out attention weights as,
+%\begin{equation*}
+%   A(Q, K, V) = \mathrm{dropout}(\mathrm{softmax}(\frac{QK^T}{\sqrt{d}}))V
+%\end{equation*}
+%As a result, the query will not be able to access the memory values at the dropped out position. In our experiments, we tried attention dropout rates of 0.2, and 0.3, and found it to work favorably for English-to-German translation.
+%$attention\_dropout\_rate=0.2$.
+
+\paragraph{標籤平滑} 在訓練期間，我們使用了值為 $\epsilon_{ls}=0.1$ \citep{DBLP:journals/corr/SzegedyVISW15} 的標籤平滑。這會損害困惑度，因為模型學會變得更不確定，但提高了準確率和 BLEU 分數。
+ 
+\section{結果} \label{sec:results}\subsection{機器翻譯}\begin{table}[t]
+\begin{center}
+\caption{The Transformer achieves better BLEU scores than previous state-of-the-art models on the English-to-German and English-to-French newstest2014 tests at a fraction of the training cost.  }
+\label{tab:wmt-results}
+\vspace{-2mm}
+%\scalebox{1.0}{
+\begin{tabular}{lccccc}
+\toprule
+\multirow{2}{*}{\vspace{-2mm}Model} & \multicolumn{2}{c}{BLEU} & & \multicolumn{2}{c}{Training Cost (FLOPs)} \\
+\cmidrule{2-3} \cmidrule{5-6} 
+& EN-DE & EN-FR & & EN-DE & EN-FR \\ 
+\hline
+ByteNet \citep{NalBytenet2017} & 23.75 & & & &\\
+Deep-Att + PosUnk \citep{DBLP:journals/corr/ZhouCWLX16} & & 39.2 & & & $1.0\cdot10^{20}$ \\
+GNMT + RL \citep{wu2016google} & 24.6 & 39.92 & & $2.3\cdot10^{19}$  & $1.4\cdot10^{20}$\\
+ConvS2S \citep{JonasFaceNet2017} & 25.16 & 40.46 & & $9.6\cdot10^{18}$ & $1.5\cdot10^{20}$\\
+MoE \citep{shazeer2017outrageously} & 26.03 & 40.56 & & $2.0\cdot10^{19}$ & $1.2\cdot10^{20}$ \\
+\hline
+\rule{0pt}{2.0ex}Deep-Att + PosUnk Ensemble \citep{DBLP:journals/corr/ZhouCWLX16} & & 40.4 & & &
+ $8.0\cdot10^{20}$ \\
+GNMT + RL Ensemble \citep{wu2016google} & 26.30 & 41.16 & & $1.8\cdot10^{20}$  & $1.1\cdot10^{21}$\\
+ConvS2S Ensemble \citep{JonasFaceNet2017} & 26.36 & \textbf{41.29} & & $7.7\cdot10^{19}$ & $1.2\cdot10^{21}$\\
+\specialrule{1pt}{-1pt}{0pt}
+\rule{0pt}{2.2ex}Transformer (base model) & 27.3 & 38.1 & & \multicolumn{2}{c}{\boldmath$3.3\cdot10^{18}$}\\
+Transformer (big) & \textbf{28.4} & \textbf{41.8} & & \multicolumn{2}{c}{$2.3\cdot10^{19}$} \\
+%\hline
+%\specialrule{1pt}{-1pt}{0pt}
+%\rule{0pt}{2.0ex}
+\bottomrule
+\end{tabular}
+%}
+\end{center}
+\end{table}
+
+
+在WMT 2014英德翻譯任務中，大型Transformer模型（表~\ref{tab:wmt-results}中的Transformer（大型））超越了先前最佳報告模型（包括集成模型）超過$2.0$個BLEU分數，創下了$28.4$的新最佳BLEU分數。此模型的配置列於表~\ref{tab:variations}的最後一行。訓練在$8$個P100 GPU上花費了$3.5$天。即使是我們的基本模型也超越了所有先前發表的模型和集成模型，而訓練成本僅為任何競爭模型的一小部分。
+在WMT 2014英法翻譯任務中，我們的大型模型達到了BLEU分數$41.0$，超越了所有先前發表的單一模型，且訓練成本不到先前最佳模型的$1/4$。用於英法翻譯的Transformer（大型）模型使用了丟棄率$P_{drop}=0.1$，而非$0.3$。
+For the base models, we used a single model obtained by averaging the last 5 checkpoints, which were written at 10-minute intervals.  For the big models, we averaged the last 20 checkpoints. We used beam search with a beam size of $4$ and length penalty $\alpha=0.6$ \citep{wu2016google}.  These hyperparameters were chosen after experimentation on the development set.  We set the maximum output length during inference to input length + $50$, but terminate early when possible \citep{wu2016google}.
+Table \ref{tab:wmt-results} 總結了我們的結果，並將我們的翻譯品質與訓練成本與文獻中的其他模型架構進行比較。我們透過將訓練時間、使用的 GPU 數量以及每個 GPU 的持續單精度浮點運算能力估計值相乘，來估算訓練模型所使用的浮點運算次數 \footnote{我們分別對 K80、K40、M40 和 P100 使用了 2.8、3.7、6.0 和 9.5 TFLOPS 的值。}。%where we compare against the leading machine translation results in the literature. Even our smaller model, with number of parameters comparable to ConvS2S, outperforms all existing single models, and achieves results close to the best ensemble model.
+
+\subsection{模型變體}
+\begin{table}[t]
+\caption{Variations on the Transformer architecture. Unlisted values are identical to those of the base model.  All metrics are on the English-to-German translation development set, newstest2013.  Listed perplexities are per-wordpiece, according to our byte-pair encoding, and should not be compared to per-word perplexities.}
+\label{tab:variations}
+\begin{center}
+\vspace{-2mm}
+%\scalebox{1.0}{
+\begin{tabular}{c|ccccccccc|ccc}
+\hline\rule{0pt}{2.0ex}
+ & \multirow{2}{*}{$N$} & \multirow{2}{*}{$\dmodel$} &
+\multirow{2}{*}{$\dff$} & \multirow{2}{*}{$h$} & 
+\multirow{2}{*}{$d_k$} & \multirow{2}{*}{$d_v$} & 
+\multirow{2}{*}{$P_{drop}$} & \multirow{2}{*}{$\epsilon_{ls}$} &
+train & PPL & BLEU & params \\
+ & & & & & & & & & steps & (dev) & (dev) & $\times10^6$ \\
+% & & & & & & & & & & & & \\
+\hline\rule{0pt}{2.0ex}
+base & 6 & 512 & 2048 & 8 & 64 & 64 & 0.1 & 0.1 & 100K & 4.92 & 25.8 & 65 \\
+\hline\rule{0pt}{2.0ex}
+\multirow{4}{*}{(A)}
+& & & & 1 & 512 & 512 & & & & 5.29 & 24.9 &  \\
+& & & & 4 & 128 & 128 & & & & 5.00 & 25.5 &  \\
+& & & & 16 & 32 & 32 & & & & 4.91 & 25.8 &  \\
+& & & & 32 & 16 & 16 & & & & 5.01 & 25.4 &  \\
+\hline\rule{0pt}{2.0ex}
+\multirow{2}{*}{(B)}
+& & & & & 16 & & & & & 5.16 & 25.1 & 58 \\
+& & & & & 32 & & & & & 5.01 & 25.4 & 60 \\
+\hline\rule{0pt}{2.0ex}
+\multirow{7}{*}{(C)}
+& 2 & & & & & & & &            & 6.11 & 23.7 & 36 \\
+& 4 & & & & & & & &            & 5.19 & 25.3 & 50 \\
+& 8 & & & & & & & &            & 4.88 & 25.5 & 80 \\
+& & 256 & & & 32 & 32 & & &    & 5.75 & 24.5 & 28 \\
+& & 1024 & & & 128 & 128 & & & & 4.66 & 26.0 & 168 \\
+& & & 1024 & & & & & &         & 5.12 & 25.4 & 53 \\
+& & & 4096 & & & & & &         & 4.75 & 26.2 & 90 \\
+\hline\rule{0pt}{2.0ex}
+\multirow{4}{*}{(D)}
+& & & & & & & 0.0 & & & 5.77 & 24.6 &  \\
+& & & & & & & 0.2 & & & 4.95 & 25.5 &  \\
+& & & & & & & & 0.0 & & 4.67 & 25.3 &  \\
+& & & & & & & & 0.2 & & 5.47 & 25.7 &  \\
+\hline\rule{0pt}{2.0ex}
+(E) & & \multicolumn{7}{c}{positional embedding instead of sinusoids} & & 4.92 & 25.7 & \\
+\hline\rule{0pt}{2.0ex}
+big & 6 & 1024 & 4096 & 16 & & & 0.3 & & 300K & \textbf{4.33} & \textbf{26.4} & 213 \\
+\hline
+\end{tabular}
+%}
+\end{center}
+\end{table}
+
+
+%Table \ref{tab:ende-results}. Our base model for this task uses 6 attention layers, 512 hidden dim, 2048 filter dim, 8 attention heads with both attention and symbol dropout of 0.2 and 0.1 respectively. Increasing the filter size of our feed forward component to 8192 increases the BLEU score on En $\to$ De by $?$. For both the models, we use beam search decoding of size $?$ and length penalty with an alpha of $?$ \cite? \todo{Update results}
+
+為了評估Transformer不同組成部分的重要性，我們以不同方式變化了基礎模型，並在開發集newstest2013上衡量了英德翻譯性能的變化。我們使用了前一節所述的束搜索，但未進行檢查點平均。我們在表~\ref{tab:variations}中展示了這些結果。
+在表~\ref{tab:variations} 的行 (A) 中，我們改變注意力頭的數量以及注意力鍵和值的維度，同時保持計算量恆定，如第 \ref{sec:multihead} 節所述。雖然單頭注意力比最佳設置差 0.9 BLEU，但頭數過多時質量也會下降。
+在表~\ref{tab:variations} 的行 (B) 中，我們觀察到減少注意力鍵的大小 $d_k$ 會損害模型品質。這表明確定相容性並不容易，且比點積更複雜的相容性函數可能是有益的。我們進一步在行 (C) 和 (D) 中觀察到，如預期般，較大的模型更好，且 dropout 在避免過擬合方面非常有幫助。在行 (E) 中，我們將正弦位置編碼替換為學習的位置嵌入 \citep{JonasFaceNet2017}，並觀察到與基礎模型幾乎相同的結果。
+%To evaluate the importance of different components of the Transformer, we use our base model to ablate on a single hyperparameter at each time and measure the change in performance on English$\to$German translation. Our variations in Table~\ref{tab:variations} show that the number of attention layers and attention heads is the most important architecture hyperparamter However, the we do not see performance gains beyond 6 layers, suggesting that we either don't have enough data to train a large model or we need to turn up regularization. We leave this exploration for future work. Among our regularizers, attention dropout has the most significant impact on performance.
+
+
+%Increasing the width of our feed forward component helps both on log ppl and Accuracy \marginpar{Intuition?}
+%Using dropout to regularize our models helps to prevent overfitting
+
+\subsection{英文成分句法分析}
+\begin{table}[t]
+\begin{center}
+\caption{The Transformer generalizes well to English constituency parsing (Results are on Section 23 of WSJ)}
+\label{tab:parsing-results}
+\vspace{-2mm}
+%\scalebox{1.0}{
+\begin{tabular}{c|c|c}
+\hline
+{\bf Parser}  & {\bf Training} & {\bf WSJ 23 F1} \\ \hline
+Vinyals \& Kaiser el al. (2014) \cite{KVparse15}
+  & WSJ only, discriminative & 88.3 \\
+Petrov et al. (2006) \cite{petrov-EtAl:2006:ACL}
+  & WSJ only, discriminative & 90.4 \\
+Zhu et al. (2013) \cite{zhu-EtAl:2013:ACL}
+  & WSJ only, discriminative & 90.4   \\
+Dyer et al. (2016) \cite{dyer-rnng:16}
+  & WSJ only, discriminative & 91.7   \\
+\specialrule{1pt}{-1pt}{0pt}
+Transformer (4 layers)  &  WSJ only, discriminative & 91.3 \\
+\specialrule{1pt}{-1pt}{0pt}   
+Zhu et al. (2013) \cite{zhu-EtAl:2013:ACL}
+  & semi-supervised & 91.3 \\
+Huang \& Harper (2009) \cite{huang-harper:2009:EMNLP}
+  & semi-supervised & 91.3 \\
+McClosky et al. (2006) \cite{mcclosky-etAl:2006:NAACL}
+  & semi-supervised & 92.1 \\
+Vinyals \& Kaiser el al. (2014) \cite{KVparse15}
+  & semi-supervised & 92.1 \\
+\specialrule{1pt}{-1pt}{0pt}
+Transformer (4 layers)  & semi-supervised & 92.7 \\
+\specialrule{1pt}{-1pt}{0pt}   
+Luong et al. (2015) \cite{multiseq2seq}
+  & multi-task & 93.0   \\
+Dyer et al. (2016) \cite{dyer-rnng:16}
+  & generative & 93.3   \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+為了評估Transformer是否能泛化到其他任務，我們在英文成分句法分析上進行了實驗。此任務具有特定挑戰：輸出受到強結構約束，且長度明顯長於輸入。
+此外，RNN序列到序列模型在小數據情境下未能達到最先進的結果\cite{KVparse15}。
+我們在華爾街日報（WSJ）部分的賓州樹庫 \citep{marcus1993building} 上訓練了一個 4 層的 transformer，使用 $d_{model} = 1024$，約有 4 萬個訓練句子。我們也在半監督設定下進行訓練，使用了來自較大的高置信度語料庫和 BerkleyParser 語料庫，約有 1700 萬個句子 \citep{KVparse15}。我們在僅使用 WSJ 的設定中使用了 16K 個詞彙的詞表，而在半監督設定中使用了 32K 個詞彙的詞表。
+我們僅進行了少數實驗來選擇丟棄率，包括注意力與殘差（第~\ref{sec:reg}節）、學習率以及波束大小，這些實驗在第22節開發集上進行，所有其他參數保持與英語到德語基礎翻譯模型不變。在推論期間，我們將最大輸出長度增加到輸入長度 + $300$。我們對僅使用WSJ和半監督設置均使用了波束大小為$21$和$\alpha=0.3$。
+我們在表~\ref{tab:parsing-results}中的結果顯示，儘管缺乏任務特定的調整，我們的模型表現出乎意料地好，除了遞迴神經網路文法\cite{dyer-rnng:16}之外，其結果優於所有先前報告的模型。
+與RNN序列到序列模型\citep{KVparse15}相比，Transformer即使在僅使用WSJ訓練集的40K句子進行訓練時，也優於BerkeleyParser \cite{petrov-EtAl:2006:ACL}。
+
+\section{結論}在這項工作中，我們提出了Transformer，這是第一個完全基於注意力機制的序列轉換模型，用多頭自注意力取代了編碼器-解碼器架構中最常用的遞迴層。
+For translation tasks, the Transformer can be trained significantly faster than architectures based on recurrent or convolutional layers. On both WMT 2014 English-to-German and WMT 2014 English-to-French translation tasks, we achieve a new state of the art. In the former task our best model outperforms even all previously reported ensembles. %We also provide an indication of the broader applicability of our models through experiments on English constituency parsing.
+我們對基於注意力的模型的未來感到興奮，並計劃將其應用於其他任務。我們計劃將Transformer擴展到涉及文本以外的輸入和輸出模態的問題，並研究局部、受限的注意力機制，以高效處理諸如圖像、音頻和視頻等大型輸入和輸出。
+使生成更少序列化是我們另一個研究目標。
+The code we used to train and evaluate our models is available at \url{https://github.com/tensorflow/tensor2tensor}.
+\paragraph{致謝} 我們感謝 Nal Kalchbrenner 和 Stephan Gouws他們的富有成果的評論、修正與啟發。
+\bibliographystyle{plain}
+%\bibliography{deeplearn}
+\begin{thebibliography}{10}
+
+\bibitem{layernorm2016}
+Jimmy~Lei Ba, Jamie~Ryan Kiros, and Geoffrey~E Hinton.
+\newblock Layer normalization.
+\newblock {\em arXiv preprint arXiv:1607.06450}, 2016.
+
+\bibitem{bahdanau2014neural}
+Dzmitry Bahdanau, Kyunghyun Cho, and Yoshua Bengio.
+\newblock Neural machine translation by jointly learning to align and
+  translate.
+\newblock {\em CoRR}, abs/1409.0473, 2014.
+
+\bibitem{DBLP:journals/corr/BritzGLL17}
+Denny Britz, Anna Goldie, Minh{-}Thang Luong, and Quoc~V. Le.
+\newblock Massive exploration of neural machine translation architectures.
+\newblock {\em CoRR}, abs/1703.03906, 2017.
+
+\bibitem{cheng2016long}
+Jianpeng Cheng, Li~Dong, and Mirella Lapata.
+\newblock Long short-term memory-networks for machine reading.
+\newblock {\em arXiv preprint arXiv:1601.06733}, 2016.
+
+\bibitem{cho2014learning}
+Kyunghyun Cho, Bart van Merrienboer, Caglar Gulcehre, Fethi Bougares, Holger
+  Schwenk, and Yoshua Bengio.
+\newblock Learning phrase representations using rnn encoder-decoder for
+  statistical machine translation.
+\newblock {\em CoRR}, abs/1406.1078, 2014.
+
+\bibitem{xception2016}
+Francois Chollet.
+\newblock Xception: Deep learning with depthwise separable convolutions.
+\newblock {\em arXiv preprint arXiv:1610.02357}, 2016.
+
+\bibitem{gruEval14}
+Junyoung Chung, {\c{C}}aglar G{\"{u}}l{\c{c}}ehre, Kyunghyun Cho, and Yoshua
+  Bengio.
+\newblock Empirical evaluation of gated recurrent neural networks on sequence
+  modeling.
+\newblock {\em CoRR}, abs/1412.3555, 2014.
+
+\bibitem{dyer-rnng:16}
+Chris Dyer, Adhiguna Kuncoro, Miguel Ballesteros, and Noah~A. Smith.
+\newblock Recurrent neural network grammars.
+\newblock In {\em Proc. of NAACL}, 2016.
+
+\bibitem{JonasFaceNet2017}
+Jonas Gehring, Michael Auli, David Grangier, Denis Yarats, and Yann~N. Dauphin.
+\newblock Convolutional sequence to sequence learning.
+\newblock {\em arXiv preprint arXiv:1705.03122v2}, 2017.
+
+\bibitem{graves2013generating}
+Alex Graves.
+\newblock Generating sequences with recurrent neural networks.
+\newblock {\em arXiv preprint arXiv:1308.0850}, 2013.
+
+\bibitem{he2016deep}
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+\newblock Deep residual learning for image recognition.
+\newblock In {\em Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition}, pages 770--778, 2016.
+
+\bibitem{hochreiter2001gradient}
+Sepp Hochreiter, Yoshua Bengio, Paolo Frasconi, and J{\"u}rgen Schmidhuber.
+\newblock Gradient flow in recurrent nets: the difficulty of learning long-term
+  dependencies, 2001.
+
+\bibitem{hochreiter1997}
+Sepp Hochreiter and J{\"u}rgen Schmidhuber.
+\newblock Long short-term memory.
+\newblock {\em Neural computation}, 9(8):1735--1780, 1997.
+
+\bibitem{huang-harper:2009:EMNLP}
+Zhongqiang Huang and Mary Harper.
+\newblock Self-training {PCFG} grammars with latent annotations across
+  languages.
+\newblock In {\em Proceedings of the 2009 Conference on Empirical Methods in
+  Natural Language Processing}, pages 832--841. ACL, August 2009.
+
+\bibitem{jozefowicz2016exploring}
+Rafal Jozefowicz, Oriol Vinyals, Mike Schuster, Noam Shazeer, and Yonghui Wu.
+\newblock Exploring the limits of language modeling.
+\newblock {\em arXiv preprint arXiv:1602.02410}, 2016.
+
+\bibitem{extendedngpu}
+{\L}ukasz Kaiser and Samy Bengio.
+\newblock Can active memory replace attention?
+\newblock In {\em Advances in Neural Information Processing Systems, ({NIPS})},
+  2016.
+
+\bibitem{neural_gpu}
+\L{}ukasz Kaiser and Ilya Sutskever.
+\newblock Neural {GPU}s learn algorithms.
+\newblock In {\em International Conference on Learning Representations
+  ({ICLR})}, 2016.
+
+\bibitem{NalBytenet2017}
+Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van~den Oord, Alex
+  Graves, and Koray Kavukcuoglu.
+\newblock Neural machine translation in linear time.
+\newblock {\em arXiv preprint arXiv:1610.10099v2}, 2017.
+
+\bibitem{structuredAttentionNetworks}
+Yoon Kim, Carl Denton, Luong Hoang, and Alexander~M. Rush.
+\newblock Structured attention networks.
+\newblock In {\em International Conference on Learning Representations}, 2017.
+
+\bibitem{kingma2014adam}
+Diederik Kingma and Jimmy Ba.
+\newblock Adam: A method for stochastic optimization.
+\newblock In {\em ICLR}, 2015.
+
+\bibitem{Kuchaiev2017Factorization}
+Oleksii Kuchaiev and Boris Ginsburg.
+\newblock Factorization tricks for {LSTM} networks.
+\newblock {\em arXiv preprint arXiv:1703.10722}, 2017.
+
+\bibitem{lin2017structured}
+Zhouhan Lin, Minwei Feng, Cicero Nogueira~dos Santos, Mo~Yu, Bing Xiang, Bowen
+  Zhou, and Yoshua Bengio.
+\newblock A structured self-attentive sentence embedding.
+\newblock {\em arXiv preprint arXiv:1703.03130}, 2017.
+
+\bibitem{multiseq2seq}
+Minh-Thang Luong, Quoc~V. Le, Ilya Sutskever, Oriol Vinyals, and Lukasz Kaiser.
+\newblock Multi-task sequence to sequence learning.
+\newblock {\em arXiv preprint arXiv:1511.06114}, 2015.
+
+\bibitem{luong2015effective}
+Minh-Thang Luong, Hieu Pham, and Christopher~D Manning.
+\newblock Effective approaches to attention-based neural machine translation.
+\newblock {\em arXiv preprint arXiv:1508.04025}, 2015.
+
+\bibitem{marcus1993building}
+Mitchell~P Marcus, Mary~Ann Marcinkiewicz, and Beatrice Santorini.
+\newblock Building a large annotated corpus of english: The penn treebank.
+\newblock {\em Computational linguistics}, 19(2):313--330, 1993.
+
+\bibitem{mcclosky-etAl:2006:NAACL}
+David McClosky, Eugene Charniak, and Mark Johnson.
+\newblock Effective self-training for parsing.
+\newblock In {\em Proceedings of the Human Language Technology Conference of
+  the NAACL, Main Conference}, pages 152--159. ACL, June 2006.
+
+\bibitem{decomposableAttnModel}
+Ankur Parikh, Oscar Täckström, Dipanjan Das, and Jakob Uszkoreit.
+\newblock A decomposable attention model.
+\newblock In {\em Empirical Methods in Natural Language Processing}, 2016.
+
+\bibitem{paulus2017deep}
+Romain Paulus, Caiming Xiong, and Richard Socher.
+\newblock A deep reinforced model for abstractive summarization.
+\newblock {\em arXiv preprint arXiv:1705.04304}, 2017.
+
+\bibitem{petrov-EtAl:2006:ACL}
+Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein.
+\newblock Learning accurate, compact, and interpretable tree annotation.
+\newblock In {\em Proceedings of the 21st International Conference on
+  Computational Linguistics and 44th Annual Meeting of the ACL}, pages
+  433--440. ACL, July 2006.
+
+\bibitem{press2016using}
+Ofir Press and Lior Wolf.
+\newblock Using the output embedding to improve language models.
+\newblock {\em arXiv preprint arXiv:1608.05859}, 2016.
+
+\bibitem{sennrich2015neural}
+Rico Sennrich, Barry Haddow, and Alexandra Birch.
+\newblock Neural machine translation of rare words with subword units.
+\newblock {\em arXiv preprint arXiv:1508.07909}, 2015.
+
+\bibitem{shazeer2017outrageously}
+Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le,
+  Geoffrey Hinton, and Jeff Dean.
+\newblock Outrageously large neural networks: The sparsely-gated
+  mixture-of-experts layer.
+\newblock {\em arXiv preprint arXiv:1701.06538}, 2017.
+
+\bibitem{srivastava2014dropout}
+Nitish Srivastava, Geoffrey~E Hinton, Alex Krizhevsky, Ilya Sutskever, and
+  Ruslan Salakhutdinov.
+\newblock Dropout: a simple way to prevent neural networks from overfitting.
+\newblock {\em Journal of Machine Learning Research}, 15(1):1929--1958, 2014.
+
+\bibitem{sukhbaatar2015}
+Sainbayar Sukhbaatar, Arthur Szlam, Jason Weston, and Rob Fergus.
+\newblock End-to-end memory networks.
+\newblock In C.~Cortes, N.~D. Lawrence, D.~D. Lee, M.~Sugiyama, and R.~Garnett,
+  editors, {\em Advances in Neural Information Processing Systems 28}, pages
+  2440--2448. Curran Associates, Inc., 2015.
+
+\bibitem{sutskever14}
+Ilya Sutskever, Oriol Vinyals, and Quoc~VV Le.
+\newblock Sequence to sequence learning with neural networks.
+\newblock In {\em Advances in Neural Information Processing Systems}, pages
+  3104--3112, 2014.
+
+\bibitem{DBLP:journals/corr/SzegedyVISW15}
+Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and
+  Zbigniew Wojna.
+\newblock Rethinking the inception architecture for computer vision.
+\newblock {\em CoRR}, abs/1512.00567, 2015.
+
+\bibitem{KVparse15}
+{Vinyals {\&} Kaiser}, Koo, Petrov, Sutskever, and Hinton.
+\newblock Grammar as a foreign language.
+\newblock In {\em Advances in Neural Information Processing Systems}, 2015.
+
+\bibitem{wu2016google}
+Yonghui Wu, Mike Schuster, Zhifeng Chen, Quoc~V Le, Mohammad Norouzi, Wolfgang
+  Macherey, Maxim Krikun, Yuan Cao, Qin Gao, Klaus Macherey, et~al.
+\newblock Google's neural machine translation system: Bridging the gap between
+  human and machine translation.
+\newblock {\em arXiv preprint arXiv:1609.08144}, 2016.
+
+\bibitem{DBLP:journals/corr/ZhouCWLX16}
+Jie Zhou, Ying Cao, Xuguang Wang, Peng Li, and Wei Xu.
+\newblock Deep recurrent models with fast-forward connections for neural
+  machine translation.
+\newblock {\em CoRR}, abs/1606.04199, 2016.
+
+\bibitem{zhu-EtAl:2013:ACL}
+Muhua Zhu, Yue Zhang, Wenliang Chen, Min Zhang, and Jingbo Zhu.
+\newblock Fast and accurate shift-reduce constituent parsing.
+\newblock In {\em Proceedings of the 51st Annual Meeting of the ACL (Volume 1:
+  Long Papers)}, pages 434--443. ACL, August 2013.
+
+\end{thebibliography}
+%\newpage
+\pagebreak
+\section*{注意力視覺化}\label{sec:viz-att}\begin{figure*}[h]
+{\includegraphics[width=\textwidth, trim=0 0 0 36, clip]{./vis/making_more_difficult5_new.pdf}}
+\caption{An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb `making', completing the phrase `making...more difficult'.  Attentions here shown only for the word `making'. Different colors represent different heads. Best viewed in color.}
+\end{figure*}
+
+\begin{figure*}
+{\includegraphics[width=\textwidth, trim=0 0 0 45, clip]{./vis/anaphora_resolution_new.pdf}}
+{\includegraphics[width=\textwidth, trim=0 0 0 37, clip]{./vis/anaphora_resolution2_new.pdf}}
+\caption{Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word `its' for attention heads 5 and 6. Note that the attentions are very sharp for this word.}
+\end{figure*}
+
+\begin{figure*}
+{\includegraphics[width=\textwidth, trim=0 0 0 36, clip]{./vis/attending_to_head_new.pdf}}
+{\includegraphics[width=\textwidth, trim=0 0 0 36, clip]{./vis/attending_to_head2_new.pdf}}
+\caption{Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly learned to perform different tasks.}
+\end{figure*}
+
+%\appendix
+%\newpage
+%\input{parameter_attention}
+
+%\input{sqrt_d_trick}
+
+\end{document}
