@@ -656,3 +656,45 @@ def test_ocr_job_without_ocr_service_fails_explicitly(tmp_path: Path, upload_pdf
     got = repo.get(job.job_id)
     assert got.status is JobStatus.FAILED
     assert "OCR" in got.error
+
+
+# ── 票 18：批量刪除 ─────────────────────────────
+
+def test_delete_removes_job_and_output_dir(tmp_path: Path, upload_pdf: Path):
+    """刪除後 list 不含該任務、輸出目錄（含產出檔）被移除。"""
+    service, _ = make_service(tmp_path)
+    job = service.create_job(upload_pdf)
+    job.status = JobStatus.COMPLETED  # 終態任務才可刪
+    out_dir = tmp_path / "outputs" / job.job_id
+    assert out_dir.exists()  # create_job 建了任務資料夾
+    (out_dir / "result.pdf").write_bytes(b"out")  # 模擬產出
+
+    service.delete(job.job_id)
+
+    assert service.list_jobs() == []
+    assert not out_dir.exists(), "刪除應移除輸出目錄"
+
+
+def test_delete_running_job_raises(tmp_path: Path, upload_pdf: Path):
+    """執行中（排隊/翻譯中）任務不可刪——UI 才可攔截提示。
+
+    QUEUED 也拒（review 修正：start() 在 QUEUED 就 spawn worker thread，
+    狀態轉換在 StartTranslation.run 內——排隊任務也可能有活 thread 在寫）。
+    """
+    service, _ = make_service(tmp_path)
+    job = service.create_job(upload_pdf)  # 預設 QUEUED
+
+    with pytest.raises(ValueError):
+        service.delete(job.job_id)
+    assert service.list_jobs() == [job], "執行中任務不可被刪除"
+
+    job.status = JobStatus.TRANSLATING
+    with pytest.raises(ValueError):
+        service.delete(job.job_id)
+    assert service.list_jobs() == [job]
+
+
+def test_delete_unknown_job_raises(tmp_path: Path):
+    service, _ = make_service(tmp_path)
+    with pytest.raises(KeyError):
+        service.delete("no-such-job")

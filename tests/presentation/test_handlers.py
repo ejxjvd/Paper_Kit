@@ -4,6 +4,8 @@
 （靜態檔伺服基準 /files/<job_id>/<檔名>）。
 """
 
+import zipfile
+
 import pytest
 
 from paper_kit.domain.job_result import JobResult
@@ -120,3 +122,72 @@ def test_plain_job_card_not_ocr():
     job = TranslationJob(job_id="p1", source_path="/outputs/p1/a.pdf")
     view = build_job_card(job, files_base="/files")
     assert view.ocr is False
+
+
+# ── 票 18：批量下載 zip 打包（純函式，路由只是薄殼） ──────────────────
+
+def _completed_with_files(tmp_path, job_id: str, file_name: str) -> TranslationJob:
+    job = completed_job(job_id)
+    out = tmp_path / job_id
+    out.mkdir()
+    mono = out / f"{file_name}.zh.mono.pdf"
+    dual = out / f"{file_name}.zh.dual.pdf"
+    mono.write_bytes(b"mono-content")
+    dual.write_bytes(b"dual-content")
+    job.result = JobResult(
+        mono_path=str(mono), dual_path=str(dual), input_tokens=0, output_tokens=0
+    )
+    return job
+
+
+def test_batch_zip_mono_contains_each_selected_job_mono(tmp_path):
+    """批量下載僅譯文：zip 內含勾選任務的 mono 檔（arcname 帶 job_id 前綴防同名衝突）。"""
+    from paper_kit.presentation.handlers import build_batch_zip
+
+    jobs = [
+        _completed_with_files(tmp_path, "a1b2c3d4", "paper"),
+        _completed_with_files(tmp_path, "e5f6g7h8", "paper"),  # 同名不同任務
+    ]
+    dest = tmp_path / "zip"
+    dest.mkdir()
+
+    zip_path = build_batch_zip(jobs, "mono", dest)
+
+    assert zip_path is not None and zip_path.exists()
+    with zipfile.ZipFile(zip_path) as zf:
+        names = sorted(zf.namelist())
+        assert names == ["a1b2c3d4-paper.zh.mono.pdf", "e5f6g7h8-paper.zh.mono.pdf"]
+        assert zf.read("a1b2c3d4-paper.zh.mono.pdf") == b"mono-content"
+
+
+def test_batch_zip_dual_contains_each_selected_job_dual(tmp_path):
+    """批量下載雙語（dual 不可退化——兩鍵獨立、都要有）。"""
+    from paper_kit.presentation.handlers import build_batch_zip
+
+    jobs = [_completed_with_files(tmp_path, "a1b2c3d4", "paper")]
+    dest = tmp_path / "zip"
+    dest.mkdir()
+
+    zip_path = build_batch_zip(jobs, "dual", dest)
+
+    assert zip_path is not None
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.namelist() == ["a1b2c3d4-paper.zh.dual.pdf"]
+        assert zf.read("a1b2c3d4-paper.zh.dual.pdf") == b"dual-content"
+
+
+def test_batch_zip_skips_jobs_without_result(tmp_path):
+    """未完成/無產出任務跳過；全無可打包 → 回傳 None（UI 提示）。"""
+    from paper_kit.presentation.handlers import build_batch_zip
+
+    done = _completed_with_files(tmp_path, "a1b2c3d4", "paper")
+    queued = TranslationJob(job_id="q0q0q0q0", source_path="/x.pdf", status=JobStatus.QUEUED)
+    dest = tmp_path / "zip"
+    dest.mkdir()
+
+    zip_path = build_batch_zip([done, queued], "mono", dest)
+    assert zip_path is not None
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.namelist() == ["a1b2c3d4-paper.zh.mono.pdf"]
+
+    assert build_batch_zip([queued], "mono", dest) is None

@@ -3,6 +3,8 @@
 app.py 只做 widget 綁定；這裡的對映可單元測試（application 即 UI 的接縫）。
 """
 
+import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -97,3 +99,33 @@ def build_job_card(
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
         pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）
     )
+
+
+def build_batch_zip(
+    jobs: list[TranslationJob],
+    kind: str,
+    dest_dir: str | Path,
+) -> Path | None:
+    """票 18：勾選任務的 mono／dual 檔打包成 zip（純函式；路由只是薄殼）。
+
+    kind="mono"（僅譯文）或 "dual"（雙語）——兩鍵獨立、都要有（使用者明定
+    「雙語不可退化」）。只收完成且有產出的任務；arcname 帶 job_id[:8] 前綴
+    防同名 PDF 衝突。全無可打包 → None（UI 提示）。
+    """
+    files = []
+    for job in jobs:
+        if job.result is None:
+            continue
+        path = Path(job.result.mono_path if kind == "mono" else job.result.dual_path)
+        if not path.exists():
+            continue
+        files.append((path, f"{job.job_id[:8]}-{path.name}"))
+    if not files:
+        return None
+    # uuid 前綴：暫存檔名唯一（review 修正——固定名會讓並行下載互相覆寫，
+    # 且第一個 response 的送完即刪會刪掉第二個的暫存）
+    zip_path = Path(dest_dir) / f"paper-kit-{kind}-{uuid.uuid4().hex[:8]}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path, arcname in files:
+            zf.write(path, arcname)
+    return zip_path

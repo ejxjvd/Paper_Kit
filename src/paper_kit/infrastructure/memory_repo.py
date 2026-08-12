@@ -23,3 +23,6 @@ class InMemoryJobRepository:
 
     def list(self) -> list[TranslationJob]:
         return list(self._jobs.values())
+
+    def remove(self, job_id: str) -> None:  # 票 18：批量刪除
+        self._jobs.pop(job_id, None)

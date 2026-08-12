@@ -10,7 +10,9 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from fastapi.responses import FileResponse, JSONResponse  # 票 18：批量下載 zip 路由
 from nicegui import app, ui
+from starlette.background import BackgroundTask  # 票 18：zip 送完即刪
 
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
@@ -34,7 +36,7 @@ from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
-from paper_kit.presentation.handlers import JobCardView, build_job_card
+from paper_kit.presentation.handlers import JobCardView, build_batch_zip, build_job_card
 from paper_kit.presentation.theme import apply_theme
 
 APP_DIR = Path.home() / ".paper_kit"
@@ -179,6 +181,44 @@ def _retry_job(service: JobService, settings: SettingsService, job_id: str) -> N
         ui.notify(to_user_message(exc), type="negative")  # 票 10：機密＋視覺引擎（統一入口）
     except KeyError:
         ui.notify("找不到此任務", type="negative")  # KeyError 語境由呼叫端決定（票 09 review）
+
+
+def _delete_jobs(service: JobService, ids: list[str]) -> tuple[int, int]:
+    """票 18：批量刪除——回傳 (成功數, 執行中被拒數)；執行中跳過不中斷其餘。
+
+    module-level（standards review：巢狀 handler 的迴圈邏輯不可測；UI 層只
+    notify＋重繪）。執行中任務維持原狀，由呼叫端提示。
+    """
+    deleted = blocked = 0
+    for jid in ids:
+        try:
+            service.delete(jid)
+            deleted += 1
+        except ValueError:
+            blocked += 1
+    return deleted, blocked
+
+
+def _batch_retry(service: JobService, settings: SettingsService, ids: list[str]) -> int:
+    """票 18：批量重試——只處理可重試任務（can_retry），回傳重試數。"""
+    retried = 0
+    for jid in ids:
+        job = next((j for j in service.list_jobs() if j.job_id == jid), None)
+        if job is not None and job.can_retry:
+            _retry_job(service, settings, jid)
+            retried += 1
+    return retried
+
+
+def _batch_cancel(service: JobService, ids: list[str]) -> int:
+    """票 18：批量取消——只處理可取消任務（can_cancel），回傳取消數。"""
+    cancelled = 0
+    for jid in ids:
+        job = next((j for j in service.list_jobs() if j.job_id == jid), None)
+        if job is not None and job.can_cancel:
+            _cancel_job(service, jid)
+            cancelled += 1
+    return cancelled
 
 
 def _cancel_job(service: JobService, job_id: str) -> None:
@@ -743,14 +783,12 @@ def _history_page(
                 {"name": "status", "label": "狀態", "field": "status_label", "align": "left"},
                 {"name": "actions", "label": "操作", "field": "actions", "align": "left"},
             ]
-            rows = [
-                _history_row(
-                    build_job_card(job, files_base=FILES_BASE, engine_labels=engine_map)
-                )
-                for job in jobs
-            ]
+            rows = _history_rows(service, engine_map)
+            # 票 18：selection='multiple' → Quasar 內建勾選欄＋全選；
+            # row_key 指向 job_id（row dict 由 _history_row 提供）
             table = ui.table(
-                columns=columns, rows=rows, pagination={"rowsPerPage": 10}
+                columns=columns, rows=rows, row_key="job_id",
+                selection="multiple", pagination={"rowsPerPage": 10},
             ).classes("w-full")
             # 狀態彩色標籤（q-badge；scope=props、需自包 <q-td>）
             table.add_slot(
@@ -759,8 +797,8 @@ def _history_page(
             )
             # 操作列：mono／dual 下載（dual 不可退化——使用者明定）；
             # download attr＝附件下載（與主頁 ui.download 行為一致）。
-            # 重試／取消：Vue slot 無法綁 Python handler，兩軸 review 裁決移除，
-            # 併入票 18 批量操作列（死按鈕比沒有更糟）。
+            # 重試／取消：Vue slot 無法綁 Python handler，票 17 review 裁決——
+            # 單列重試／取消併入票 18 批量操作列（批量按鈕在表格下方，Python handler 可直綁）。
             table.add_slot(
                 "body-cell-actions",
                 """<q-td><div class="flex gap-1">
@@ -771,10 +809,122 @@ def _history_page(
                 </div></q-td>""",
             )
 
+            # ── 票 18：批量操作工具列（勾選後操作；刪除二次確認） ──
+
+            def _refresh_rows() -> None:
+                """批量操作後重繪表格（選取清空）。"""
+                table.rows = _history_rows(service, engine_map)
+                table.selected = []
+
+            def _require_selection() -> list[str] | None:
+                """勾選檢查——空選回 None（已提示），否則回 job_id 清單。"""
+                ids = [r["job_id"] for r in table.selected]
+                if not ids:
+                    ui.notify("請先勾選要操作的任務", type="warning")
+                    return None
+                return ids
+
+            def _batch_delete() -> None:
+                ids = _require_selection()
+                if ids is None:
+                    return
+                # 二次確認 dialog（破壞性操作——規格書 Further Notes 必做）
+                with ui.dialog() as dialog, ui.card().classes("p-4 gap-2"):
+                    ui.label(f"確定刪除 {len(ids)} 筆任務（含輸出檔）？").classes("text-lg")
+                    ui.label("此操作無法復原").classes("text-xs text-grey-6")
+                    with ui.row().classes("gap-2"):
+                        ui.button("取消", on_click=dialog.close).props("outline")
+                        ui.button(
+                            "確認刪除",
+                            on_click=lambda: (_confirm_delete(ids), dialog.close()),
+                        ).props("color=negative")
+                dialog.open()
+
+            def _confirm_delete(ids: list[str]) -> None:
+                deleted, blocked = _delete_jobs(service, ids)
+                if blocked:
+                    ui.notify(f"{blocked} 筆執行中的任務無法刪除", type="warning")
+                if deleted:
+                    ui.notify(f"已刪除 {deleted} 筆任務", type="positive")
+                _refresh_rows()
+
+            def _batch_action(action: str) -> None:
+                """票 18：批量重試／取消（票 17 review 裁決的承諾——Python handler 直綁）。"""
+                ids = _require_selection()
+                if ids is None:
+                    return
+                if action == "retry":
+                    n = _batch_retry(service, settings, ids)
+                    if n == 0:
+                        ui.notify("沒有可重試的任務（僅失敗／已取消可重試）", type="warning")
+                else:
+                    n = _batch_cancel(service, ids)
+                    if n == 0:
+                        ui.notify("沒有執行中的任務可取消", type="warning")
+                _refresh_rows()
+
+            def _batch_download(kind: str) -> None:
+                ids = _require_selection()
+                if ids is None:
+                    return
+                # 跳到 /download-batch 路由：伺服端 zip 打包、附件回傳（送完刪暫存）
+                ui.navigate.to(f"/download-batch?ids={','.join(ids)}&kind={kind}")
+
+            with ui.row().classes("items-center gap-2"):
+                ui.button("批量刪除", on_click=_batch_delete).props("outline color=negative")
+                ui.button(
+                    "↻ 批量重試", on_click=lambda: _batch_action("retry")
+                ).props("outline")
+                ui.button(
+                    "✕ 批量取消", on_click=lambda: _batch_action("cancel")
+                ).props("outline")
+                ui.button(
+                    "批量下載 mono", on_click=lambda: _batch_download("mono")
+                ).props("outline")
+                ui.button(
+                    "批量下載 dual", on_click=lambda: _batch_download("dual")
+                ).props("outline color=teal")
+                ui.label("勾選表格列後操作；執行中任務無法刪除").classes("text-xs text-grey-6")
+
+
+def register_batch_download_route(service: JobService) -> None:
+    """票 18：/download-batch?ids=...&kind=mono|dual —— 批量 zip 附件下載。
+
+    伺服端打包（build_batch_zip 純函式）、zip 暫存 tempdir、送完即刪
+    （FastAPI BackgroundTask）。無可打包任務 → 404（UI 已先提示）；
+    kind 只接受 mono/dual（review 修正：未知 kind 不靜默走 dual）。
+    """
+    @app.get("/download-batch")
+    def download_batch(ids: str = "", kind: str = "mono"):
+        if kind not in ("mono", "dual"):
+            return JSONResponse({"error": "bad kind"}, status_code=400)
+        job_ids = [i for i in ids.split(",") if i]
+        jobs = [j for j in service.list_jobs() if j.job_id in job_ids]
+        zip_path = build_batch_zip(jobs, kind, tempfile.gettempdir())
+        if zip_path is None:
+            return JSONResponse({"error": "no files"}, status_code=404)
+        return FileResponse(
+            zip_path,
+            filename=zip_path.name,
+            media_type="application/zip",
+            background=BackgroundTask(zip_path.unlink, missing_ok=True),
+        )
+
+
+def _history_rows(service: JobService, engine_map: dict[str, str]) -> list[dict]:
+    """票 18：歷史表格列資料一處建構（initial 與 _refresh_rows 共用，免重複）。"""
+    return [
+        _history_row(
+            build_job_card(job, files_base=FILES_BASE, engine_labels=engine_map)
+        )
+        for job in service.list_jobs()
+    ]
+
 
 def _history_row(view: JobCardView) -> dict:
     """歷史表格列資料——只挑 JSON-safe 欄位（票 17；enum 不序列化）。"""
     return {
+        "job_id": view.job_id,  # 票 18：row_key（勾選回傳可對映回任務）
         "file_name": view.file_name,
         "created_label": view.created_label,
         "pages_label": view.pages_label,
@@ -806,6 +956,7 @@ def main() -> None:
     _index_page(service, settings, cost, glossaries)
     _settings_page(settings, cost, glossaries)
     _history_page(service, settings)
+    register_batch_download_route(service)  # 票 18：批量下載 zip 路由
     _debug_page(LOG_PATH, settings)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)
 

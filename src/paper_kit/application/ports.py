@@ -43,6 +43,10 @@ class JobRepository(Protocol):
         """票 08：全部任務（建立順序）——重啟後 JobService 由此載入歷史。"""
         ...
 
+    def remove(self, job_id: str) -> None:
+        """票 18：永久移除任務。不存在時靜默（delete 的 key 檢查在 Service 層）。"""
+        ...
+
 
 class OcrPort(Protocol):
     """票 12：OCR 埠——掃描 PDF 每頁 → 文字（本機執行，不上雲端視覺 API）。

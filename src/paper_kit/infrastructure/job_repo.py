@@ -84,6 +84,11 @@ class SqliteJobRepository:
             ).fetchall()
         return [self._deserialize(row) for row in rows]
 
+    def remove(self, job_id: str) -> None:  # 票 18：批量刪除
+        with self._lock:
+            self._conn.execute("DELETE FROM jobs WHERE job_id=?", (job_id,))
+            self._conn.commit()
+
     def _serialize(self, job: TranslationJob) -> tuple:
         return (
             job.job_id,

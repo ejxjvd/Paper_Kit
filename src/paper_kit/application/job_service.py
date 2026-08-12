@@ -151,6 +151,32 @@ class JobService:
             engine.cancel()
         logger.info("任務已取消", extra={"job_id": job_id})
 
+    def delete(self, job_id: str) -> None:
+        """票 18：永久刪除任務——執行中拒絕、移除 repo 記錄與輸出目錄。
+
+        執行中＝ live thread 存在 或 狀態為排隊/翻譯中（review 修正：start() 在
+        QUEUED 就 spawn thread、轉換發生在 StartTranslation.run 內——QUEUED 任務
+        也可能有活 thread 在寫）。判定與移除包在 _lock 內、對齊 cancel 的
+        check-then-act race 修正（worker 的狀態轉換持同一把鎖）。未知任務 KeyError。
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        with self._lock:
+            if (
+                job_id in self._threads
+                or job.status in (JobStatus.QUEUED, JobStatus.TRANSLATING)
+            ):
+                raise ValueError("執行中的任務不可刪除")
+            self._jobs.remove(job_id)
+            self._order.remove(job_id)
+        self._threads.pop(job_id, None)
+        self._engines.pop(job_id, None)
+        out_dir = self._outputs / job_id
+        if out_dir.exists():
+            shutil.rmtree(out_dir, ignore_errors=True)
+        logger.info("任務已刪除", extra={"job_id": job_id})
+
     def wait(self, job_id: str, timeout: float = 10.0) -> None:
         """等待背景執行結束（測試／無頭執行用）。"""
         thread = self._threads.get(job_id)
