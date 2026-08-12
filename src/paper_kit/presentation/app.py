@@ -284,7 +284,9 @@ def _settings_page(
     @ui.page("/settings")
     def settings_page():
         ui.page_title("Paper_Kit 設定")
-        _enter_theme(settings)  # 票 11：設定頁與 debug 頁同一主題
+        # 票 16：統一頁框——側欄（設定 active）；主題切換收進 frame
+        nav = [(l, p, _nav_active(p, "/settings")) for l, p in SIDEBAR_NAV]
+        app_frame("⚙️ Paper_Kit 設定", settings, nav)
         # 2026-08-12 bug 修復：bind_value_to(locals(), ...) 寫入的是 locals() dict，
         # Python 名稱解析（LOAD_GLOBAL）看不見它——函數內讀取的變數必須顯式
         # 初始化，否則首次渲染（pricing_for(engine_id)）與「不修改直接儲存」
@@ -297,8 +299,7 @@ def _settings_page(
         in_price = str(base.input_per_1k)
         out_price = str(base.output_per_1k)
         per_page = str(base.per_page_tokens)
-        with ui.header().classes("items-center"):
-            ui.label("⚙️ Paper_Kit 設定").classes("text-2xl font-bold")
+        # 票 16 spec review：殘留的原 header 已刪（app_frame 統一頂部標題）
         with ui.column().classes("w-full max-w-2xl mx-auto p-6 gap-4"):
             with ui.card().classes("w-full"):
                 ui.label("翻譯引擎").classes("font-bold")
@@ -622,15 +623,63 @@ def _toggle_theme(settings: SettingsService, dark: ui.dark_mode, btn) -> None:
     btn.set_text("☀️" if on else "🌙")
 
 
+# 票 16：統一頁框側欄導覽（label, path；active 由 _nav_active 依當前頁判定）
+SIDEBAR_NAV = [
+    ("翻譯", "/"),
+    ("歷史", "/history"),
+    ("設定", "/settings"),
+]
+
+
+def _nav_active(path: str, current: str) -> bool:
+    """票 16：側欄項是否高亮（當前頁對應項）。"""
+    return path == current
+
+
+def app_frame(
+    title: str,
+    settings: SettingsService,
+    nav: list[tuple[str, str, bool]],
+    badge: str | None = None,
+) -> None:
+    """票 16：統一頁框——頂部標題＋左側導覽欄＋主題切換＋Debug 頁尾。
+
+    各頁面建構時呼叫一次（header/drawer 為 client 層級元素，不包內容）；
+    取代各頁自造的 ui.header——三頁從「三個獨立網站」變成一個工具。
+    Debug 降級為側欄底部小字連結（票 16 決策）。
+    """
+    dark = _enter_theme(settings)
+    with ui.header().classes("items-center justify-between"):
+        with ui.row().classes("items-center gap-3"):
+            ui.label(title).classes("text-2xl font-bold")
+            if badge:
+                ui.badge(badge).props("outline")
+        with ui.row().classes("items-center gap-3"):
+            theme_btn = ui.button(
+                "🌙" if settings.dark_mode() else "☀️",
+                on_click=lambda: _toggle_theme(settings, dark, theme_btn),
+            ).props("flat round")
+    with ui.left_drawer(value=True).classes("bg-grey-3"):
+        with ui.column().classes("w-full gap-1 p-2"):
+            for label, path, active in nav:
+                # ui.link（真實 <a href>）：點擊即導航，不需手寫 on_click
+                link = ui.link(label, path).classes("w-full px-3 py-2 rounded")
+                if active:
+                    link.classes("bg-primary text-white")
+                else:
+                    link.classes("hover:bg-grey-4")
+        ui.link("Debug", "/debug").classes("text-xs text-grey-6 px-4")
+
+
 def _debug_page(log_path: Path, settings: SettingsService) -> None:
     """票 09：debug 檢視頁——最近任務的 log 可查（job_id 過濾）。"""
 
     @ui.page("/debug")
     def debug_page():
         ui.page_title("Paper_Kit Debug")
-        _enter_theme(settings)  # 票 11：設定頁與 debug 頁同一主題
-        with ui.header().classes("items-center"):
-            ui.label("🔍 Paper_Kit Debug Log").classes("text-2xl font-bold")
+        # 票 16：統一頁框——側欄導覽；Debug 頁也進框架
+        nav = [(l, p, _nav_active(p, "/debug")) for l, p in SIDEBAR_NAV]
+        app_frame("🔍 Paper_Kit Debug Log", settings, nav)
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
             ui.label(f"log 檔：{log_path}").classes("text-xs text-grey-6")
             job_filter = ui.input("過濾任務 id（空白 = 全部）").classes("w-full")
@@ -685,19 +734,11 @@ def _index_page(
     @ui.page("/")
     def index():
         ui.page_title("Paper_Kit")
-        dark = _enter_theme(settings)  # 票 11：注入主題 CSS＋依偏好套深色（三頁共用入口）
-        with ui.header().classes("items-center justify-between"):
-            with ui.row().classes("items-center"):
-                ui.label("📄 Paper_Kit 論文翻譯器").classes("text-2xl font-bold")
-                ui.badge("自建 UI · 免除線上工具綁架").props("outline")
-            with ui.row().classes("items-center gap-3"):
-                # 票 11：主題切換按鈕——即時生效、不重載（偏好存 settings，圖示同步更新）
-                theme_btn = ui.button(
-                    "🌙" if settings.dark_mode() else "☀️",
-                    on_click=lambda: _toggle_theme(settings, dark, theme_btn),
-                ).props("flat round")
-                ui.link("設定", "/settings").classes("text-white")
-                ui.link("Debug", "/debug").classes("text-white text-grey-4")
+        # 票 16：統一頁框——側欄（翻譯 active）＋頂部標題；主題切換收進 frame
+        nav = [(l, p, _nav_active(p, "/")) for l, p in SIDEBAR_NAV]
+        app_frame(
+            "📄 Paper_Kit 論文翻譯器", settings, nav, badge="自建 UI · 免除線上工具綁架"
+        )
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
             # 票 10：上傳即提示「檔案將送雲端」＋機密確認（R18／隱私紅線）
