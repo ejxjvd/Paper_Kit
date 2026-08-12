@@ -80,3 +80,10 @@ def test_illegal_transition_message_mentions_both_states():
     job = make_job(JobStatus.COMPLETED)
     with pytest.raises(InvalidTransition, match=r"COMPLETED.*QUEUED"):
         job.transition(JobStatus.QUEUED)
+
+
+# ── 票 10：機密標記 ──────────────────────────────────────
+
+
+def test_sensitive_defaults_false():
+    assert TranslationJob(job_id="j").sensitive is False

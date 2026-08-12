@@ -95,3 +95,54 @@ def test_list_empty_db(tmp_path: Path):
 
 def test_get_unknown_returns_none(tmp_path: Path):
     assert make_repo(tmp_path).get("nope") is None
+
+
+# ── 票 10：機密標記隨任務持久化 ──────────────────────────
+
+
+def test_sensitive_flag_survives_roundtrip_and_restart(tmp_path: Path):
+    """票 10：機密標記隨任務記錄（SQLite 欄位），重啟也在。"""
+    job = sample_job()
+    job.sensitive = True
+
+    db = tmp_path / "app.db"
+    repo1 = SqliteJobRepository(db)
+    repo1.add(job)
+    assert repo1.get("abc123").sensitive is True
+
+    repo2 = SqliteJobRepository(db)  # 重啟
+    assert repo2.get("abc123").sensitive is True
+
+
+def test_sensitive_defaults_false_in_db(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
+    assert repo.get("plain").sensitive is False
+
+
+def test_old_schema_migrates_missing_column(tmp_path: Path):
+    """票 10 standards review（硬問題）：舊 DB（無 sensitive 欄位）開啟後要能寫入
+    ——_COLUMNS 驅動的遷移（PRAGMA table_info → ALTER TABLE）。"""
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE jobs (job_id TEXT PRIMARY KEY, created_at TEXT, status TEXT, "
+        "source_path TEXT, target_lang TEXT, pages TEXT, output_dir TEXT, "
+        "glossary_files TEXT, auto_extract TEXT, engine_id TEXT, "
+        "estimated_cost TEXT, result TEXT, error TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO jobs (job_id, created_at, status, source_path) VALUES (?, ?, ?, ?)",
+        ("legacy1", "1755000000.0", "QUEUED", "/out/legacy1/a.pdf"),
+    )
+    conn.commit()
+    conn.close()
+
+    repo = SqliteJobRepository(db)  # 開啟舊 DB → 自動 ALTER TABLE 補欄位
+    job = TranslationJob(job_id="new1", source_path="/out/new1/a.pdf", sensitive=True)
+    repo.add(job)  # 寫入路徑不再崩（INSERT 含 sensitive 欄位）
+
+    assert repo.get("legacy1").sensitive is False  # 舊列讀取安全
+    assert repo.get("new1").sensitive is True

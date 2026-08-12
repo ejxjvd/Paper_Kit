@@ -94,3 +94,17 @@ def test_usage_label_passes_through_to_view():
     """票 06：成本標籤由 app.py 用 CostService 算好後傳入（handlers 保持純函式）。"""
     view = build_job_card(completed_job(), usage_label="成本：估 ¥0.169 → 實際 ¥0.032")
     assert view.usage_label == "成本：估 ¥0.169 → 實際 ¥0.032"
+
+
+# ── 票 10：機密標記顯示 ──────────────────────────────────
+
+
+def test_sensitive_job_carries_flag_to_card():
+    job = TranslationJob(job_id="s1", source_path="/outputs/s1/a.pdf", sensitive=True)
+    view = build_job_card(job)
+    assert view.sensitive is True
+
+
+def test_plain_job_card_not_sensitive():
+    view = build_job_card(TranslationJob(job_id="p1", source_path="/outputs/p1/a.pdf"))
+    assert view.sensitive is False

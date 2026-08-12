@@ -37,11 +37,13 @@ class JobService:
         target_lang: str = "zh-TW",
         pages: str | None = None,
         output_dir: str = "",
+        sensitive: bool = False,
     ) -> TranslationJob:
         """把上傳檔複製進任務資料夾，建立 queued 任務。
 
         pages：頁面範圍（票 07，None=全部）；output_dir：完成後產出複製到的目錄
-        （票 07，空白=留在預設 outputs/<job_id>/）。
+        （票 07，空白=留在預設 outputs/<job_id>/）；sensitive：機密文件
+        （票 10——只准純文字引擎，start 時強制檢查）。
         """
         job_id = uuid.uuid4().hex
         src = Path(upload_path)
@@ -55,6 +57,7 @@ class JobService:
             target_lang=target_lang,
             pages=pages,
             output_dir=output_dir,
+            sensitive=sensitive,
         )
         self._jobs.add(job)
         self._order.append(job_id)
@@ -65,13 +68,35 @@ class JobService:
         """任務列表（建立順序，UI 輪詢用）。"""
         return [self._jobs.get(job_id) for job_id in self._order if self._jobs.get(job_id)]
 
+    @staticmethod
+    def _assert_sensitive_allowed(job: TranslationJob, engine_allows_sensitive: bool | None) -> None:
+        """票 10 紅線（fail-closed）：機密任務只放行「明確聲明相容」的引擎。
+
+        None（未聲明）也拒絕——紅線不依賴呼叫端記得傳 flag（spec review 修正）；
+        application 層不查 ENGINE_SPECS（保持不依賴 infrastructure 引擎註冊表，
+        相容性由有 registry 的呼叫端聲明）。
+        """
+        if job.sensitive and engine_allows_sensitive is not True:
+            raise ValueError("機密文件只可使用純文字引擎（DeepSeek）；已阻止使用視覺引擎")
+
     def start(
-        self, job_id: str, engine: TranslationEnginePort, engine_id: str | None = None
+        self,
+        job_id: str,
+        engine: TranslationEnginePort,
+        engine_id: str | None = None,
+        *,
+        engine_allows_sensitive: bool | None = None,
     ) -> None:
-        """背景 thread 執行翻譯；立即回傳。engine_id 記在任務上（票 06 計價）。"""
+        """背景 thread 執行翻譯；立即回傳。engine_id 記在任務上（票 06 計價）。
+
+        engine_allows_sensitive（票 10 紅線）：呼叫端（有 ENGINE_SPECS 的 UI 層）
+        聲明引擎的機密相容性——機密任務只放行 True（fail-closed：None/False 都拒絕，
+        任務維持 queued、引擎不被呼叫）。
+        """
         job = self._jobs.get(job_id)
         if job is None:
             raise KeyError(job_id)
+        self._assert_sensitive_allowed(job, engine_allows_sensitive)
         job.engine_id = engine_id
         self._engines[job_id] = engine
         thread = threading.Thread(target=self._run, args=(job, engine), daemon=True)
@@ -79,19 +104,33 @@ class JobService:
         self._threads[job_id] = thread
         logger.info("任務開始翻譯", extra={"job_id": job_id, "engine": engine_id})
 
-    def retry(self, job_id: str, engine: TranslationEnginePort, engine_id: str | None = None) -> None:
+    def retry(
+        self,
+        job_id: str,
+        engine: TranslationEnginePort,
+        engine_id: str | None = None,
+        *,
+        engine_allows_sensitive: bool | None = None,
+    ) -> None:
         """票 08：失敗任務重試——回 queued 再跑一次（不需重新上傳）。
 
         engine_id 省略（spec review 防護）→ 沿用任務原本的引擎 id，
         不把 job.engine_id 覆寫成 None。
+        engine_allows_sensitive（票 10）：機密任務重試同 start 的紅線檢查——
+        standards review 修正：檢查先於狀態變更（被拒的重試不該把任務弄成 queued）。
         """
         job = self._jobs.get(job_id)
         if job is None:
             raise KeyError(job_id)
+        self._assert_sensitive_allowed(job, engine_allows_sensitive)
         job.transition(JobStatus.QUEUED)  # 非 FAILED → InvalidTransition
         job.error = None
         self._jobs.save(job)
-        self.start(job_id, engine, engine_id=engine_id if engine_id is not None else job.engine_id)
+        self.start(
+            job_id, engine,
+            engine_id=engine_id if engine_id is not None else job.engine_id,
+            engine_allows_sensitive=engine_allows_sensitive,
+        )
 
     def cancel(self, job_id: str) -> None:
         """票 08：進行中任務取消——狀態→cancelled、通知引擎中止、產出拋棄。"""

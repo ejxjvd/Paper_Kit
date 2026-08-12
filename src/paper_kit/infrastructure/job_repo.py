@@ -18,7 +18,7 @@ from paper_kit.domain.translation_job import JobStatus, TranslationJob
 _COLUMNS = (
     "job_id", "created_at", "status", "source_path", "target_lang", "pages",
     "output_dir", "glossary_files", "auto_extract", "engine_id",
-    "estimated_cost", "result", "error",
+    "estimated_cost", "sensitive", "result", "error",  # 票 10：機密標記隨任務記錄
 )
 _PLACEHOLDERS = ", ".join("?" for _ in _COLUMNS)
 
@@ -40,7 +40,18 @@ class SqliteJobRepository:
             + ", ".join(f"{c} TEXT" for c in _COLUMNS)
             + ", PRIMARY KEY (job_id))"
         )
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """票 10 review（standards 硬問題）：舊 DB 缺新欄位時 CREATE IF NOT EXISTS
+        不會補——_COLUMNS 是 schema 單一真相，逐欄比對缺的 ALTER TABLE 補上
+        （讀路徑 .get() 能忍、寫路徑 INSERT 會崩，review 修）。"""
+        with self._lock:
+            existing = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+            for column in _COLUMNS:
+                if column not in existing:
+                    self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
 
     def add(self, job: TranslationJob) -> None:
         with self._lock:
@@ -53,7 +64,7 @@ class SqliteJobRepository:
     def get(self, job_id: str) -> TranslationJob | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+                f"SELECT {', '.join(_COLUMNS)} FROM jobs WHERE job_id=?", (job_id,)
             ).fetchone()
         return self._deserialize(row) if row else None
 
@@ -69,7 +80,7 @@ class SqliteJobRepository:
     def list(self) -> list[TranslationJob]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at, rowid"
+                f"SELECT {', '.join(_COLUMNS)} FROM jobs ORDER BY created_at, rowid"
             ).fetchall()
         return [self._deserialize(row) for row in rows]
 
@@ -86,6 +97,7 @@ class SqliteJobRepository:
             int(job.auto_extract),
             job.engine_id,
             str(job.estimated_cost) if job.estimated_cost is not None else None,
+            int(job.sensitive),
             json.dumps(asdict(job.result)) if job.result else None,
             job.error,
         )
@@ -107,6 +119,8 @@ class SqliteJobRepository:
             auto_extract=bool(data["auto_extract"]),
             engine_id=data["engine_id"],
             estimated_cost=Decimal(data["estimated_cost"]) if data["estimated_cost"] else None,
+            # int()：TEXT 欄位存 "0"/"1" 字串，bool("0") 是 True（陷阱）
+            sensitive=bool(int(data.get("sensitive") or 0)),  # .get：舊 DB 無此欄位 → 預設非機密
             result=result,
             error=data["error"],
         )

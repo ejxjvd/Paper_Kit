@@ -57,6 +57,7 @@ def _start_job(
     glossaries: GlossaryService,
     e,
     pages_text: str = "",
+    sensitive: bool = False,
 ) -> None:
     # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於寫暫存檔）
     try:
@@ -71,29 +72,40 @@ def _start_job(
     except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
         ui.notify(to_user_message(exc), type="negative")
         return
-    job = service.create_job(
-        staging,
-        target_lang=settings.target_lang(),
-        pages=pages,
-        output_dir=settings.output_dir(),
-    )
-    # 票 05：挑選的術語表組合＋自動提取開關隨任務記錄（之後改設定不影響舊任務）
-    names = settings.selected_glossary_names(glossaries.list_glossaries())  # 預設全選
-    job.glossary_files = glossaries.paths_for(names)
-    job.auto_extract = settings.auto_extract()
     try:
         engine = settings.resolve_engine()
     except EngineError as exc:
         ui.notify(to_user_message(exc), type="negative")
         return
     engine_id = settings.engine_id()
+    # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
+    # .get()：未知引擎保守視為視覺（機密 fail-closed）
+    spec = ENGINE_SPECS.get(engine_id)
+    if sensitive and (spec is None or not spec.sensitive_ok):
+        ui.notify("機密文件只可使用 DeepSeek 純文字引擎（先到設定切換引擎）", type="negative")
+        return
+    job = service.create_job(
+        staging,
+        target_lang=settings.target_lang(),
+        pages=pages,
+        output_dir=settings.output_dir(),
+        sensitive=sensitive,
+    )
+    # 票 05：挑選的術語表組合＋自動提取開關隨任務記錄（之後改設定不影響舊任務）
+    names = settings.selected_glossary_names(glossaries.list_glossaries())  # 預設全選
+    job.glossary_files = glossaries.paths_for(names)
+    job.auto_extract = settings.auto_extract()
     # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
     est = cost.estimate_for_pdf(engine_id, staging, pages=pages)
     if est is not None:
         job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
     _notify_estimate(cost, engine_id, est)
     ui.notify(f"任務已建立：{e.name}", type="positive")
-    service.start(job.job_id, engine, engine_id=engine_id)
+    # 票 10：engine_allows_sensitive 由 UI 層查 ENGINE_SPECS 傳入（service 兜底防衛）
+    service.start(
+        job.job_id, engine, engine_id=engine_id,
+        engine_allows_sensitive=spec.sensitive_ok if spec else False,
+    )
 
 
 def _notify_estimate(
@@ -125,10 +137,19 @@ def _retry_job(service: JobService, settings: SettingsService, job_id: str) -> N
         ui.notify(to_user_message(exc), type="negative")
         return
     try:
-        service.retry(job_id, engine, engine_id=settings.engine_id())
+        engine_id = settings.engine_id()
+        # 票 10：機密任務重試也用目前的引擎判定（視覺引擎 → ValueError 拒絕）。
+        # .get()：未知引擎保守視為視覺（機密 fail-closed）
+        spec = ENGINE_SPECS.get(engine_id)
+        service.retry(
+            job_id, engine, engine_id=engine_id,
+            engine_allows_sensitive=spec.sensitive_ok if spec else False,
+        )
         ui.notify("已重新排隊", type="positive")
     except InvalidTransition as exc:
         ui.notify(to_user_message(exc), type="negative")
+    except ValueError as exc:
+        ui.notify(to_user_message(exc), type="negative")  # 票 10：機密＋視覺引擎（統一入口）
     except KeyError:
         ui.notify("找不到此任務", type="negative")  # KeyError 語境由呼叫端決定（票 09 review）
 
@@ -148,7 +169,10 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
     with ui.card().classes("w-full"):
         with ui.row().classes("items-center justify-between w-full"):
             with ui.column().classes("gap-0"):
-                ui.label(view.file_name).classes("text-lg font-semibold")
+                with ui.row().classes("items-center gap-2"):
+                    ui.label(view.file_name).classes("text-lg font-semibold")
+                    if view.sensitive:  # 票 10：機密標記顯示
+                        ui.badge("🔒 機密").props("outline color=orange")
                 # 票 08：歷史卡片顯示建立時間＋引擎
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
@@ -589,6 +613,12 @@ def main() -> None:
                 ui.link("Debug", "/debug").classes("text-white text-grey-4")
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
+            # 票 10：上傳即提示「檔案將送雲端」＋機密確認（R18／隱私紅線）
+            ui.label(
+                "⚠️ 上傳即代表同意：檔案內容將送雲端 API 翻譯。"
+                "機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理"
+            ).classes("text-xs text-amber-7")
+            sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
             memo: dict[str, str | None] = {}
             cards = ui.column().classes("w-full gap-4")
             # 票 07：頁面範圍（空白=全部；1-2／3-5／1-2,4-6 區間格式）
@@ -599,7 +629,8 @@ def main() -> None:
                 label="拖放 PDF 或點選選擇",
                 auto_upload=True,
                 on_upload=lambda e: _start_job(
-                    service, settings, cost, glossaries, e, pages_input.value
+                    service, settings, cost, glossaries, e,
+                    pages_text=pages_input.value, sensitive=sensitive_input.value,
                 ),
             ).classes("w-full")
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))

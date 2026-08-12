@@ -469,3 +469,97 @@ def test_unexpected_exception_in_worker_marks_failed(tmp_path: Path, upload_pdf:
     assert "boom" in done.error
     assert "Traceback" not in done.error  # 不吐原始 traceback
     assert done.can_retry is True  # 之後可重試
+
+
+# ── 票 10：機密模式紅線 ──────────────────────────────────
+
+
+def test_create_job_carries_sensitive_flag(tmp_path: Path, upload_pdf: Path):
+    """票 10：機密標記隨任務記錄——create_job 收 sensitive 並存進 repo。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, sensitive=True)
+    assert job.sensitive is True
+    assert repo.get(job.job_id).sensitive is True
+
+
+def test_sensitive_job_rejects_vision_engine_before_start(tmp_path: Path, upload_pdf: Path):
+    """票 10 紅線：機密任務＋視覺引擎（sensitive_ok=False）→ 拒絕啟動，
+    任務維持 QUEUED、引擎不被呼叫。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, sensitive=True)
+
+    calls: list[str] = []
+
+    class VisionEngine:
+        def translate(self, job):
+            calls.append("translate")
+            raise AssertionError("視覺引擎不得執行機密任務")
+
+        def cancel(self):
+            calls.append("cancel")
+
+    with pytest.raises(ValueError, match="機密"):
+        service.start(
+            job.job_id, VisionEngine(), engine_id="siliconflow", engine_allows_sensitive=False
+        )
+    assert repo.get(job.job_id).status is JobStatus.QUEUED, "拒絕後任務維持 queued"
+    assert calls == [], "引擎不得被呼叫"
+
+
+def test_sensitive_job_allows_text_engine(tmp_path: Path, upload_pdf: Path):
+    """票 10：機密任務＋純文字引擎（sensitive_ok=True，DeepSeek）→ 正常翻譯。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, sensitive=True)
+    service.start(
+        job.job_id,
+        FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="deepseek",
+        engine_allows_sensitive=True,
+    )
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).status is JobStatus.COMPLETED
+
+
+def test_non_sensitive_job_unaffected_by_engine_flag(tmp_path: Path, upload_pdf: Path):
+    """票 10：一般任務不受引擎旗標限制（siliconflow 照常）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(
+        job.job_id,
+        FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="siliconflow",
+        engine_allows_sensitive=False,
+    )
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).status is JobStatus.COMPLETED
+
+
+def test_sensitive_job_rejects_unstated_engine_capability(tmp_path: Path, upload_pdf: Path):
+    """票 10 spec review（fail-closed）：未聲明引擎相容性（None）也拒絕機密任務——
+    紅線不依賴呼叫端記得傳 flag。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, sensitive=True)
+
+    with pytest.raises(ValueError, match="機密"):
+        service.start(job.job_id, FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")))
+    assert repo.get(job.job_id).status is JobStatus.QUEUED
+    assert service._threads.get(job.job_id) is None, "拒絕後不得開 worker thread"
+
+
+def test_sensitive_job_retry_rejected_keeps_failed_state(tmp_path: Path, upload_pdf: Path):
+    """票 10 standards review：被拒的重試不得把任務弄成 queued（檢查先於狀態變更）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, sensitive=True)
+    service.start(
+        job.job_id,
+        FakeEngine(error="先失敗"),
+        engine_id="deepseek",
+        engine_allows_sensitive=True,
+    )
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).status is JobStatus.FAILED
+
+    with pytest.raises(ValueError, match="機密"):
+        service.retry(job.job_id, FakeEngine(), engine_id="siliconflow", engine_allows_sensitive=False)
+    assert repo.get(job.job_id).status is JobStatus.FAILED, "被拒的重試維持 FAILED"
+    assert repo.get(job.job_id).error is not None
