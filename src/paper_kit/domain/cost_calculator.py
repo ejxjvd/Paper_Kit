@@ -28,10 +28,19 @@ class CostEstimate:
 
 
 class CostCalculator:
-    def estimate(self, pages: int, pricing: PricingConfig) -> CostEstimate:
+    # 術語表倍率：BabelDOC 官方統計關術語 4,703 tokens/頁 vs 開術語 7,382/頁
+    # → 7,382/4,703 ≈ 1.57（術語注入增加 input tokens；research 實測值）
+    GLOSSARY_TOKEN_MULTIPLIER = Decimal("1.57")
+
+    def estimate(
+        self, pages: int, pricing: PricingConfig, glossary: bool = False
+    ) -> CostEstimate:
         if pages < 0:
             raise ValueError(f"頁數不可為負: {pages}")
-        total = pages * pricing.per_page_tokens
+        per_page = pricing.per_page_tokens
+        if glossary:
+            per_page = int(Decimal(per_page) * self.GLOSSARY_TOKEN_MULTIPLIER)
+        total = pages * per_page
         input_tokens = int(Decimal(total) * pricing.input_ratio)
         output_tokens = total - input_tokens
         return CostEstimate(

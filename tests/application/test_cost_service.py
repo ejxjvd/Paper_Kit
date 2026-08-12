@@ -150,15 +150,92 @@ def test_estimate_for_pdf_scales_with_pages_range(tmp_path):
 
 
 def test_usage_label_shows_estimate_vs_actual(tmp_path):
-    """完成任務的成本標籤：估算 vs 實際＋用量（用上傳時存的估算——非幽靈重算）。"""
+    """完成任務的成本標籤：估算 vs 實際＋用量（用上傳時存的估算——非幽靈重算）。
+
+    新格式（2026-08-13 成本顯示改版）：美元 4 位＋台幣 2 位（成本比較報告風格），
+    in/out 附 tokens 單位。手算（匯率 32）：0.169×32=5.408→NT$5.41；
+    0.032006×32=1.024192→NT$1.02；差 0.136994→US$0.1370。"""
     svc = make_service(tmp_path)
     svc.set_pricing("deepseek", "0.002", "0.008", 5000)
     job = TranslationJob(job_id="j1", source_path="/in/a.pdf", engine_id="deepseek")
     job.estimated_cost = Decimal("0.169")  # _start_job 在上傳時存的
     job.result = JobResult(mono_path="/o/a.pdf", input_tokens=7127, output_tokens=2219)
     label = svc.usage_label(job)
-    assert "估 $0.169" in label and "實際" in label
-    assert "7,127 in / 2,219 out" in label
+    assert "估 US$0.1690（≈NT$5.41）" in label
+    assert "實際 US$0.0320（實際 NT$1.02）" in label
+    assert "差 US$0.1370" in label
+    assert "7,127 in tokens / 2,219 out tokens" in label
+
+
+def test_usage_label_fallback_reestimate_new_format(tmp_path):
+    """無 stored 估算（舊任務）→ 回退即時重估也要新格式（估…≈NT$…→ 實際…）。"""
+    svc = make_service(tmp_path)
+    svc.set_pricing("deepseek", "0.002", "0.008", 5000)
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    pdf = tmp_path / "one.pdf"
+    with open(pdf, "wb") as f:
+        writer.write(f)
+    job = TranslationJob(job_id="j1", source_path=str(pdf), engine_id="deepseek")
+    job.result = JobResult(mono_path="/o/a.pdf", input_tokens=7127, output_tokens=2219)
+    label = svc.usage_label(job)
+    assert "估 US$" in label and "≈NT$" in label and "實際 US$" in label
+
+
+def test_twd_rate_defaults_to_32(tmp_path):
+    """匯率 default 32（成本比較報告 2026-08-12 實測值）；可改（單價是設定不是寫死）。"""
+    svc = make_service(tmp_path)
+    assert svc.usd_twd_rate() == Decimal("32")
+    svc.set_usd_twd_rate("31.5")
+    assert svc.usd_twd_rate() == Decimal("31.5")
+
+
+def test_twd_conversion(tmp_path):
+    """USD → TWD 換算：0.042 × 32 = 1.344。"""
+    svc = make_service(tmp_path)
+    assert svc.twd(Decimal("0.042")) == Decimal("1.344")
+
+
+def test_usd_twd_label_report_style(tmp_path):
+    """成本比較報告風格：美元 4 位＋台幣 2 位並列（US$0.0105 ≈ NT$0.34）。"""
+    svc = make_service(tmp_path)
+    assert svc.usd_twd_label(Decimal("0.0105")) == "US$0.0105 ≈ NT$0.34"
+
+
+def test_estimated_label_includes_tokens_and_twd(tmp_path):
+    """未完成任務（票 08「翻之前先估價」）新格式：估算 tokens＋美元＋台幣。"""
+    svc = make_service(tmp_path)
+    job = TranslationJob(job_id="j1", source_path="/in/a.pdf", engine_id="deepseek")
+    job.estimated_cost = Decimal("0.169")
+    job.estimated_tokens = 50_000
+    label = svc.estimated_label(job)
+    assert "估算 ≈ 50,000 tokens ≈ US$0.1690（≈NT$5.41）" in label
+
+
+def test_estimated_label_without_tokens_falls_back(tmp_path):
+    """舊任務只有 cost 無 tokens → 顯示估算美元＋台幣（無 tokens 數字不造假）。"""
+    svc = make_service(tmp_path)
+    job = TranslationJob(job_id="j1", source_path="/in/a.pdf", engine_id="deepseek")
+    job.estimated_cost = Decimal("0.169")
+    label = svc.estimated_label(job)
+    assert "估算 US$0.1690（≈NT$5.41）" in label
+
+
+def test_estimated_label_never_estimated_is_none(tmp_path):
+    """從未估算過（如 PDF 解析失敗）→ None（卡片不顯示，不誤導成「免費引擎」）。"""
+    svc = make_service(tmp_path)
+    job = TranslationJob(job_id="j1", source_path="/in/bad.pdf", engine_id="deepseek")
+    assert svc.estimated_label(job) is None
+
+
+def test_estimate_for_pdf_with_glossary_scales_tokens(tmp_path):
+    """術語表開啟 → 每頁 token 基準 ×1.57（挑選術語表後預估要更新）。"""
+    svc = make_service(tmp_path)
+    est = svc.estimate_for_pdf("deepseek", tmp_path / "missing.pdf", pages="1-2", glossary=True)
+    assert est is not None
+    assert est.total_tokens == 15_700  # 2 × 5000 × 1.57
 
 
 def test_usage_label_recomputes_when_no_stored_estimate(tmp_path):
@@ -192,6 +269,18 @@ def test_usage_label_without_engine_only_shows_usage(tmp_path):
     job = TranslationJob(job_id="j1", source_path="/in/a.pdf")
     job.result = JobResult(mono_path="/o/a.pdf", input_tokens=7127, output_tokens=2219)
     assert svc.usage_label(job).startswith("實際用量")
+
+
+def test_usage_label_unreestimateable_shows_actual_with_twd(tmp_path):
+    """來源已刪無法重估（也無 stored 估算）→ 實際美元＋台幣並列（2026-08-13 改版）。"""
+    svc = make_service(tmp_path)
+    svc.set_pricing("deepseek", "0.002", "0.008", 5000)
+    job = TranslationJob(job_id="j1", source_path="/in/gone.pdf", engine_id="deepseek")
+    job.result = JobResult(mono_path="/o/a.pdf", input_tokens=7127, output_tokens=2219)
+    label = svc.usage_label(job)
+    # in 7127×0.002 + out 2219×0.008 = 0.032006 → US$0.0320 ≈ NT$1.02
+    assert "實際成本 US$0.0320（≈NT$1.02）" in label
+    assert "in tokens" in label and "out tokens" in label
 
 
 def test_usage_label_without_result_is_none(tmp_path):

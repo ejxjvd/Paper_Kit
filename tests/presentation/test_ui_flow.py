@@ -152,17 +152,23 @@ def test_card_engine_label_uses_spec_label_with_fallback():
 
 
 def test_unfinished_job_card_shows_estimated_cost():
-    """spec review：未完成任務也要有成本欄——顯示上傳時存的估算（「翻之前先估價」）。"""
+    """spec review：未完成任務也要有成本欄——app 層算好的預估標籤傳入顯示。
+
+    2026-08-13 改版：handlers 不再內部組字（純函式不碰 CostService），
+    新格式（tokens＋美元/台幣）由 app._refresh 以 cost.estimated_label(job) 算好傳入。
+    """
     from decimal import Decimal
 
     job = TranslationJob(
         job_id="j1", source_path="/in/a.pdf", status=JobStatus.FAILED,
         estimated_cost=Decimal("0.004609"),
     )
-    view = build_job_card(job)
+    view = build_job_card(
+        job, estimated_label="估算 US$0.0046（≈NT$0.15）"
+    )
     assert view.usage_label is None
-    assert view.estimated_label == "估算 $0.004609"
-    # 完成任務有 usage_label 時優先顯示實際成本標籤
+    assert view.estimated_label == "估算 US$0.0046（≈NT$0.15）"
+    # 完成任務有 usage_label 時優先顯示實際成本標籤（未完成才傳 estimated_label）
     done = TranslationJob(
         job_id="j2", source_path="/in/b.pdf", status=JobStatus.COMPLETED,
         estimated_cost=Decimal("0.004609"),

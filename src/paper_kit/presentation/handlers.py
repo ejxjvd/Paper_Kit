@@ -57,6 +57,7 @@ def build_job_card(
     files_base: str = "/files",
     usage_label: str | None = None,
     engine_labels: dict[str, str] | None = None,
+    estimated_label: str | None = None,  # 2026-08-13：app 層算好傳入（handlers 純函式不碰 CostService）
 ) -> JobCardView:
     """任務 → 卡片 viewmodel（純函式）。
 
@@ -80,10 +81,6 @@ def build_job_card(
             _result_url(files_base, job.job_id, job.result.dual_path),
             mono_url,
         )
-    # spec review：未完成任務也要有成本欄——上傳時存的估算（「翻之前先估價」）
-    estimated_label = None
-    if usage_label is None and job.estimated_cost is not None:
-        estimated_label = f"估算 ${job.estimated_cost}"
     return JobCardView(
         job_id=job.job_id,
         file_name=Path(job.source_path).name if job.source_path else "",

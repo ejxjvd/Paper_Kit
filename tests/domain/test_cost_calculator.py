@@ -86,3 +86,18 @@ def test_cost_for_tokens_zero_usage_costs_nothing():
 def test_estimate_reports_input_output_split():
     est = CALC.estimate(1, DEFAULT)
     assert est.input_tokens + est.output_tokens == est.total_tokens
+
+
+def test_estimate_with_glossary_multiplies_per_page_tokens():
+    """術語表開啟 → 每頁 token 基準提高（research 實測：關術語 4,703 → 開術語 7,382/頁
+    = 倍率 1.57）。手算：2 頁 × 5000 × 1.57 = 15,700；
+    in 12089×0.27/K = 3.26403、out 3611×1.10/K = 3.97210 → 7.23613。"""
+    est = CALC.estimate(2, DEFAULT, glossary=True)
+    assert est.total_tokens == 15_700
+    assert est.cost == Decimal("7.23613")
+
+
+def test_estimate_glossary_off_matches_plain():
+    """glossary=False（或預設）＝原行為，零回歸。"""
+    assert CALC.estimate(2, DEFAULT).total_tokens == CALC.estimate(2, DEFAULT, glossary=False).total_tokens
+    assert CALC.estimate(2, DEFAULT).total_tokens == 10_000

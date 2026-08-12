@@ -164,9 +164,13 @@ async def _start_job(
     job.glossary_files = glossaries.paths_for(names)
     job.auto_extract = settings.auto_extract()
     # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
-    est = cost.estimate_for_pdf(engine_id, staging, pages=pages)
+    # 2026-08-13：挑選術語表 → 預估 tokens 依 ×1.57 倍率更新（research 實測值）
+    est = cost.estimate_for_pdf(
+        engine_id, staging, pages=pages, glossary=bool(job.glossary_files)
+    )
     if est is not None:
         job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
+        job.estimated_tokens = est.total_tokens  # 2026-08-13：UI 預估顯示用（隨任務持久化）
     _notify_estimate(cost, engine_id, est)
     ui.notify(f"任務已建立：{e.file.name}", type="positive")
     # 票 10：engine_allows_sensitive 由 UI 層查 ENGINE_SPECS 傳入（service 兜底防衛）
@@ -179,20 +183,24 @@ async def _start_job(
 def _notify_estimate(
     cost: CostService, engine_id: str, est: CostEstimate | None
 ) -> None:
-    """票 06：上傳時顯示成本估算（頁數、引擎、單價明細）。不可估就靜默跳過。"""
+    """票 06：上傳時顯示成本估算（頁數、引擎、單價明細）。不可估就靜默跳過。
+
+    2026-08-13 改版：顯示預估 tokens 數＋美元/台幣並列（成本比較報告風格）；
+    est.pages 保留原頁數（術語表倍率後不可用 total//per_page 倒推）。"""
     if est is None:
         return
     cfg = cost.pricing_for(engine_id)
-    pages = est.total_tokens // cfg.per_page_tokens if cfg.per_page_tokens else 0
-    if pages <= 0:
+    if est.pages <= 0:
         return
     if cfg.input_per_1k == 0 and cfg.output_per_1k == 0:
-        ui.notify(f"已估算：{pages} 頁 · {engine_id} 免費引擎無費用", type="info")
+        ui.notify(
+            f"已估算：{est.pages} 頁 · {engine_id} ≈ {est.total_tokens:,} tokens · 免費引擎無費用",
+            type="info",
+        )
     else:
         ui.notify(
-            f"已估算：{pages} 頁 · {engine_id}："
-            f"in {est.input_tokens:,}×${cfg.input_per_1k}/1K + "
-            f"out {est.output_tokens:,}×${cfg.output_per_1k}/1K ≈ ${est.cost}",
+            f"已估算：{est.pages} 頁 · {engine_id} ≈ {est.total_tokens:,} tokens"
+            f" ≈ {cost.usd_twd_label(est.cost)}",
             type="info",
         )
 
@@ -380,12 +388,19 @@ def _refresh(
         # memo：完成任務只算一次成本標籤（1s 輪詢下避免每輪重讀 PDF 頁數）
         if job.status is JobStatus.COMPLETED and job.job_id not in memo:
             memo[job.job_id] = cost.usage_label(job)
+        # 2026-08-13：未完成任務預估標籤每輪即算——純欄位讀取無 IO（估 tokens＋美元/台幣）
+        estimated_label = (
+            cost.estimated_label(job) if job.status is not JobStatus.COMPLETED else None
+        )
         # 2026-08-12 使用者實測 bug：卡片必須進 cards 容器——之前落在頁面 root slot，
         # 每秒輪詢 clear() 清不到、卡片＋錯誤行無限疊加。
         with cards:
             _render_card(
                 build_job_card(
-                    job, usage_label=memo.get(job.job_id), engine_labels=engine_labels
+                    job,
+                    usage_label=memo.get(job.job_id),
+                    estimated_label=estimated_label,
+                    engine_labels=engine_labels,
                 ),
                 service,
                 settings,
@@ -461,6 +476,7 @@ def _settings_page(
         in_price = str(base.input_per_1k)
         out_price = str(base.output_per_1k)
         per_page = str(base.per_page_tokens)
+        rate = str(cost.usd_twd_rate())  # 2026-08-13：匯率顯示用（default 32，可改）
         # 票 16 spec review：殘留的原 header 已刪（app_frame 統一頂部標題）
         with ui.column().classes("w-full max-w-2xl mx-auto p-6 gap-4"):
             with ui.card().classes("w-full"):
@@ -533,9 +549,13 @@ def _settings_page(
                     "每頁 token 基準",
                     value=per_page,
                 ).classes("w-full").bind_value_to(locals(), "per_page")
+                ui.input(
+                    "匯率 USD→TWD（成本顯示換算用；default 32）",
+                    value=rate,
+                ).classes("w-full").bind_value_to(locals(), "rate")
                 ui.button(
                     "儲存單價（目前選定的引擎）",
-                    on_click=lambda: _save_pricing(cost, engine_id, in_price, out_price, per_page),
+                    on_click=lambda: _save_pricing(cost, engine_id, in_price, out_price, per_page, rate),
                 ).props("outline")
             with ui.card().classes("w-full"):
                 ui.label("術語表庫").classes("font-bold")
@@ -780,12 +800,16 @@ def _add_entry(
     _render_entries(glossaries, entries_box, name)
 
 
-def _save_pricing(cost: CostService, engine_id: str, in_price: str, out_price: str, per_page: str) -> None:
+def _save_pricing(
+    cost: CostService, engine_id: str, in_price: str, out_price: str, per_page: str, rate: str
+) -> None:
+    """2026-08-13：單價卡含匯率（USD→TWD 顯示換算）——一起儲存，匯率也是設定不是寫死。"""
     try:
         cost.set_pricing(engine_id, in_price, out_price, int(per_page))
-        ui.notify(f"單價已儲存（{engine_id}）", type="positive")
+        cost.set_usd_twd_rate(rate)  # 匯率單獨存（跨引擎共用）
+        ui.notify(f"單價＋匯率已儲存（{engine_id}）", type="positive")
     except (ValueError, TypeError):
-        ui.notify("單價格式錯誤（需為數字）", type="negative")  # 表單驗證，固定訊息
+        ui.notify("單價/匯率格式錯誤（需為數字）", type="negative")  # 表單驗證，固定訊息
 
 
 def _enter_theme(settings: SettingsService) -> ui.dark_mode:

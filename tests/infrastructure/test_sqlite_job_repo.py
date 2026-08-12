@@ -166,3 +166,56 @@ def test_ocr_defaults_false_in_db(tmp_path: Path):
     repo = make_repo(tmp_path)
     repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
     assert repo.get("plain").ocr is False
+
+
+# ── 2026-08-13 成本顯示改版：estimated_tokens 隨任務持久化 ──
+
+
+def test_estimated_tokens_survives_roundtrip_and_restart(tmp_path: Path):
+    """上傳時估算的總 tokens 隨任務記錄（UI 預估顯示用），重啟也在。"""
+    job = sample_job()
+    job.estimated_tokens = 50_000
+
+    db = tmp_path / "app.db"
+    repo1 = SqliteJobRepository(db)
+    repo1.add(job)
+    assert repo1.get("abc123").estimated_tokens == 50_000
+
+    repo2 = SqliteJobRepository(db)  # 重啟
+    assert repo2.get("abc123").estimated_tokens == 50_000
+
+
+def test_estimated_tokens_none_stays_none(tmp_path: Path):
+    """舊任務無 tokens 估算 → 讀回 None（不造假 token 數字）。"""
+    repo = make_repo(tmp_path)
+    repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
+    assert repo.get("plain").estimated_tokens is None
+
+
+def test_old_schema_migrates_estimated_tokens_column(tmp_path: Path):
+    """舊 DB（無 estimated_tokens 欄位，如 2026-08-13 改版前的 DB）開啟後要能寫入
+    ——_COLUMNS 驅動的遷移（PRAGMA table_info → ALTER TABLE）自動補欄。"""
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE jobs (job_id TEXT PRIMARY KEY, created_at TEXT, status TEXT, "
+        "source_path TEXT, target_lang TEXT, pages TEXT, output_dir TEXT, "
+        "glossary_files TEXT, auto_extract TEXT, engine_id TEXT, "
+        "estimated_cost TEXT, result TEXT, error TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO jobs (job_id, created_at, status, source_path) VALUES (?, ?, ?, ?)",
+        ("legacy1", "1755000000.0", "QUEUED", "/out/legacy1/a.pdf"),
+    )
+    conn.commit()
+    conn.close()
+
+    repo = SqliteJobRepository(db)  # 開啟舊 DB → 自動 ALTER TABLE 補欄位
+    new_job = TranslationJob(job_id="new1", source_path="/out/new1/a.pdf")
+    new_job.estimated_tokens = 15_700
+    repo.add(new_job)  # 寫入路徑不再崩（INSERT 含 estimated_tokens 欄位）
+
+    assert repo.get("legacy1").estimated_tokens is None  # 舊列讀取安全
+    assert repo.get("new1").estimated_tokens == 15_700

@@ -20,6 +20,7 @@ _COLUMNS = (
     "output_dir", "glossary_files", "auto_extract", "engine_id",
     "estimated_cost", "sensitive", "ocr", "result", "error",
     "progress",  # #72：翻譯進度（0.0–1.0；None＝無確定進度）
+    "estimated_tokens",  # 2026-08-13：上傳時估算的總 tokens（UI 預估顯示用）
 )
 _PLACEHOLDERS = ", ".join("?" for _ in _COLUMNS)
 
@@ -108,6 +109,7 @@ class SqliteJobRepository:
             json.dumps(asdict(job.result)) if job.result else None,
             job.error,
             str(job.progress) if job.progress is not None else None,
+            str(job.estimated_tokens) if job.estimated_tokens is not None else None,
         )
 
     def _deserialize(self, row) -> TranslationJob:
@@ -127,6 +129,8 @@ class SqliteJobRepository:
             auto_extract=bool(data["auto_extract"]),
             engine_id=data["engine_id"],
             estimated_cost=Decimal(data["estimated_cost"]) if data["estimated_cost"] else None,
+            # .get：舊 DB 無 estimated_tokens 欄位（auto-migrate 補欄）→ 預設 None（舊任務不造假 token）
+            estimated_tokens=int(data["estimated_tokens"]) if data.get("estimated_tokens") else None,
             # int()：TEXT 欄位存 "0"/"1" 字串，bool("0") 是 True（陷阱）
             sensitive=bool(int(data.get("sensitive") or 0)),  # .get：舊 DB 無此欄位 → 預設非機密
             ocr=bool(int(data.get("ocr") or 0)),  # 票 12：同款遷移防護（舊 DB 無此欄位）

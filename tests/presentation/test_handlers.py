@@ -108,6 +108,17 @@ def test_usage_label_passes_through_to_view():
     assert view.usage_label == "成本：估 ¥0.169 → 實際 ¥0.032"
 
 
+def test_estimated_label_passes_through_to_view():
+    """2026-08-13：預估標籤由 app 層算好傳入（handlers 純函式不碰 CostService）。"""
+    job = TranslationJob(job_id="e1", source_path="/outputs/e1/a.pdf")
+    view = build_job_card(
+        job, estimated_label="估算 ≈ 50,000 tokens ≈ US$0.1690（≈NT$5.41）"
+    )
+    assert view.estimated_label == "估算 ≈ 50,000 tokens ≈ US$0.1690（≈NT$5.41）"
+    # 未傳入（舊呼叫端／歷史頁）→ None，不再內部組字
+    assert build_job_card(job).estimated_label is None
+
+
 # ── 票 10：機密標記顯示 ──────────────────────────────────
 
 

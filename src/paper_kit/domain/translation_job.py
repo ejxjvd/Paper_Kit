@@ -49,6 +49,7 @@ class TranslationJob:
     auto_extract: bool = False        # 票 05：--term-siliconflow 自動術語提取
     engine_id: str | None = None      # 用哪個引擎（票 06 計價用）
     estimated_cost: Decimal | None = None  # 票 06：上傳時的前置估算（完成後比對用）
+    estimated_tokens: int | None = None    # 2026-08-13：上傳時估算的總 tokens（UI 顯示預估用）
     sensitive: bool = False           # 票 10：機密文件（R18／隱私）——只准純文字引擎
     ocr: bool = False                 # 票 12：掃描件（無文字層）——執行前先本機 OCR
     result: JobResult | None = None
