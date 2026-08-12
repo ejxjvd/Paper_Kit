@@ -79,3 +79,15 @@ class VisionTranslatorPort(Protocol):
     ) -> VisionTranslation:
         """把幻燈片圖翻譯成目標語言文字；失敗丟 EngineError。"""
         ...
+
+
+class TeXCompilePort(Protocol):
+    """票 15：LaTeX 編譯埠——.tex 源碼 → 產物 PDF 路徑（xeCJK 中文關鍵）。
+
+    實作：TeXCompiler（xelatex headless；MiKTeX --enable-installer 自動裝缺套件）。
+    需要系統 xelatex；不存在時丟 EngineError（友善訊息含安裝指引）。
+    """
+
+    def compile(self, tex_path: str | Path, out_dir: str | Path) -> Path:
+        """編譯 .tex → PDF；回傳產物路徑。"""
+        ...

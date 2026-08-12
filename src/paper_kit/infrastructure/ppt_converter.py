@@ -10,12 +10,12 @@ WSL interop 事實：soffice.exe 是 Windows 程式，收不到 /mnt/c/... 路�
 """
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pymupdf
 
 from paper_kit.application.ports import EngineError
+from paper_kit.infrastructure.process_utils import run_command, windowsify
 
 # 候選路徑：PATH 優先，再試常見安裝位置（含 WSL 掛載形式——本機 soffice.exe
 # 裝在 Windows，WSL 側的檢查路徑是 /mnt/c/...，C:\\... 在 Linux 下永遠不存在）
@@ -39,39 +39,15 @@ def find_soffice() -> str | None:
     return None
 
 
-def _windowsify(path: str) -> str:
-    """WSL 內把 Linux 路徑轉成 Windows 形式（wslpath -w）；失敗回原樣。"""
-    wslpath = shutil.which("wslpath")
-    if wslpath is None:
-        return path
-    try:
-        out = subprocess.run(
-            [wslpath, "-w", path], capture_output=True, text=True, timeout=10
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return path
-
-
 def build_soffice_command(soffice: str, pptx_path: str, out_dir: str) -> list[str]:
     """組裝 soffice headless 轉 PDF 命令（純函式，測試直接斷言旗標）。
 
     soffice.exe（Windows 程式）在 WSL 下跑 → 路徑轉 Windows 形式。
     """
     if soffice.lower().endswith(".exe"):
-        pptx_path = _windowsify(pptx_path)
-        out_dir = _windowsify(out_dir)
+        pptx_path = windowsify(pptx_path)
+        out_dir = windowsify(out_dir)
     return [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, pptx_path]
-
-
-def _default_runner(cmd: list[str]) -> tuple[int, str]:
-    try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    except subprocess.TimeoutExpired:
-        return 124, "soffice 逾時（超過 180 秒無回應）"
-    return done.returncode, done.stdout + done.stderr
 
 
 class LibreOfficeConverter:
@@ -80,7 +56,7 @@ class LibreOfficeConverter:
     def __init__(self, soffice: str | None = None, zoom: float = 2.0, runner=None):
         self._soffice = soffice if soffice is not None else (find_soffice() or "")
         self._zoom = zoom
-        self._runner = runner or _default_runner
+        self._runner = runner or (lambda cmd: run_command(cmd, 180, "soffice"))
 
     def convert_to_images(self, pptx_path: str | Path, out_dir: str | Path) -> list[Path]:
         if not self._soffice:

@@ -42,6 +42,15 @@ def test_ppt_vision_default_pricing_matches_siliconflow(tmp_path):
     assert p.per_page_tokens == 5000
 
 
+def test_latex_default_pricing_matches_deepseek(tmp_path):
+    """票 15：LaTeX 路線後端＝deepseek-chat → 預設單價比照 DeepSeek。"""
+    svc = make_service(tmp_path)
+    p = svc.pricing_for("latex")
+    assert p.input_per_1k == Decimal("0.00027")
+    assert p.output_per_1k == Decimal("0.0011")
+    assert p.per_page_tokens == 5000
+
+
 def test_pricing_can_be_updated_for_price_raises(tmp_path):
     """DeepSeek 漲價只需改設定（2026-08-06 漲價公告教訓）。"""
     svc = make_service(tmp_path)

@@ -13,6 +13,12 @@ from paper_kit.infrastructure.babeldoc_adapter import (
     DEFAULT_BABELDOC_BASE_URL,
     DEFAULT_BABELDOC_MODEL,
 )
+from paper_kit.infrastructure.latex_adapter import (
+    DEFAULT_LATEX_BASE_URL,
+    DEFAULT_LATEX_MODEL,
+    LatexAdapter,
+    LatexConfig,
+)
 from paper_kit.infrastructure.pdf2zh_next_adapter import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
@@ -99,6 +105,15 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         sensitive_ok=False,  # 視覺 = 圖片上雲端（票 10 紅線，同 paste-vision）
         base_url=DEFAULT_VISION_BASE_URL,
     ),
+    "latex": EngineSpec(
+        id="latex",
+        label="LaTeX 源碼（xelatex 編譯，DeepSeek 純文字）",
+        provider="latex",
+        model=DEFAULT_LATEX_MODEL,
+        needs_key=True,
+        sensitive_ok=True,  # 純文字源碼：機密模式可用（票 10 紅線合規）
+        base_url=DEFAULT_LATEX_BASE_URL,
+    ),
 }
 
 
@@ -120,6 +135,13 @@ def build_engine(
             base_url=spec.base_url,
         )
         return PptVisionAdapter(cfg)
+    if spec.provider == "latex":
+        cfg = LatexConfig(
+            api_key=api_key,
+            model=spec.model,
+            base_url=spec.base_url,
+        )
+        return LatexAdapter(cfg)
     cfg = EngineConfig(
         provider=spec.provider,
         model=spec.model,

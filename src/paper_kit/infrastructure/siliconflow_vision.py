@@ -7,13 +7,13 @@ SettingsService 槽位（與設定頁一致）；失敗訊息不外洩 key。
 """
 
 import base64
-import json
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
 from paper_kit.domain.vision_translation import VisionTranslation
+from paper_kit.infrastructure.llm_client import chat_completion
 
 DEFAULT_VISION_BASE_URL = "https://api.siliconflow.com/v1/chat/completions"
 DEFAULT_VISION_MODEL = "google/gemma-4-31B-it"
@@ -95,21 +95,14 @@ class SiliconFlowVisionTranslator:
         raise EngineError(_friendly_vision_error(last_error))
 
     def _call(self, model: str, image_path: str | Path, target_lang: str) -> VisionTranslation:
+        # 傳輸＋tokens 解析走共用 llm_client（票 15 收攏——原本就地重複）
         payload = build_vision_payload(model, image_path, target_lang)
-        req = urllib.request.Request(
+        text, in_tokens, out_tokens = chat_completion(
             self._base_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
+            self._api_key,
+            payload,
+            timeout=VISION_TIMEOUTS.get(model, 8),
         )
-        with urllib.request.urlopen(req, timeout=VISION_TIMEOUTS.get(model, 8)) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = data["choices"][0]["message"]["content"]
-        usage = data.get("usage") or {}
         return VisionTranslation(
-            text=text,
-            input_tokens=int(usage.get("prompt_tokens", 0) or 0),
-            output_tokens=int(usage.get("completion_tokens", 0) or 0),
+            text=text, input_tokens=in_tokens, output_tokens=out_tokens
         )

@@ -1,0 +1,34 @@
+"""系統程序共用（票 15 收攏）：WSL interop 路徑轉換＋逾時程序執行。
+
+Windows 程式（soffice.exe / xelatex.exe）在 WSL 下收不到 /mnt/c/... 路徑
+→ 命令組裝時以 wslpath -w 轉成 C:\\ 形式（wslpath 不存在時回原樣）。
+兩引擎（PPT／LaTeX）同形——libreoffice_runner 原本私有，票 15 收攏共用。
+"""
+
+import shutil
+import subprocess
+
+
+def windowsify(path: str) -> str:
+    """WSL 內把 Linux 路徑轉成 Windows 形式（wslpath -w）；失敗回原樣。"""
+    wslpath = shutil.which("wslpath")
+    if wslpath is None:
+        return path
+    try:
+        out = subprocess.run(
+            [wslpath, "-w", path], capture_output=True, text=True, timeout=10
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return path
+
+
+def run_command(cmd: list[str], timeout: int = 180, label: str = "程序") -> tuple[int, str]:
+    """跑子程序（逾時回 rc 124＋說明）；回傳 (rc, stdout+stderr)。"""
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, f"{label} 逾時（超過 {timeout} 秒無回應）"
+    return done.returncode, done.stdout + done.stderr

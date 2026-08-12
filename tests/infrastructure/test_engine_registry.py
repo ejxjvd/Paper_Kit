@@ -18,6 +18,11 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
     Pdf2zhNextAdapter,
     build_command,
 )
+from paper_kit.infrastructure.latex_adapter import LatexAdapter
+from paper_kit.infrastructure.latex_translator import (
+    DEFAULT_LATEX_BASE_URL,
+    DEFAULT_LATEX_MODEL,
+)
 from paper_kit.infrastructure.ppt_vision_adapter import PptVisionAdapter
 from paper_kit.infrastructure.siliconflow_vision import (
     DEFAULT_VISION_BASE_URL,
@@ -137,3 +142,30 @@ def test_build_engine_ppt_vision_missing_key_fails_at_translate():
     adapter = build_engine(ENGINE_SPECS["ppt-vision"], api_key="")
     with pytest.raises(EngineError, match="API key"):
         adapter.translate(TranslationJob(job_id="j", source_path="/in/a.pptx"))
+
+
+# ── 票 15：LaTeX 源碼路線第四支插頭 ────────────────────────
+
+
+def test_registry_has_latex_spec():
+    """AC1：引擎註冊表新增 → UI 下拉（registry-driven）立即可選（同票 13/14 模式）。"""
+    spec = ENGINE_SPECS["latex"]
+    assert spec.label
+    assert spec.needs_key is True
+    assert spec.sensitive_ok is True  # 純文字引擎：機密模式可用（票 10 紅線合規）
+    assert spec.model == DEFAULT_LATEX_MODEL
+    assert spec.base_url == DEFAULT_LATEX_BASE_URL
+
+
+def test_build_engine_latex_returns_latex_adapter():
+    adapter = build_engine(ENGINE_SPECS["latex"], api_key="DS-KEY")
+    assert isinstance(adapter, LatexAdapter)
+    assert adapter._config.api_key == "DS-KEY"
+    assert adapter._config.model == DEFAULT_LATEX_MODEL
+
+
+def test_build_engine_latex_missing_key_fails_at_translate():
+    """缺 key 的錯誤時點/訊息與既有引擎一致（翻譯時友善錯誤）。"""
+    adapter = build_engine(ENGINE_SPECS["latex"], api_key="")
+    with pytest.raises(EngineError, match="API key"):
+        adapter.translate(TranslationJob(job_id="j", source_path="/in/a.tex"))

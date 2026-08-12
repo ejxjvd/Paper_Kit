@@ -26,6 +26,7 @@ DEFAULT_PRICING: dict[str, tuple[Decimal, Decimal, int]] = {
     "bing": (Decimal("0"), Decimal("0"), 5000),
     "babeldoc": (Decimal("0.00027"), Decimal("0.0011"), 5000),  # 票 13：後端＝deepseek-chat
     "ppt-vision": (Decimal("0.0012"), Decimal("0.0012"), 5000),  # 票 14：SiliconFlow gemma 眼睛
+    "latex": (Decimal("0.00027"), Decimal("0.0011"), 5000),  # 票 15：後端＝deepseek-chat
 }
 DEFAULT_PER_PAGE_TOKENS = 5000
 
