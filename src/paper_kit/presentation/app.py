@@ -246,21 +246,21 @@ def _delete_jobs(service: JobService, ids: list[str]) -> tuple[int, int]:
     return deleted, blocked
 
 
-def _confirm_delete_one(service: JobService, job_id: str) -> None:
-    """#74：主頁卡片單一刪除——二次確認 dialog（破壞性操作：含輸出檔）。
+def _confirm_delete_one(
+    service: JobService, job_id: str, dialog, state: dict
+) -> None:
+    """#74：主頁卡片單一刪除——頁面級確認 dialog 的開啟（破壞性：含輸出檔）。
 
-    對齊歷史頁批量刪除的確認樣式；執行中任務理論上不會出現此按鈕
-    （view.can_delete 已擋），但 service.delete 紅線仍會兜底。
+    #82 修復：dialog 為 `_index_page` 建置的**頁面級單例**（重複使用）。
+    舊版在此 handler 內 `with ui.dialog()` 建立——NiceGUI handle_event 以
+    sender 的 parent slot（＝卡片 slot，events.py）執行 handler，Dialog
+    建構時的 canary 元素掛該 slot；卡片每 1s 被 _refresh 的 cards.clear()
+    刪除 → canary finalize 連坐 dialog.delete()＝「刪除欄位不到 2 秒就消失」
+    （使用者 3 次回報）。頁面級單例的 canary 掛 content slot（永存）不隨
+    卡片死；執行中任務理論上不會出現此按鈕（view.can_delete 已擋），
+    service.delete 紅線仍會兜底。
     """
-    with ui.dialog() as dialog, ui.card().classes("p-4 gap-2"):
-        ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
-        ui.label("此操作無法復原").classes("text-xs text-grey-6")
-        with ui.row().classes("gap-2"):
-            ui.button("取消", on_click=dialog.close).props("outline")
-            ui.button(
-                "確認刪除",
-                on_click=lambda: (_do_delete_one(service, job_id), dialog.close()),
-            ).props("color=negative")
+    state["job_id"] = job_id
     dialog.open()
 
 
@@ -306,7 +306,15 @@ def _cancel_job(service: JobService, job_id: str) -> None:
         ui.notify("找不到此任務", type="negative")  # KeyError 語境由呼叫端決定（票 09 review）
 
 
-def _render_card(view: JobCardView, service: JobService, settings: SettingsService) -> None:
+def _render_card(
+    view: JobCardView,
+    service: JobService,
+    settings: SettingsService,
+    delete_dialog=None,
+    delete_state: dict | None = None,
+    preview_dialog=None,
+    preview_box=None,
+) -> None:
     # 票 19 review：marker 供測試鎖定任務卡——引擎卡也有 spec.label，
     # 純 content 匹配會假陽性（被引擎卡自身滿足），任務卡必須可獨立定位
     with ui.card().mark("job-card").classes("w-full pk-card"):  # 票 11：卡片主題 class（圓角/陰影/背景變數）
@@ -364,22 +372,39 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                         "下載 dual",
                         on_click=lambda: ui.download(str(_real_path(view.dual_url))),
                     ).props("outline")
-                ui.button("瀏覽器內預覽", on_click=lambda: _preview(view.preview_url))
+                ui.button(
+                    "瀏覽器內預覽",
+                    on_click=lambda: _preview(preview_dialog, preview_box, view.preview_url),
+                )
             if view.can_delete:  # #74：終態任務可刪除——清掉舊任務不堆積主頁
                 ui.button(
                     "🗑 刪除",
-                    on_click=lambda: _confirm_delete_one(service, view.job_id),
+                    on_click=lambda: _confirm_delete_one(service, view.job_id, delete_dialog, delete_state),
                 ).props("outline color=negative")
 
 
-def _preview(url: str) -> None:
-    with ui.dialog() as dialog, ui.card().classes("w-[90vw] h-[90vh]"):
-        ui.pdf(url).classes("w-full h-full")
+def _preview(dialog, box, url: str) -> None:
+    """#82 修復：預覽 dialog 為頁面級單例（同刪除 dialog 機制——handler 內
+    重建 dialog 的 canary 會隨卡片 clear 被刪）；ui.pdf 在 NiceGUI 3.15 不存在
+    （點擊時靜默 AttributeError）→ 改用 ui.html 包 iframe 渲染 PDF。
+    """
+    box.set_content(
+        f'<iframe src="{url}" class="w-full h-full" '
+        'style="border:0;min-height:70vh"></iframe>'
+    )
     dialog.open()
 
 
 def _refresh(
-    cards, service: JobService, cost: CostService, settings: SettingsService, memo: dict
+    cards,
+    service: JobService,
+    cost: CostService,
+    settings: SettingsService,
+    memo: dict,
+    delete_dialog=None,
+    delete_state: dict | None = None,
+    preview_dialog=None,
+    preview_box=None,
 ) -> None:
     cards.clear()
     # spec review：引擎欄顯示 label（「DeepSeek（純文字…）」）不是 raw id
@@ -404,6 +429,10 @@ def _refresh(
                 ),
                 service,
                 settings,
+                delete_dialog,
+                delete_state,
+                preview_dialog,
+                preview_box,
             )
 
 
@@ -1156,6 +1185,27 @@ def _index_page(
             ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
             memo: dict[str, str | None] = {}
             cards = ui.column().classes("w-full gap-4")
+            # #82 修復：刪除／預覽 dialog 建為**頁面級單例**（重複使用、canary 掛
+            # 永存容器）——舊版在 handler 內 `with ui.dialog()` 重建，canary 掛卡片
+            # slot，1s 輪詢 cards.clear() 連坐 dialog.delete()（「不到 2 秒消失」）。
+            # state 承接「哪一筆任務」：按確認才刪（非開啟當下快照，防競態）。
+            delete_state: dict = {"job_id": None}
+            with ui.dialog() as delete_dialog, ui.card().classes("p-4 gap-2"):
+                ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
+                ui.label("此操作無法復原").classes("text-xs text-grey-6")
+                with ui.row().classes("gap-2"):
+                    ui.button("取消", on_click=delete_dialog.close).props("outline")
+                    ui.button(
+                        "確認刪除",
+                        on_click=lambda: (
+                            _do_delete_one(service, delete_state["job_id"]),
+                            delete_dialog.close(),
+                        ),
+                    ).props("color=negative")
+            with ui.dialog() as preview_dialog, ui.card().classes(
+                "w-[90vw] h-[90vh] p-0"
+            ):
+                preview_box = ui.html("")
             # 票 19：引擎三選卡——點選即設定「本任務」引擎（不寫進設定頁 global）
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
 
@@ -1230,7 +1280,13 @@ def _index_page(
                         on_click=lambda: upload_el.run_method("upload"),
                     ).props("color=primary unelevated").classes("text-lg")
                     ui.label("選擇檔案後按「開始翻譯」送出；或直接拖放檔案到上方").classes("text-xs text-grey-7")
-        ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
+        ui.timer(
+            1.0,
+            lambda: _refresh(
+                cards, service, cost, settings, memo,
+                delete_dialog, delete_state, preview_dialog, preview_box,
+            ),
+        )
 
 
 if __name__ == "__main__":
