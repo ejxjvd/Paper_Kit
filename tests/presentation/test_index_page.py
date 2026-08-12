@@ -95,6 +95,55 @@ async def test_index_page_has_start_button(tmp_path):
         await user.should_see("拖放 PDF 或點選選擇")
 
 
+@pytest.mark.asyncio
+async def test_upload_is_selection_only_never_auto_submit(tmp_path):
+    """2026-08-12 使用者核心訴求：拖放/點選＝**選檔**，絕不自動開始翻譯（花錢）。
+
+    auto_upload=False 是伺服器端契約——NiceGUI set_bool 對 falsy 值會 pop
+    props（props.py），Quasar autoUpload 未傳＝undefined＝falsy → 拖放只進
+    queue 不上傳；「開始翻譯」才是送出的唯一入口。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        # NiceGUI 元素層無 auto_upload 屬性（僅 init 參數）——契約在 props：
+        # falsy 時 set_bool pop（props.py），Quasar autoUpload 未傳＝falsy
+        assert "auto-upload" not in upload_el._props
+
+
+@pytest.mark.asyncio
+async def test_start_button_sends_queued_files_not_picker(tmp_path, monkeypatch):
+    """「開始翻譯」＝送出已選檔案（run_method("upload")），**不是**再開檔案
+    選擇器。舊版 on_click 開 pickFiles → 拖放後按按鈕又彈檔案總管
+    （2026-08-12 使用者實測 bug 的舊世代行為，本測試固化語意）。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        called: list[str] = []
+        monkeypatch.setattr(upload_el, "run_method", lambda m: called.append(m))
+        start_btn = next(
+            b for b in user.find(ui.button).elements if "開始翻譯" in (b.text or "")
+        )
+        # NiceGUI 3.15 Button 無 .click()（user_simulation 不支援）——
+        # 契約在 click listener（_event_listeners: {uuid: EventListener}）：
+        # 呼叫 click listener 必須是 run_method("upload")（送 queue），
+        # 不是 pickFiles（開檔案總管）。
+        clicked = [el for el in start_btn._event_listeners.values() if el.type == "click"]
+        assert clicked, "「開始翻譯」按鈕沒有 click listener"
+        for el in clicked:
+            el.handler(None)
+        assert called == ["upload"]
+
+
 # ── 票 19：主頁就地選項（引擎卡／目標語言／任務卡顯示引擎） ─────────
 
 
