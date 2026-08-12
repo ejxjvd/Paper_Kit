@@ -211,6 +211,43 @@ async def test_lang_select_accepts_custom_setting_value(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_blank_pdf):
+    """AC5（票 20）：點選無 key 的引擎上傳 → 就地錯誤提示且引擎未被呼叫。
+
+    側信道：monkeypatch build_engine 計數——被呼叫即失敗；任務也不該建立。
+    （override 路徑 `_resolve_task_engine` 建引擎前查 key——票 19 設計。）
+    """
+    calls = []
+
+    def spy_build_engine(spec, api_key=""):
+        calls.append(spec.id)
+        raise AssertionError("無 key 引擎不應被建")
+
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+
+    service, settings, cost, glossaries = _build(tmp_path)
+    monkeypatch.setattr("paper_kit.presentation.app.build_engine", spy_build_engine)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _engine_card(user, "deepseek").click()  # 未設 deepseek key
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(
+                name="N1.pdf",
+                content_type="application/pdf",
+                _data=make_blank_pdf(tmp_path / "N1.pdf").read_bytes(),
+            ),
+        ])
+        msg = f"尚未設定 {ENGINE_SPECS['deepseek'].label} 的 API key（設定頁填入後再翻譯）"
+        await user.should_see(msg, retries=20)
+        assert calls == [], f"引擎不應被呼叫，實際呼叫：{calls}"
+        assert service.list_jobs() == [], "無 key 不應建立任務"
+
+
+@pytest.mark.asyncio
 async def test_job_card_shows_engine_label_not_raw_id(tmp_path, monkeypatch, make_blank_pdf):
     """AC3：任務卡顯示引擎名稱（非 raw id）——完成卡片 meta 含 label。
 

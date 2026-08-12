@@ -7,9 +7,11 @@ user_simulation 開真實 /settings 頁——渲染拋任何例外都會 500。
 """
 
 import pytest
+from nicegui import ui
 from nicegui.testing import user_simulation
 
 from paper_kit.application.cost_service import CostService
+from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.infrastructure.glossary_repo import GlossaryRepository
@@ -53,4 +55,112 @@ async def test_settings_page_save_engine_without_touching_inputs(tmp_path):
         await user.open("/settings")
         user.find("儲存引擎設定").click()
         await user.should_see("引擎設定已儲存")
+
+
+# ── 票 20：每引擎獨立 API key 欄位＋遮罩＋清除 ────────────────
+
+
+def _engine_key_input(user, eid: str):
+    """引擎 key input（marker 定位——input 在引擎卡內，content 匹配會撈到別的 input）。"""
+    return next(iter(user.find(kind=ui.input, marker=f"engine-key-input-{eid}").elements))
+
+
+def _engine_key_save_button(user, eid: str):
+    """引擎卡「儲存 key」按鈕（marker 定位——三張卡同名按鈕，content 撈到多個）。"""
+    return user.find(kind=ui.button, marker=f"engine-key-save-{eid}")
+
+
+def test_mask_key_masks_all_but_first_six_chars():
+    """遮罩：前 6 字符＋其餘星號；短 key 全星號；空 key 空字串。"""
+    from paper_kit.presentation.app import _mask_key
+
+    assert _mask_key("sk-test123456") == "sk-tes*******"
+    assert _mask_key("abc") == "***"
+    assert _mask_key("") == ""
+
+
+@pytest.mark.asyncio
+async def test_settings_page_shows_three_engine_key_cards_with_masking(tmp_path):
+    """AC1+AC3：三張引擎卡各有獨立 key 欄位；已存 key 回顯遮罩（前 6＋星號）。
+
+    （字面值斷言——standards review：用 `_mask_key(...)` 算預期值是 tautology；
+    遮罩格式已由 test_mask_key_masks_all_but_first_six_chars 釘死。）
+    """
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("deepseek", "sk-test123456")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        for label in ("SiliconFlow", "DeepSeek", "BabelDOC"):
+            await user.should_see(label)
+        deepseek_input = _engine_key_input(user, "deepseek")
+        assert deepseek_input.value == "sk-tes*******", "已存 key 應遮罩回顯（前 6 字符＋星號）"
+        assert _engine_key_input(user, "siliconflow").value == "", "未存引擎 input 應為空"
+
+
+@pytest.mark.asyncio
+async def test_save_key_stores_only_that_engine(tmp_path):
+    """AC2+AC3：儲存一卡的 key 只寫該引擎；他引擎 key 不受影響。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("siliconflow", "sf-original")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        deepseek_input = _engine_key_input(user, "deepseek")
+        deepseek_input.value = "sk-new-deepseek"
+        _engine_key_save_button(user, "deepseek").click()
+        await user.should_see(f"已儲存 {ENGINE_SPECS['deepseek'].label} 的 API key")
+        assert settings.api_key("deepseek") == "sk-new-deepseek", "handler 應已寫入 key"
+        assert settings.api_key("siliconflow") == "sf-original", "儲存他卡不覆寫"
+
+
+@pytest.mark.asyncio
+async def test_save_with_masked_value_does_not_overwrite(tmp_path):
+    """防遮罩寫回：input 回顯的是遮罩——不修改直接儲存不得把遮罩當 key 存。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("siliconflow", "sk-original-123")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        _engine_key_save_button(user, "siliconflow").click()  # 不修改 input（遮罩原樣）
+        await user.should_see(f"已儲存 {ENGINE_SPECS['siliconflow'].label} 的 API key")
+        assert settings.api_key("siliconflow") == "sk-original-123", "遮罩不得寫回成 key"
+
+
+@pytest.mark.asyncio
+async def test_clear_key_button_empties_key(tmp_path):
+    """AC4：清除按鈕清空後 api_key 回傳空。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("babeldoc", "bk-original")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        babeldoc_input = _engine_key_input(user, "babeldoc")
+        user.find(kind=ui.button, marker="engine-key-clear-babeldoc").click()
+        await user.should_see(f"已清除 {ENGINE_SPECS['babeldoc'].label} 的 API key")
+        assert settings.api_key("babeldoc") == ""
+        # spec review（票 20）：清除後 input 顯示值也必須清空——否則殘留遮罩
+        # 在「清除後再按儲存」時會被 `_save_engine_key` 當新 key 寫回（current=""
+        # 時任何值都過防遮罩判斷），key 損毀且不可復原
+        assert babeldoc_input.value == "", "清除後 input 顯示值應為空"
 

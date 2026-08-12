@@ -346,14 +346,53 @@ def _refresh(
         )
 
 
-def _save_engine(settings: SettingsService, engine_id: str, api_key: str) -> None:
+def _mask_key(key: str) -> str:
+    """票 20：已存 key 回顯遮罩——前 6 字符＋其餘星號；短 key（≤6）全星號。
+
+    短 key 全遮（前 6 明文是規格明定；短 key 全顯示＝整把 key 曝光）。
+    input 顯示遮罩；儲存時值等於遮罩＝未修改（防遮罩寫回，見 _save_engine_key）。
+    """
+    if not key:
+        return ""
+    if len(key) <= 6:
+        return "*" * len(key)
+    return key[:6] + "*" * (len(key) - 6)
+
+
+def _save_engine_choice(settings: SettingsService, engine_id: str) -> None:
+    """票 20：儲存「預設引擎」選擇（key 已由各引擎卡獨立管理，不再經此寫）。"""
     try:
         settings.set_engine(engine_id)
-        if api_key:
-            settings.set_api_key(engine_id, api_key)
         ui.notify("引擎設定已儲存", type="positive")
     except KeyError:
         ui.notify("未知引擎", type="negative")
+
+
+def _save_engine_key(settings: SettingsService, eid: str, key_input) -> None:
+    """票 20：0 參數 factory（`lambda eid=eid:` 會被 event 覆寫，票 19 教訓）。
+
+    防遮罩寫回：input 回顯的是遮罩——值等於遮罩視為未修改，不得存成 key。
+    """
+    def save() -> None:
+        current = settings.api_key(eid)
+        value = key_input.value
+        if value and value != _mask_key(current):
+            settings.set_api_key(eid, value)
+        ui.notify(f"已儲存 {ENGINE_SPECS[eid].label} 的 API key", type="positive")
+    return save
+
+
+def _clear_engine_key(settings: SettingsService, eid: str, key_input) -> None:
+    """票 20：0 參數 factory——清除該引擎 key（清空後 api_key 回傳空）。
+
+    spec review（票 20）：一併清 input 顯示值——否則殘留遮罩在「清除後再按儲存」
+    會被 `_save_engine_key` 當新 key 寫回（current="" 時任何值都過防遮罩判斷）。
+    """
+    def clear() -> None:
+        settings.set_api_key(eid, "")
+        key_input.value = ""
+        ui.notify(f"已清除 {ENGINE_SPECS[eid].label} 的 API key", type="warning")
+    return clear
 
 
 def _settings_page(
@@ -370,7 +409,6 @@ def _settings_page(
         # 初始化，否則首次渲染（pricing_for(engine_id)）與「不修改直接儲存」
         # 的 lambda 都會 NameError（真實 UI 500，實測 traceback app.py:326）。
         engine_id = settings.engine_id()
-        api_key = settings.api_key(engine_id)
         target_lang = settings.target_lang()
         output_dir = settings.output_dir()
         base = cost.pricing_for(engine_id)
@@ -384,18 +422,40 @@ def _settings_page(
                 ui.select(
                     _engine_label_map(),
                     value=engine_id,
-                    label="引擎",
+                    label="預設引擎（主頁引擎卡可為單一任務另選）",
                 ).classes("w-full").bind_value_to(locals(), "engine_id")
-                ui.input(
-                    "API key（存本機 SQLite，不會進 log）",
-                    value=api_key,
-                    password=True,
-                    password_toggle_button=True,
-                ).classes("w-full").bind_value_to(locals(), "api_key")
                 ui.button(
                     "儲存引擎設定",
-                    on_click=lambda: _save_engine(settings, engine_id, api_key),
+                    on_click=lambda: _save_engine_choice(settings, engine_id),
                 ).props("outline")
+            # 票 20：每引擎獨立 API key（BYOK——交付他人時各自用自己帳號的 key）
+            with ui.card().classes("w-full"):
+                ui.label("引擎 API keys").classes("font-bold")
+                ui.label(
+                    "各自用自己的 key（存本機 SQLite，不入 repo/log）；已存 key 僅顯示遮罩。"
+                ).classes("text-xs text-grey-6")
+                for eid, desc in ENGINE_CARDS:
+                    spec = ENGINE_SPECS[eid]
+                    with ui.card().mark(f"engine-key-{eid}").classes("w-full gap-2"):
+                        with ui.row().classes("items-center justify-between w-full"):
+                            ui.label(spec.label).classes("font-semibold")
+                            ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
+                        ui.label(desc).classes("text-xs text-grey-7")
+                        key_input = ui.input(
+                            "API key",
+                            value=_mask_key(settings.api_key(eid)),
+                            password=True,
+                            password_toggle_button=True,
+                        ).classes("w-full").mark(f"engine-key-input-{eid}")
+                        with ui.row().classes("gap-2"):
+                            ui.button(
+                                "儲存 key",
+                                on_click=_save_engine_key(settings, eid, key_input),
+                            ).props("outline").mark(f"engine-key-save-{eid}")
+                            ui.button(
+                                "清除",
+                                on_click=_clear_engine_key(settings, eid, key_input),
+                            ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
             with ui.card().classes("w-full"):
                 ui.label("預設值").classes("font-bold")
                 ui.input(
