@@ -57,7 +57,7 @@ def _real_path(view_url: str) -> Path:
     return OUTPUTS_DIR / view_url.split(FILES_BASE + "/", 1)[1]
 
 
-def _start_job(
+async def _start_job(
     service: JobService,
     settings: SettingsService,
     cost: CostService,
@@ -74,9 +74,10 @@ def _start_job(
         ui.notify(to_user_message(exc), type="negative")
         return
     try:
-        staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.name}"
-        with open(staging, "wb") as f:
-            f.write(e.content.read())
+        # 2026-08-12 使用者實測 bug：NiceGUI 3.15 的 UploadEventArguments 沒有
+        # name/content——改 e.file: FileUpload（async save，自動分流大小檔）。
+        staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.file.name}"
+        await e.file.save(staging)
     except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
         ui.notify(to_user_message(exc), type="negative")
         return
@@ -94,7 +95,7 @@ def _start_job(
         return
     # 票 14 spec review：OCR 只適用 PDF——勾了但上傳非 PDF → 警告＋忽略旗標
     # （ensure_text_layer 同層兜底安全跳過；視覺路徑不需要文字層）
-    if ocr and not is_pdf_path(e.name):
+    if ocr and not is_pdf_path(e.file.name):
         ui.notify("🔍 掃描件 OCR 僅適用 PDF——已忽略（PPT 走視覺翻譯）", type="warning")
         ocr = False
     job = service.create_job(
@@ -126,7 +127,7 @@ def _start_job(
     if est is not None:
         job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
     _notify_estimate(cost, engine_id, est)
-    ui.notify(f"任務已建立：{e.name}", type="positive")
+    ui.notify(f"任務已建立：{e.file.name}", type="positive")
     # 票 10：engine_allows_sensitive 由 UI 層查 ENGINE_SPECS 傳入（service 兜底防衛）
     service.start(
         job.job_id, engine, engine_id=engine_id,
@@ -284,6 +285,18 @@ def _settings_page(
     def settings_page():
         ui.page_title("Paper_Kit 設定")
         _enter_theme(settings)  # 票 11：設定頁與 debug 頁同一主題
+        # 2026-08-12 bug 修復：bind_value_to(locals(), ...) 寫入的是 locals() dict，
+        # Python 名稱解析（LOAD_GLOBAL）看不見它——函數內讀取的變數必須顯式
+        # 初始化，否則首次渲染（pricing_for(engine_id)）與「不修改直接儲存」
+        # 的 lambda 都會 NameError（真實 UI 500，實測 traceback app.py:326）。
+        engine_id = settings.engine_id()
+        api_key = settings.api_key(engine_id)
+        target_lang = settings.target_lang()
+        output_dir = settings.output_dir()
+        base = cost.pricing_for(engine_id)
+        in_price = str(base.input_per_1k)
+        out_price = str(base.output_per_1k)
+        per_page = str(base.per_page_tokens)
         with ui.header().classes("items-center"):
             ui.label("⚙️ Paper_Kit 設定").classes("text-2xl font-bold")
         with ui.column().classes("w-full max-w-2xl mx-auto p-6 gap-4"):
@@ -291,12 +304,12 @@ def _settings_page(
                 ui.label("翻譯引擎").classes("font-bold")
                 ui.select(
                     {eid: spec.label for eid, spec in ENGINE_SPECS.items()},
-                    value=settings.engine_id(),
+                    value=engine_id,
                     label="引擎",
                 ).classes("w-full").bind_value_to(locals(), "engine_id")
                 ui.input(
                     "API key（存本機 SQLite，不會進 log）",
-                    value=settings.api_key(settings.engine_id()),
+                    value=api_key,
                     password=True,
                     password_toggle_button=True,
                 ).classes("w-full").bind_value_to(locals(), "api_key")
@@ -308,11 +321,11 @@ def _settings_page(
                 ui.label("預設值").classes("font-bold")
                 ui.input(
                     "目標語言（如 zh-TW）",
-                    value=settings.target_lang(),
+                    value=target_lang,
                 ).classes("w-full").bind_value_to(locals(), "target_lang")
                 ui.input(
                     "輸出目錄（空白 = ~/.paper_kit/outputs）",
-                    value=settings.output_dir(),
+                    value=output_dir,
                 ).classes("w-full").bind_value_to(locals(), "output_dir")
                 ui.button(
                     "儲存預設",
@@ -323,18 +336,17 @@ def _settings_page(
                 ui.label("票 06：DeepSeek 漲價只需改這裡（單價是設定不是寫死）").classes(
                     "text-xs text-grey-6"
                 )
-                base = cost.pricing_for(engine_id)
                 ui.input(
                     "input 單價",
-                    value=str(base.input_per_1k),
+                    value=in_price,
                 ).classes("w-full").bind_value_to(locals(), "in_price")
                 ui.input(
                     "output 單價",
-                    value=str(base.output_per_1k),
+                    value=out_price,
                 ).classes("w-full").bind_value_to(locals(), "out_price")
                 ui.input(
                     "每頁 token 基準",
-                    value=str(base.per_page_tokens),
+                    value=per_page,
                 ).classes("w-full").bind_value_to(locals(), "per_page")
                 ui.button(
                     "儲存單價（目前選定的引擎）",
@@ -431,7 +443,7 @@ def _sync_glossary_pickers(
     edit_select.set_options(names, value=edit_select.value if edit_select.value in names else None)
 
 
-def _import_glossary(
+async def _import_glossary(
     glossaries: GlossaryService,
     settings: SettingsService,
     glossary_select,
@@ -439,8 +451,8 @@ def _import_glossary(
     e,
 ) -> None:
     """CSV 上傳：檔名＝術語表名；缺 source/target 標頭顯示明確錯誤（不崩潰）。"""
-    name = Path(e.name).stem.strip() or "匯入"
-    raw = e.content.read()
+    name = Path(e.file.name).stem.strip() or "匯入"
+    raw = await e.file.read()
     try:
         text = raw.decode("utf-8-sig")  # 吃 Excel 的 BOM
     except UnicodeDecodeError:
@@ -657,6 +669,19 @@ def main() -> None:
     cost = CostService(repo)
     glossaries = GlossaryService(GlossaryRepository(GLOSSARIES_DIR))
 
+    _index_page(service, settings, cost, glossaries)
+    _settings_page(settings, cost, glossaries)
+    _debug_page(LOG_PATH, settings)
+    ui.run(title="Paper_Kit 論文翻譯器", reload=False)
+
+def _index_page(
+    service: JobService,
+    settings: SettingsService,
+    cost: CostService,
+    glossaries: GlossaryService,
+) -> None:
+    """主頁：上傳即開始翻譯（票 10 紅線提示＋票 07 頁面範圍＋票 12 OCR）。"""
+
     @ui.page("/")
     def index():
         ui.page_title("Paper_Kit")
@@ -689,20 +714,25 @@ def main() -> None:
             pages_input = ui.input(
                 "頁面範圍（空白=全部；如 1-2、3-5）"
             ).props("clearable").classes("w-full")
-            ui.upload(
-                label="拖放 PDF 或點選選擇",
-                auto_upload=True,
-                on_upload=lambda e: _start_job(
-                    service, settings, cost, glossaries, e,
-                    pages_text=pages_input.value, sensitive=sensitive_input.value,
-                    ocr=ocr_input.value,
-                ),
-            ).classes("w-full")
+            # 2026-08-12 使用者回饋：上傳卡卡片化＋「開始翻譯」主動作按鈕
+            # （上傳即開始；按鈕是選檔入口，語意＝「點此選檔並翻譯」）
+            with ui.card().classes("w-full pk-card"):
+                upload_el = ui.upload(
+                    label="拖放 PDF 或點選選擇",
+                    auto_upload=True,
+                    on_upload=lambda e: _start_job(
+                        service, settings, cost, glossaries, e,
+                        pages_text=pages_input.value, sensitive=sensitive_input.value,
+                        ocr=ocr_input.value,
+                    ),
+                ).classes("w-full")
+                with ui.row().classes("items-center gap-3 w-full"):
+                    ui.button(
+                        "📂 開始翻譯",
+                        on_click=lambda: upload_el.run_method("pickFiles"),
+                    ).props("color=primary unelevated").classes("text-lg")
+                    ui.label("點此選檔並翻譯；或直接拖放檔案到上方").classes("text-xs text-grey-7")
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
-
-    _settings_page(settings, cost, glossaries)
-    _debug_page(LOG_PATH, settings)
-    ui.run(title="Paper_Kit 論文翻譯器", reload=False)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,13 @@ def has_text_layer(pdf_path: str | Path) -> bool:
     """
     if not is_pdf_path(pdf_path):
         return False
-    reader = pypdf.PdfReader(str(pdf_path))
+    try:
+        reader = pypdf.PdfReader(str(pdf_path))
+    except pypdf.errors.PdfStreamError:
+        # 2026-08-12：損壞/非標準 PDF 拋 PdfStreamError（非 OSError）——
+        # 偵測路徑永不炸 UI（同票 14 精神）；壞檔由翻譯引擎在任務層報錯。
+        # 無法判定 → 視為無文字層（提示可能掃描件，輕度誤導可接受）。
+        return False
     for page in reader.pages:
         text = (page.extract_text() or "").strip()
         if text:
