@@ -101,6 +101,27 @@ def test_estimate_for_pdf_returns_none_on_unparseable(tmp_path):
     assert make_service(tmp_path).estimate_for_pdf("deepseek", bad) is None
 
 
+def test_estimate_for_pdf_scales_with_pages_range(tmp_path):
+    """票 07 review：指定頁面範圍時估價按範圍頁數縮放（規格書 story 4「只為需要的部分付費」）。
+
+    手算（deepseek 預設 0.00027/0.0011、5000/頁、77/23）：
+    2 頁 → total 10000, input 7700, output 2300
+      cost = 7.7×0.00027 + 2.3×0.0011 = 0.002079 + 0.002530 = 0.004609
+    5 頁 → total 25000, input 19250, output 5750
+      cost = 19.25×0.00027 + 5.75×0.0011 = 0.0051975 + 0.006325 = 0.0115225
+    """
+    svc = make_service(tmp_path)
+    est = svc.estimate_for_pdf("deepseek", tmp_path / "missing.pdf", pages="1-2")
+    assert est is not None
+    assert est.pages == 2 and est.total_tokens == 10000
+    assert est.input_tokens == 7700 and est.output_tokens == 2300
+    assert est.cost == Decimal("0.004609")
+
+    five = svc.estimate_for_pdf("deepseek", tmp_path / "missing.pdf", pages="1-2,4-6")
+    assert five.total_tokens == 25000
+    assert five.cost == Decimal("0.0115225")
+
+
 def test_usage_label_shows_estimate_vs_actual(tmp_path):
     """完成任務的成本標籤：估算 vs 實際＋用量（用上傳時存的估算——非幽靈重算）。"""
     svc = make_service(tmp_path)

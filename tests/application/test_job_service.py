@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from paper_kit.application.job_service import JobService
+from paper_kit.application.pages import page_count_in_range, parse_pages
 from paper_kit.application.ports import EngineError
 from paper_kit.application.start_translation import StartTranslation
 from paper_kit.domain.job_result import JobResult
@@ -83,6 +84,137 @@ def test_create_job_each_gets_own_directory(tmp_path: Path, upload_pdf: Path):
     j2 = service.create_job(upload_path=upload_pdf)
     assert j1.job_id != j2.job_id
     assert Path(j1.source_path).parent != Path(j2.source_path).parent
+
+
+# ── 票 07：頁面範圍＋輸出目錄 ────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("", None),        # 空白 = 全部
+        ("   ", None),
+        (None, None),      # Quasar clearable 清空給 null → 等同空白（review 修正）
+        ("1-2", "1-2"),
+        ("3-5", "3-5"),
+        ("1", "1"),
+        ("1-2,4-6", "1-2,4-6"),
+        (" 3-5 ", "3-5"),
+    ],
+)
+def test_parse_pages_accepts_valid_ranges(text, expected):
+    assert parse_pages(text) == expected
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "abc", "1-2-3", "1--2", "-1", "1-", "1.5", "1-2,", "，",
+        "0-5", "5-2", "0", "1-0", "10-2",  # 語義檢查（review 修正）：頁≥1、起≤終
+    ],
+)
+def test_parse_pages_rejects_invalid_ranges(bad):
+    with pytest.raises(ValueError):
+        parse_pages(bad)
+
+
+@pytest.mark.parametrize(
+    "spec,expected",
+    [
+        ("1-2", 2),
+        ("3-5", 3),
+        ("1", 1),
+        ("10", 1),        # 單頁 = 第 10 頁
+        ("1-2,4-6", 5),   # 2 + 3
+        ("1-10,20-25", 16),  # 10 + 6
+    ],
+)
+def test_page_count_in_range(spec, expected):
+    """票 07 review：範圍規格 → 頁數（成本估算按範圍縮放用）。"""
+    assert page_count_in_range(spec) == expected
+
+
+def test_create_job_records_pages_and_output_dir(tmp_path: Path, upload_pdf: Path):
+    service, _ = make_service(tmp_path)
+    job = service.create_job(
+        upload_path=upload_pdf, pages="1-2", output_dir="/out/custom"
+    )
+    assert job.pages == "1-2"
+    assert job.output_dir == "/out/custom"
+
+
+def test_completed_job_copies_outputs_to_configured_dir(tmp_path: Path, upload_pdf: Path):
+    """票 07：完成任務把 mono/dual 複製到設定的輸出目錄。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, output_dir=str(tmp_path / "out"))
+    src_dir = Path(job.source_path).parent
+    mono = src_dir / "a.zh.mono.pdf"
+    dual = src_dir / "a.zh.dual.pdf"
+    mono.write_bytes(b"mono")
+    dual.write_bytes(b"dual")
+    engine = FakeEngine(result=JobResult(mono_path=str(mono), dual_path=str(dual)))
+
+    service.start(job.job_id, engine)
+    service.wait(job.job_id, timeout=5)
+
+    assert repo.get(job.job_id).status == JobStatus.COMPLETED
+    assert (tmp_path / "out" / "a.zh.mono.pdf").read_bytes() == b"mono"
+    assert (tmp_path / "out" / "a.zh.dual.pdf").read_bytes() == b"dual"
+
+
+def test_no_output_dir_keeps_files_in_job_dir(tmp_path: Path, upload_pdf: Path):
+    """輸出目錄空白 = 留在預設（~/.paper_kit/outputs/<job_id>）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    src_dir = Path(job.source_path).parent
+    mono = src_dir / "a.zh.mono.pdf"
+    mono.write_bytes(b"mono")
+    engine = FakeEngine(result=JobResult(mono_path=str(mono), dual_path=""))
+
+    service.start(job.job_id, engine)
+    service.wait(job.job_id, timeout=5)
+
+    assert repo.get(job.job_id).status == JobStatus.COMPLETED
+    assert mono.read_bytes() == b"mono"  # 原位置沒被搬走
+
+
+def test_copy_failure_records_error_and_keeps_completed(tmp_path: Path, upload_pdf: Path):
+    """review 修正：產出複製失敗（輸出目錄位置是檔案）→ job.error 記錄、thread 不靜默死。"""
+    service, repo = make_service(tmp_path)
+    blocker = tmp_path / "out"
+    blocker.write_bytes(b"i am a file, not a dir")  # mkdir 會 FileExistsError
+    job = service.create_job(upload_path=upload_pdf, output_dir=str(blocker))
+    src_dir = Path(job.source_path).parent
+    mono = src_dir / "a.zh.mono.pdf"
+    mono.write_bytes(b"mono")
+    engine = FakeEngine(result=JobResult(mono_path=str(mono), dual_path=""))
+
+    service.start(job.job_id, engine)
+    service.wait(job.job_id, timeout=5)
+
+    done = repo.get(job.job_id)
+    assert done.status == JobStatus.COMPLETED
+    assert "複製失敗" in done.error
+
+
+def test_output_dir_equals_job_dir_skips_copy(tmp_path: Path, upload_pdf: Path):
+    """review 修正：輸出目錄＝任務自己的目錄 → 略過複製（防 SameFileError）。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    # job 目錄 = outputs/<job_id>；把 output_dir 指向它自己
+    job.output_dir = str(Path(job.source_path).parent)
+    src_dir = Path(job.source_path).parent
+    mono = src_dir / "a.zh.mono.pdf"
+    mono.write_bytes(b"mono")
+    engine = FakeEngine(result=JobResult(mono_path=str(mono), dual_path=""))
+
+    service.start(job.job_id, engine)
+    service.wait(job.job_id, timeout=5)
+
+    done = repo.get(job.job_id)
+    assert done.status == JobStatus.COMPLETED
+    assert done.error is None
+    assert mono.read_bytes() == b"mono"
 
 
 # ── slice B：start（背景執行） ───────────────────────────────────────

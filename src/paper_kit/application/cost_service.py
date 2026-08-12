@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from paper_kit.application.pages import page_count_in_range
 from paper_kit.domain.cost_calculator import CostCalculator, CostEstimate, PricingConfig
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
@@ -86,9 +87,17 @@ class CostService:
         with PdfReader(str(pdf_path)) as reader:
             return len(reader.pages)
 
-    def estimate_for_pdf(self, engine_id: str, pdf_path: str | Path) -> CostEstimate | None:
-        """翻譯前估算；pypdf 解析失敗回 None（UI 靜默跳過，不外洩 IO 錯誤）。"""
+    def estimate_for_pdf(
+        self, engine_id: str, pdf_path: str | Path, pages: str | None = None
+    ) -> CostEstimate | None:
+        """翻譯前估算；pypdf 解析失敗回 None（UI 靜默跳過，不外洩 IO 錯誤）。
+
+        pages 指定（票 07）→ 按範圍頁數縮放（規格書 story 4「只為需要的部分付費」），
+        不再需要讀 PDF。
+        """
         try:
+            if pages:
+                return self.estimate(engine_id, pages=page_count_in_range(pages))
             return self.estimate(engine_id, pages=self.pdf_pages(pdf_path))
         except Exception:
             return None

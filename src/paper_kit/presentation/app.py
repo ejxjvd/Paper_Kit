@@ -15,6 +15,7 @@ from nicegui import app, ui
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
+from paper_kit.application.pages import parse_pages
 from paper_kit.application.ports import EngineError
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.domain.cost_calculator import CostEstimate
@@ -52,11 +53,23 @@ def _start_job(
     cost: CostService,
     glossaries: GlossaryService,
     e,
+    pages_text: str = "",
 ) -> None:
+    # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於寫暫存檔）
+    try:
+        pages = parse_pages(pages_text)
+    except ValueError as exc:
+        ui.notify(str(exc), type="negative")
+        return
     staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.name}"
     with open(staging, "wb") as f:
         f.write(e.content.read())
-    job = service.create_job(staging, target_lang=settings.target_lang())
+    job = service.create_job(
+        staging,
+        target_lang=settings.target_lang(),
+        pages=pages,
+        output_dir=settings.output_dir(),
+    )
     # 票 05：挑選的術語表組合＋自動提取開關隨任務記錄（之後改設定不影響舊任務）
     names = settings.selected_glossary_names(glossaries.list_glossaries())  # 預設全選
     job.glossary_files = glossaries.paths_for(names)
@@ -67,7 +80,8 @@ def _start_job(
         ui.notify(str(exc), type="negative")
         return
     engine_id = settings.engine_id()
-    est = cost.estimate_for_pdf(engine_id, staging)
+    # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
+    est = cost.estimate_for_pdf(engine_id, staging, pages=pages)
     if est is not None:
         job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
     _notify_estimate(cost, engine_id, est)
@@ -481,10 +495,16 @@ def main() -> None:
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
             memo: dict[str, str | None] = {}
             cards = ui.column().classes("w-full gap-4")
+            # 票 07：頁面範圍（空白=全部；1-2／3-5／1-2,4-6 區間格式）
+            pages_input = ui.input(
+                "頁面範圍（空白=全部；如 1-2、3-5）"
+            ).props("clearable").classes("w-full")
             ui.upload(
                 label="拖放 PDF 或點選選擇",
                 auto_upload=True,
-                on_upload=lambda e: _start_job(service, settings, cost, glossaries, e),
+                on_upload=lambda e: _start_job(
+                    service, settings, cost, glossaries, e, pages_input.value
+                ),
             ).classes("w-full")
         ui.timer(1.0, lambda: _refresh(cards, service, cost, memo))
 
