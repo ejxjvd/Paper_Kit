@@ -29,6 +29,7 @@ from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import JobCardView, build_job_card
+from paper_kit.presentation.theme import apply_theme
 
 APP_DIR = Path.home() / ".paper_kit"
 OUTPUTS_DIR = APP_DIR / "outputs"
@@ -166,7 +167,7 @@ def _cancel_job(service: JobService, job_id: str) -> None:
 
 
 def _render_card(view: JobCardView, service: JobService, settings: SettingsService) -> None:
-    with ui.card().classes("w-full"):
+    with ui.card().classes("w-full pk-card"):  # 票 11：卡片主題 class（圓角/陰影/背景變數）
         with ui.row().classes("items-center justify-between w-full"):
             with ui.column().classes("gap-0"):
                 with ui.row().classes("items-center gap-2"):
@@ -177,18 +178,19 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
                     meta += f" · {view.engine_label}"
-                ui.label(meta).classes("text-xs text-grey-6")
+                ui.label(meta).classes("text-xs pk-meta")  # 票 11：muted 變數
             ui.badge(view.status_label).props(f"color={BADGE_COLORS[view.status]}")
         if view.is_running:
-            ui.linear_progress(value=0.5).props("indeterminate").classes("w-full")
+            # 票 11：進度條納入主題變數（深色下保持對比）
+            ui.linear_progress(value=0.5).props("indeterminate").classes("w-full pk-progress")
         elif view.status is JobStatus.COMPLETED:
-            ui.linear_progress(value=1.0).classes("w-full")
+            ui.linear_progress(value=1.0).classes("w-full pk-progress")
         if view.error:
-            ui.label(f"錯誤：{view.error}").classes("text-red-7")
+            ui.label(f"錯誤：{view.error}").classes("pk-error")  # 票 11：錯誤語意色走主題變數
         # 票 08 review：完成任務顯示「估算 vs 實際」，未完成顯示上傳時估價
         cost_label = view.usage_label or view.estimated_label
         if cost_label:
-            ui.label(cost_label).classes("text-grey-8 text-sm")
+            ui.label(cost_label).classes("text-sm pk-cost")  # 票 11：成本排版變數
         with ui.row().classes("items-center"):
             if view.can_retry:
                 ui.button(
@@ -253,6 +255,7 @@ def _settings_page(
     @ui.page("/settings")
     def settings_page():
         ui.page_title("Paper_Kit 設定")
+        _enter_theme(settings)  # 票 11：設定頁與 debug 頁同一主題
         with ui.header().classes("items-center"):
             ui.label("⚙️ Paper_Kit 設定").classes("text-2xl font-bold")
         with ui.column().classes("w-full max-w-2xl mx-auto p-6 gap-4"):
@@ -560,12 +563,32 @@ def _save_pricing(cost: CostService, engine_id: str, in_price: str, out_price: s
         ui.notify("單價格式錯誤（需為數字）", type="negative")  # 表單驗證，固定訊息
 
 
-def _debug_page(log_path: Path) -> None:
+def _enter_theme(settings: SettingsService) -> ui.dark_mode:
+    """票 11：三頁共用入口——注入主題 CSS＋依偏好套深色，回傳控制器。"""
+    dark = apply_theme()
+    if settings.dark_mode():
+        dark.enable()
+    return dark
+
+
+def _toggle_theme(settings: SettingsService, dark: ui.dark_mode, btn) -> None:
+    """票 11：切換深色偏好並即時套用（不重載頁面），按鈕圖示同步更新。"""
+    on = not settings.dark_mode()
+    settings.set_dark_mode(on)
+    if on:
+        dark.enable()
+    else:
+        dark.disable()
+    btn.set_text("☀️" if on else "🌙")
+
+
+def _debug_page(log_path: Path, settings: SettingsService) -> None:
     """票 09：debug 檢視頁——最近任務的 log 可查（job_id 過濾）。"""
 
     @ui.page("/debug")
     def debug_page():
         ui.page_title("Paper_Kit Debug")
+        _enter_theme(settings)  # 票 11：設定頁與 debug 頁同一主題
         with ui.header().classes("items-center"):
             ui.label("🔍 Paper_Kit Debug Log").classes("text-2xl font-bold")
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
@@ -604,11 +627,17 @@ def main() -> None:
     @ui.page("/")
     def index():
         ui.page_title("Paper_Kit")
+        dark = _enter_theme(settings)  # 票 11：注入主題 CSS＋依偏好套深色（三頁共用入口）
         with ui.header().classes("items-center justify-between"):
             with ui.row().classes("items-center"):
                 ui.label("📄 Paper_Kit 論文翻譯器").classes("text-2xl font-bold")
                 ui.badge("自建 UI · 免除線上工具綁架").props("outline")
             with ui.row().classes("items-center gap-3"):
+                # 票 11：主題切換按鈕——即時生效、不重載（偏好存 settings，圖示同步更新）
+                theme_btn = ui.button(
+                    "🌙" if settings.dark_mode() else "☀️",
+                    on_click=lambda: _toggle_theme(settings, dark, theme_btn),
+                ).props("flat round")
                 ui.link("設定", "/settings").classes("text-white")
                 ui.link("Debug", "/debug").classes("text-white text-grey-4")
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
@@ -636,7 +665,7 @@ def main() -> None:
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
 
     _settings_page(settings, cost, glossaries)
-    _debug_page(LOG_PATH)
+    _debug_page(LOG_PATH, settings)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)
 
 

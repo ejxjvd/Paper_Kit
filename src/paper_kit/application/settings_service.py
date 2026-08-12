@@ -79,3 +79,12 @@ class SettingsService:
 
     def set_auto_extract(self, on: bool) -> None:
         self._repo.set("auto_extract", "1" if on else "0")
+
+    # ── 票 11：深色模式偏好 ────────────────────────────────────
+
+    def dark_mode(self) -> bool:
+        """深色模式偏好；預設深色（論文翻譯工具夜間使用為主）。"""
+        return (self._repo.get("dark_mode", "1") or "1") == "1"
+
+    def set_dark_mode(self, on: bool) -> None:
+        self._repo.set("dark_mode", "1" if on else "0")

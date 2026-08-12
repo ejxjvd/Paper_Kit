@@ -96,3 +96,20 @@ def test_auto_extract_toggle_roundtrip(tmp_path):
     assert svc.auto_extract() is True
     svc.set_auto_extract(False)
     assert svc.auto_extract() is False
+
+
+# ── 票 11：深色模式偏好 ───────────────────────────────────
+
+
+def test_dark_mode_defaults_to_dark(tmp_path):
+    svc = make_service(tmp_path)
+    assert svc.dark_mode() is True  # 論文翻譯工具夜間使用為主
+
+
+def test_dark_mode_roundtrip_and_survives_restart(tmp_path):
+    svc = make_service(tmp_path)
+    svc.set_dark_mode(False)
+    assert svc.dark_mode() is False
+
+    restarted = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))  # 重啟
+    assert restarted.dark_mode() is False
