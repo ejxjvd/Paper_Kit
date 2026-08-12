@@ -55,13 +55,16 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
     cmd += ["--lang-out", job.target_lang]
     if cfg.provider == "deepseek":
         cmd += ["--deepseek", "--deepseek-api-key", cfg.api_key]
-    else:
+    elif cfg.provider == "siliconflow":
         cmd += [
             "--siliconflow",
             "--siliconflow-model", cfg.model,
             "--siliconflow-api-key", cfg.api_key,
             "--siliconflow-base-url", cfg.base_url,
         ]
+    else:
+        # 免費引擎：旗標名＝provider（--google／--bing／--siliconflowfree），不需 key
+        cmd += [f"--{cfg.provider}"]
     if job.glossary_files:
         cmd += ["--glossaries", ",".join(job.glossary_files), "--no-auto-extract-glossary"]
     return cmd
