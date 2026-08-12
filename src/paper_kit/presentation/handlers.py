@@ -40,6 +40,7 @@ class JobCardView:
     can_cancel: bool = False         # 票 08：進行中任務可取消
     sensitive: bool = False          # 票 10：機密文件（卡片顯示 🔒）
     ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
+    pages_label: str = "全文"        # 票 17：歷史表格「頁數」欄（None→「全文」對映在 build_job_card）
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -94,4 +95,5 @@ def build_job_card(
         can_cancel=job.can_cancel,
         sensitive=job.sensitive,   # 票 10：機密標記顯示（🔒）
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
+        pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）
     )

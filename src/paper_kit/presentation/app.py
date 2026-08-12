@@ -254,7 +254,7 @@ def _refresh(
 ) -> None:
     cards.clear()
     # spec review：引擎欄顯示 label（「DeepSeek（純文字…）」）不是 raw id
-    engine_labels = {eid: spec.label for eid, spec in ENGINE_SPECS.items()}
+    engine_labels = _engine_label_map()
     for job in service.list_jobs():
         # memo：完成任務只算一次成本標籤（1s 輪詢下避免每輪重讀 PDF 頁數）
         if job.status is JobStatus.COMPLETED and job.job_id not in memo:
@@ -304,7 +304,7 @@ def _settings_page(
             with ui.card().classes("w-full"):
                 ui.label("翻譯引擎").classes("font-bold")
                 ui.select(
-                    {eid: spec.label for eid, spec in ENGINE_SPECS.items()},
+                    _engine_label_map(),
                     value=engine_id,
                     label="引擎",
                 ).classes("w-full").bind_value_to(locals(), "engine_id")
@@ -636,6 +636,11 @@ def _nav_active(path: str, current: str) -> bool:
     return path == current
 
 
+def _engine_label_map() -> dict[str, str]:
+    """引擎顯示名對照（engine_id → label）。三頁共用（standards review：收攏重複對映）。"""
+    return {eid: spec.label for eid, spec in ENGINE_SPECS.items()}
+
+
 def app_frame(
     title: str,
     settings: SettingsService,
@@ -701,6 +706,86 @@ def _debug_page(log_path: Path, settings: SettingsService) -> None:
             render()
 
 
+def _history_page(
+    service: JobService,
+    settings: SettingsService,
+    engine_labels: dict[str, str] | None = None,
+) -> None:
+    """票 17：任務歷史表格頁——表格化＋分頁（每頁 10）＋引擎欄＋空狀態。
+
+    對照沉浸式翻譯「記錄頁」：欄位（文件名／創建時間／頁數／引擎／狀態／操作）。
+    批量操作（勾選／刪除／zip 下載）是票 18；本頁先立表格骨架。
+    ui.table 的列資料直接送前端渲染（Vue），必須 JSON-safe——
+    enum 不序列化，故列資料用挑選過的 dict（非 vars(view)）。
+    slot 模板的 scope 變數是 props（`props.row`）且 body-cell slot 需自包
+    <q-td>（spec review：裸 row.xxx 模板在前端渲染失敗）。
+    """
+
+    @ui.page("/history")
+    def history_page():
+        ui.page_title("Paper_Kit 歷史")
+        # 票 16：統一頁框——側欄（歷史 active）
+        nav = [(l, p, _nav_active(p, "/history")) for l, p in SIDEBAR_NAV]
+        app_frame("📚 翻譯歷史", settings, nav)
+        with ui.column().classes("w-full max-w-5xl mx-auto p-6 gap-4"):
+            jobs = service.list_jobs()
+            if not jobs:
+                # 票 17 AC：空歷史提示＋「翻譯新文件」快捷入口（→ 主頁）
+                ui.label("尚無翻譯任務").classes("text-xl text-grey-8")
+                ui.link("翻譯新文件", "/").classes("text-primary")
+                return
+            engine_map = engine_labels or _engine_label_map()
+            columns = [
+                {"name": "file_name", "label": "文件名", "field": "file_name", "align": "left"},
+                {"name": "created", "label": "創建時間", "field": "created_label", "align": "left"},
+                {"name": "pages", "label": "頁數", "field": "pages_label", "align": "left"},
+                {"name": "engine", "label": "引擎", "field": "engine_label", "align": "left"},
+                {"name": "status", "label": "狀態", "field": "status_label", "align": "left"},
+                {"name": "actions", "label": "操作", "field": "actions", "align": "left"},
+            ]
+            rows = [
+                _history_row(
+                    build_job_card(job, files_base=FILES_BASE, engine_labels=engine_map)
+                )
+                for job in jobs
+            ]
+            table = ui.table(
+                columns=columns, rows=rows, pagination={"rowsPerPage": 10}
+            ).classes("w-full")
+            # 狀態彩色標籤（q-badge；scope=props、需自包 <q-td>）
+            table.add_slot(
+                "body-cell-status",
+                "<q-td><q-badge :color='props.row.status_color' :label='props.row.status_label' /></q-td>",
+            )
+            # 操作列：mono／dual 下載（dual 不可退化——使用者明定）；
+            # download attr＝附件下載（與主頁 ui.download 行為一致）。
+            # 重試／取消：Vue slot 無法綁 Python handler，兩軸 review 裁決移除，
+            # 併入票 18 批量操作列（死按鈕比沒有更糟）。
+            table.add_slot(
+                "body-cell-actions",
+                """<q-td><div class="flex gap-1">
+                <q-btn v-if="props.row.mono_url" size="sm" flat color="primary" type="a"
+                       :href="props.row.mono_url" download label="下載 mono" />
+                <q-btn v-if="props.row.dual_url" size="sm" flat color="teal" type="a"
+                       :href="props.row.dual_url" download label="下載 dual" />
+                </div></q-td>""",
+            )
+
+
+def _history_row(view: JobCardView) -> dict:
+    """歷史表格列資料——只挑 JSON-safe 欄位（票 17；enum 不序列化）。"""
+    return {
+        "file_name": view.file_name,
+        "created_label": view.created_label,
+        "pages_label": view.pages_label,
+        "engine_label": view.engine_label or "",
+        "status_label": view.status_label,
+        "status_color": BADGE_COLORS[view.status],
+        "mono_url": view.mono_url,
+        "dual_url": view.dual_url,
+    }
+
+
 def main() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -720,6 +805,7 @@ def main() -> None:
 
     _index_page(service, settings, cost, glossaries)
     _settings_page(settings, cost, glossaries)
+    _history_page(service, settings)
     _debug_page(LOG_PATH, settings)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)
 
