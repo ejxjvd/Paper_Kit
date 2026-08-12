@@ -11,6 +11,7 @@ POC 教訓（2026-08-12 實測）：
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.domain.job_result import JobResult
@@ -100,14 +101,16 @@ class Pdf2zhNextAdapter:
         self._runner = runner or self._default_runner
 
     @staticmethod
-    def _default_runner(cmd: list[str], timeout: int):
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    def _default_runner(cmd: list[str], timeout: int, cwd: str | None = None):
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
         return proc.returncode, proc.stdout + proc.stderr
 
     def translate(self, job: TranslationJob) -> JobResult:
         if not self._config.api_key:
             raise EngineError("尚未設定 API key（設定頁填入後再翻譯）")
         cmd = build_command(job, self._config)
+        # babeldoc 輸出走子程序 CWD → 以任務資料夾為 cwd，產出才落在該處（票 03 實測教訓）
+        cwd = str(Path(job.source_path).parent) if job.source_path else None
         last_error = ""
         for attempt in range(self._config.retries + 1):
             if attempt:
@@ -115,7 +118,7 @@ class Pdf2zhNextAdapter:
 
                 time.sleep(2**attempt)  # 退避 2s, 4s
             try:
-                rc, output = self._runner(cmd, timeout=self._config.timeout_seconds)
+                rc, output = self._runner(cmd, timeout=self._config.timeout_seconds, cwd=cwd)
             except subprocess.TimeoutExpired:
                 raise EngineError(
                     f"翻譯逾時（超過 {self._config.timeout_seconds} 秒無回應，上游可能掛了）"

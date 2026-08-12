@@ -38,8 +38,8 @@ class FakeRunner:
         self.results = list(results)
         self.calls = []
 
-    def __call__(self, cmd, timeout=None):
-        self.calls.append((cmd, timeout))
+    def __call__(self, cmd, timeout=None, cwd=None):
+        self.calls.append((cmd, timeout, cwd))
         r = self.results.pop(0)
         if isinstance(r, Exception):
             raise r
@@ -183,3 +183,13 @@ def test_timeout_maps_to_timeout_message():
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=runner)
     with pytest.raises(EngineError, match="逾時"):
         adapter.translate(make_job())
+
+
+def test_translate_runs_engine_in_job_source_directory():
+    """babeldoc 輸出走子程序 CWD → cwd 必須是任務資料夾，產出才落在該處（票 03 實測教訓）。"""
+    runner = FakeRunner((0, LOG))
+    job = make_job()  # source_path = /in/paper.pdf
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=runner)
+    adapter.translate(job)
+    _, _, cwd = runner.calls[0]
+    assert cwd == "/in", f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
