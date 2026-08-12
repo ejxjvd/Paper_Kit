@@ -143,6 +143,38 @@ def test_build_command_auto_extract_uses_term_extraction_flags():
     assert "--no-auto-extract-glossary" not in cmd
 
 
+# ── #85 切片C：babeldoc 進階旗標（僅 babeldoc 引擎，一手 CLI 源碼實證） ──
+
+
+def test_build_command_advanced_flags_default_off():
+    """#85：進階開關預設全關——相容模式／移除非公式線條不送；行號增強預設
+    開（不送反向 --no-merge-...）；字體預設 serif（不送 --primary-font-family）。"""
+    cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
+    assert "--enhance-compatibility" not in cmd
+    assert "--remove-non-formula-lines" not in cmd
+    assert "--no-merge-alternating-line-numbers" not in cmd
+    assert "--primary-font-family" not in cmd
+
+
+def test_build_command_advanced_flags_when_enabled():
+    """#85：勾選進階開關 → 對應旗標送達（源碼：--enhance-compatibility／
+    --no-merge-alternating-line-numbers／--remove-non-formula-lines／
+    --primary-font-family serif|sans-serif|script）。"""
+    cmd = build_babeldoc_command(
+        make_job(
+            enhance_compatibility=True,
+            merge_alternating_line_numbers=False,  # 行號增強關閉 → 送反向旗標
+            remove_non_formula_lines=True,
+            font_family="script",
+        ),
+        BabelDocConfig(api_key="KEY"),
+    )
+    assert "--enhance-compatibility" in cmd
+    assert "--no-merge-alternating-line-numbers" in cmd
+    assert "--remove-non-formula-lines" in cmd
+    assert cmd[cmd.index("--primary-font-family") + 1] == "script"
+
+
 # ── translate：成功解析 ──────────────────────────────────
 
 

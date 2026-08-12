@@ -53,6 +53,11 @@ class TranslationJob:
     sensitive: bool = False           # 票 10：機密文件（R18／隱私）——只准純文字引擎
     ocr: bool = False                 # 票 12：掃描件（無文字層）——執行前先本機 OCR
     only_selected_pages: bool = True  # #85：僅翻譯選中頁面（引擎預設輸出全部頁面；OFF＝未選頁原樣保留）
+    # #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎消費；其他引擎忽略）
+    enhance_compatibility: bool = False   # --enhance-compatibility（相容模式：版式較保守、錯位較少）
+    merge_alternating_line_numbers: bool = True  # 行號增強（True=合併交錯行號；CLI 反向旗標 --no-merge-...）
+    remove_non_formula_lines: bool = False  # --remove-non-formula-lines（移除段落中的非公式線條）
+    font_family: str = "serif"           # --primary-font-family：serif / sans-serif / script
     result: JobResult | None = None
     error: str | None = None
     progress: float | None = None     # #72：翻譯進度 0.0–1.0（None＝無確定進度→UI 用 indeterminate）

@@ -49,6 +49,11 @@ class JobService:
         sensitive: bool = False,
         ocr: bool = False,
         only_selected_pages: bool = True,
+        # #85 切片C：babeldoc 進階選項（其他引擎忽略）
+        enhance_compatibility: bool = False,
+        merge_alternating_line_numbers: bool = True,
+        remove_non_formula_lines: bool = False,
+        font_family: str = "serif",
     ) -> TranslationJob:
         """把上傳檔複製進任務資料夾，建立 queued 任務。
 
@@ -72,6 +77,10 @@ class JobService:
             sensitive=sensitive,
             ocr=ocr,
             only_selected_pages=only_selected_pages,  # #85：僅翻譯選中頁面 toggle
+            enhance_compatibility=enhance_compatibility,  # #85 切片C
+            merge_alternating_line_numbers=merge_alternating_line_numbers,
+            remove_non_formula_lines=remove_non_formula_lines,
+            font_family=font_family,
         )
         self._jobs.add(job)
         self._order.append(job_id)

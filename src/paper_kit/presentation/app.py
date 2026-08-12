@@ -140,6 +140,11 @@ def _start_job(
     engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
     target_lang: str | None = None,  # 票 19：語言下拉就地選（None=設定頁值）
     only_selected_pages: bool = True,  # #85：僅翻譯選中頁面 toggle
+    # #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎消費；其他引擎忽略）
+    enhance_compatibility: bool = False,
+    merge_alternating_line_numbers: bool = True,
+    remove_non_formula_lines: bool = False,
+    font_family: str = "serif",
 ) -> bool:
     """送暫存檔建立翻譯任務。成功（含引擎已啟動）回 True——呼叫方清理暫存。
 
@@ -175,6 +180,11 @@ def _start_job(
         sensitive=sensitive,
         ocr=ocr,
         only_selected_pages=only_selected_pages,  # #85：僅翻譯選中頁面
+        # #85 切片C：babeldoc 進階選項透傳（其他引擎忽略）
+        enhance_compatibility=enhance_compatibility,
+        merge_alternating_line_numbers=merge_alternating_line_numbers,
+        remove_non_formula_lines=remove_non_formula_lines,
+        font_family=font_family,
     )
     # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）。
     # 票 14：只對 PDF 偵測（pptx 上傳不誤報掃描件——has_text_layer 對非 PDF 回 False）
@@ -1248,6 +1258,8 @@ def _index_page(
                         remove="ring-2 ring-primary",
                         add=("ring-2 ring-primary" if cid == eid else ""),
                     )
+                # #85 切片C：進階選項僅 babeldoc 消費 → 點到 babeldoc 卡才顯示
+                advanced_box.set_visibility(eid == "babeldoc")
                 ui.notify(f"本任務將使用 {ENGINE_SPECS[eid].label}", type="info")
 
             engine_cards: dict[str, ui.card] = {}
@@ -1276,6 +1288,18 @@ def _index_page(
                 value=current_lang,
                 label="目標語言（本任務）",
             ).classes("w-full")
+            # #85 切片B：術語庫選擇移入主翻譯面板（BabelDOC 風格）——與設定頁共用
+            # settings 後端（任一面板勾選即生效，雙向同步）；_start_job 讀同一值
+            # → 術語表帶進 job.glossary_files＋預估 tokens ×1.57 倍率（#79 已測）
+            main_glossary_select = ui.select(
+                glossaries.list_glossaries(),
+                value=settings.selected_glossary_names(glossaries.list_glossaries()),
+                multiple=True,
+                label="術語表（勾選套用；預估 tokens 依倍率更新）",
+            ).classes("w-full")
+            main_glossary_select.on_value_change(
+                lambda: settings.set_selected_glossaries(list(main_glossary_select.value))
+            )
             # #85：BabelDOC 風格暫存流程（2026-08-13 定案）——選檔＝**暫存**：
             # auto_upload=True 選完即上傳伺服器暫存（不建任務、不花錢），服務端
             # pypdf 讀頁數 → 「N of M」頁面範圍下拉 → 按「開始翻譯」才消費暫存建任務。
@@ -1331,6 +1355,11 @@ def _index_page(
                         ),
                         target_lang=lang_select.value,
                         only_selected_pages=only_selected_input.value,  # #85：僅選中頁面
+                        # #85 切片C：babeldoc 進階選項（其他引擎忽略）
+                        enhance_compatibility=enhance_compat_input.value,
+                        merge_alternating_line_numbers=merge_lines_input.value,
+                        remove_non_formula_lines=remove_lines_input.value,
+                        font_family=font_select.value,
                     )
                     if ok:
                         staged.pop(name, None)
@@ -1356,6 +1385,22 @@ def _index_page(
                     ).classes("flex-1")
                     range_counter = ui.label("已選 0 of 0 頁").classes("text-xs text-grey-7")
                 only_selected_input = ui.checkbox("☑ 僅翻譯選中頁面（未選頁原樣保留）", value=True)
+                # #85 切片C：babeldoc 進階選項——僅 babeldoc 引擎消費（點卡才顯示；
+                # 設定頁 global 引擎＝babeldoc 時初始即顯示）
+                advanced_box = ui.column().mark("babeldoc-advanced").classes("gap-1 w-full")
+                advanced_box.set_visibility(selected_engine == "babeldoc")
+                with advanced_box:
+                    ui.label("BabelDOC 進階選項").classes("text-sm font-semibold text-grey-8")
+                    enhance_compat_input = ui.checkbox("☑ 相容模式（版式較保守、錯位較少）", value=False)
+                    merge_lines_input = ui.checkbox("☑ 行號增強（合併交錯行號）", value=True)
+                    remove_lines_input = ui.checkbox(
+                        "☑ 移除段落中的非公式線條", value=False
+                    )
+                    font_select = ui.select(
+                        ["serif", "sans-serif", "script"],
+                        value="serif",
+                        label="字體",
+                    ).classes("w-48")
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",

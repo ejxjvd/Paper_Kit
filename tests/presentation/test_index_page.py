@@ -513,6 +513,54 @@ async def test_only_selected_pages_toggle_off_flows_into_job(
         assert job.only_selected_pages is False, "toggle OFF 應記入 job"
 
 
+# ── #85 切片B：術語庫選擇移入主翻譯面板 ──
+
+
+def _seed_glossary(tmp_path, name: str) -> None:
+    """造一份術語表（repo 直寫——主面板下拉選項來源）。"""
+    from paper_kit.domain.glossary import Glossary
+    from paper_kit.infrastructure.glossary_repo import GlossaryRepository
+
+    repo = GlossaryRepository(tmp_path / "glossaries")
+    repo.create(name)
+    repo.write(name, Glossary.parse("source,target\nterm,譯\n", target_lang="zh"))
+
+
+@pytest.mark.asyncio
+async def test_main_panel_glossary_selection_flows_into_job(
+    tmp_path, monkeypatch, make_blank_pdf
+):
+    """#85 切片B：主面板術語表多選——勾選後翻譯的 job 帶該術語表（側信道
+    job.glossary_files）；預設值＝設定頁選擇（雙向同步同一 settings 後端）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    _seed_glossary(tmp_path, "dl")
+    _seed_glossary(tmp_path, "img")
+    monkeypatch.setattr(settings, "resolve_engine", lambda: FileWritingFakeEngine())
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        g_select = next(
+            s for s in user.find(ui.select).elements if "術語表" in (s.label or "")
+        )
+        assert set(g_select.value) == {"dl", "img"}, "預設全選（與設定頁一致）"
+        g_select.value = ["dl"]  # 只留 dl
+        assert settings.selected_glossary_names(glossaries.list_glossaries()) == ["dl"], \
+            "主面板勾選即寫入 settings（雙向同步）"
+        upload_el = next(iter(user.find(ui.upload).elements))
+        pdf = make_blank_pdf(tmp_path / "CH4.pdf", pages=2)
+        await upload_el.handle_uploads([
+            SmallFileUpload(name="CH4.pdf", content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("已暫存：CH4.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        job = service.list_jobs()[-1]
+        names = [Path(p).stem for p in job.glossary_files]
+        assert names == ["dl"], f"job 應帶勾選的術語表，實際 {names}"
+
+
 # ── _pages_for_file：範圍套用單一檔案（純函式） ──
 
 
@@ -537,3 +585,83 @@ def test_pages_for_file_out_of_range_pages_dropped():
     # 檔案頁數不足 → 越界頁碼剔除；交集空 → None（全文，不把越界頁碼漏到引擎）
     assert _pages_for_file(["1", "5"], 3) == "1"
     assert _pages_for_file(["5"], 3) is None
+
+
+# ── #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎顯示） ──
+
+
+def _babeldoc_advanced_box(user):
+    """BabelDOC 進階選項容器（marker 定位；預設隱藏、點 babeldoc 卡才顯示）。"""
+    return next(iter(user.find(kind=ui.column, marker="babeldoc-advanced").elements))
+
+
+@pytest.mark.asyncio
+async def test_babeldoc_advanced_panel_hidden_by_default(tmp_path):
+    """#85 切片C：進階選項（相容模式／行號增強／非公式線條／字體）預設隱藏——
+    預設引擎（siliconflow）不消費 babeldoc 旗標，不該看到這些開關。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        # find 只回傳可見元素（only_visible=True）→ 預設隱藏＝find 不到進階區標題
+        with pytest.raises(AssertionError):
+            user.find(content="BabelDOC 進階選項")
+
+
+@pytest.mark.asyncio
+async def test_babeldoc_advanced_panel_shows_when_babeldoc_selected(tmp_path):
+    """#85 切片C：點選 BabelDOC 卡 → 進階選項區顯示（引擎＝babeldoc 才消費這些旗標）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _engine_card(user, "babeldoc").click()
+        assert _babeldoc_advanced_box(user).visible is True, \
+            "點選 babeldoc 卡後進階選項區應顯示"
+
+
+@pytest.mark.asyncio
+async def test_babeldoc_advanced_options_flow_into_job(
+    tmp_path, monkeypatch, make_blank_pdf
+):
+    """#85 切片C：勾選進階選項＋選字體 → job 帶全部值（側信道）→ adapter 轉旗標。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("babeldoc", "sk-test")  # override 路徑建引擎前查 key
+    monkeypatch.setattr(settings, "resolve_engine", lambda: FileWritingFakeEngine())
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _engine_card(user, "babeldoc").click()
+        # 勾選：相容模式 ON、行號增強 OFF（預設 ON）、移除非公式線條 ON
+        for label, value in (
+            ("相容模式", True),
+            ("行號增強", False),
+            ("非公式線條", True),
+        ):
+            cb = next(
+                c for c in user.find(ui.checkbox).elements if label in (c.text or "")
+            )
+            cb.value = value
+        font_select = next(
+            s for s in user.find(ui.select).elements if "字體" in (s.label or "")
+        )
+        font_select.value = "script"
+        upload_el = next(iter(user.find(ui.upload).elements))
+        pdf = make_blank_pdf(tmp_path / "CH4.pdf", pages=2)
+        await upload_el.handle_uploads([
+            SmallFileUpload(name="CH4.pdf", content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("已暫存：CH4.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        job = service.list_jobs()[-1]
+        assert job.enhance_compatibility is True
+        assert job.merge_alternating_line_numbers is False
+        assert job.remove_non_formula_lines is True
+        assert job.font_family == "script"

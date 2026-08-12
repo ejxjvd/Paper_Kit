@@ -22,6 +22,10 @@ _COLUMNS = (
     "progress",  # #72：翻譯進度（0.0–1.0；None＝無確定進度）
     "estimated_tokens",  # 2026-08-13：上傳時估算的總 tokens（UI 預估顯示用）
     "only_selected_pages",  # #85：「僅選中頁面」toggle 隨任務記錄
+    "enhance_compatibility",  # #85 切片C：babeldoc 進階選項隨任務記錄
+    "merge_alternating_line_numbers",
+    "remove_non_formula_lines",
+    "font_family",
 )
 _PLACEHOLDERS = ", ".join("?" for _ in _COLUMNS)
 
@@ -112,6 +116,10 @@ class SqliteJobRepository:
             str(job.progress) if job.progress is not None else None,
             str(job.estimated_tokens) if job.estimated_tokens is not None else None,
             int(job.only_selected_pages),
+            int(job.enhance_compatibility),
+            int(job.merge_alternating_line_numbers),
+            int(job.remove_non_formula_lines),
+            job.font_family,
         )
 
     def _deserialize(self, row) -> TranslationJob:
@@ -142,4 +150,11 @@ class SqliteJobRepository:
             progress=float(data["progress"]) if data.get("progress") else None,
             # .get：舊 DB 無此欄位 → 預設 True（不送 flag 的唯二時機是 toggle OFF 或無頁面）
             only_selected_pages=bool(int(data.get("only_selected_pages") or 1)),
+            # #85 切片C：舊 DB 無進階欄位 → 預設值（相容模式關／行號增強開／非公式線條不移除／serif）
+            enhance_compatibility=bool(int(data.get("enhance_compatibility") or 0)),
+            merge_alternating_line_numbers=bool(
+                int(data.get("merge_alternating_line_numbers") or 1)
+            ),
+            remove_non_formula_lines=bool(int(data.get("remove_non_formula_lines") or 0)),
+            font_family=data.get("font_family") or "serif",
         )

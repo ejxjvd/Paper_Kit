@@ -63,6 +63,16 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
             "--openai-term-extraction-base-url", cfg.base_url,
             "--openai-term-extraction-api-key", cfg.api_key,
         ]
+    # #85 切片C：進階選項（babeldoc CLI 源碼實證——預設值不送旗標，引擎行為即預設）
+    if job.enhance_compatibility:
+        cmd += ["--enhance-compatibility"]
+    if not job.merge_alternating_line_numbers:
+        # 行號增強預設開（合併交錯行號）；關閉才送反向旗標
+        cmd += ["--no-merge-alternating-line-numbers"]
+    if job.remove_non_formula_lines:
+        cmd += ["--remove-non-formula-lines"]
+    if job.font_family and job.font_family != "serif":
+        cmd += ["--primary-font-family", job.font_family]
     return cmd
 
 

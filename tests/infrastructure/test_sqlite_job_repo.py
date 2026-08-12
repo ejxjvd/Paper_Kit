@@ -243,3 +243,42 @@ def test_only_selected_pages_defaults_true_in_db(tmp_path: Path):
     repo = make_repo(tmp_path)
     repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
     assert repo.get("plain").only_selected_pages is True
+
+
+# ── #85 切片C：babeldoc 進階選項持久化 ──
+
+
+def test_advanced_options_survive_roundtrip_and_restart(tmp_path: Path):
+    """#85 切片C：相容模式／行號增強／非公式線條／字體隨任務記錄，重啟也在。"""
+    job = sample_job()
+    job.enhance_compatibility = True
+    job.merge_alternating_line_numbers = False
+    job.remove_non_formula_lines = True
+    job.font_family = "script"
+
+    db = tmp_path / "app.db"
+    repo1 = SqliteJobRepository(db)
+    repo1.add(job)
+    restored = repo1.get("abc123")
+    assert restored.enhance_compatibility is True
+    assert restored.merge_alternating_line_numbers is False
+    assert restored.remove_non_formula_lines is True
+    assert restored.font_family == "script"
+
+    repo2 = SqliteJobRepository(db)  # 重啟
+    restored = repo2.get("abc123")
+    assert restored.enhance_compatibility is True
+    assert restored.merge_alternating_line_numbers is False
+    assert restored.remove_non_formula_lines is True
+    assert restored.font_family == "script"
+
+
+def test_advanced_options_default_in_db(tmp_path: Path):
+    """#85 切片C：舊任務/預設 → 相容模式關／行號增強開／不移除線條／serif。"""
+    repo = make_repo(tmp_path)
+    repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
+    job = repo.get("plain")
+    assert job.enhance_compatibility is False
+    assert job.merge_alternating_line_numbers is True
+    assert job.remove_non_formula_lines is False
+    assert job.font_family == "serif"
