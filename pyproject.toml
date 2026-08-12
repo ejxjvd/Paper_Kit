@@ -5,6 +5,7 @@ description = "Paper_Kit：自建學術 PDF/簡報翻譯器（免除線上工具
 requires-python = ">=3.12"
 dependencies = [
     "nicegui>=2.0",
+    "pypdf>=5.0",  # 票 06：估算前取 PDF 真實頁數
 ]
 
 [project.scripts]
@@ -14,7 +15,6 @@ paper-kit = "paper_kit.presentation.app:main"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "pypdf>=5.0",
 ]
 
 [tool.pytest.ini_options]

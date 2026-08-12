@@ -11,8 +11,8 @@ from decimal import Decimal
 from paper_kit.domain.cost_calculator import CostCalculator, CostEstimate, PricingConfig
 
 DEFAULT = PricingConfig(
-    input_per_1k=Decimal("0.14"),   # USD，近似 DeepSeek 單價
-    output_per_1k=Decimal("0.28"),
+    input_per_1k=Decimal("0.27"),   # USD，2026-08-06 漲價後近似值（單價是設定不是寫死）
+    output_per_1k=Decimal("1.10"),
     per_page_tokens=5000,
     input_ratio=Decimal("0.77"),
 )
@@ -47,8 +47,8 @@ def test_known_worked_example():
 def test_huge_page_count_scales_linearly():
     est = CALC.estimate(10_000, DEFAULT)
     assert est.total_tokens == 50_000_000
-    assert est.cost == pytest.approx(float(Decimal("0.77") * 50_000_000 / 1000 * Decimal("0.14")
-                                         + Decimal("0.23") * 50_000_000 / 1000 * Decimal("0.28")))
+    assert est.cost == pytest.approx(float(Decimal("0.77") * 50_000_000 / 1000 * Decimal("0.27")
+                                         + Decimal("0.23") * 50_000_000 / 1000 * Decimal("1.10")))
 
 
 def test_pricing_is_parameterized_not_hardcoded():
@@ -65,6 +65,22 @@ def test_pricing_is_parameterized_not_hardcoded():
 def test_negative_pages_rejected():
     with pytest.raises(ValueError):
         CALC.estimate(-1, DEFAULT)
+
+
+def test_cost_for_tokens_known_worked_example():
+    """實際用量計費（與 estimate 同一公式）：in 7127 ×$0.27/K + out 2219 ×$1.10/K。
+    = 7.127×0.27 + 2.219×1.10 = 1.92429 + 2.4409 = $4.36519"""
+    pricing = PricingConfig(
+        input_per_1k=Decimal("0.27"),
+        output_per_1k=Decimal("1.10"),
+        per_page_tokens=5000,
+        input_ratio=Decimal("0.77"),
+    )
+    assert CALC.cost_for_tokens(7127, 2219, pricing) == Decimal("4.36519")
+
+
+def test_cost_for_tokens_zero_usage_costs_nothing():
+    assert CALC.cost_for_tokens(0, 0, DEFAULT) == Decimal("0")
 
 
 def test_estimate_reports_input_output_split():

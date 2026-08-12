@@ -7,6 +7,7 @@
 """
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import Enum, auto
 
 from paper_kit.domain.job_result import JobResult
@@ -41,6 +42,8 @@ class TranslationJob:
     target_lang: str = "zh-TW"
     pages: str | None = None          # "1-2" 形式；None = 全文
     glossary_files: list[str] = field(default_factory=list)
+    engine_id: str | None = None      # 用哪個引擎（票 06 計價用）
+    estimated_cost: Decimal | None = None  # 票 06：上傳時的前置估算（完成後比對用）
     result: JobResult | None = None
     error: str | None = None
 

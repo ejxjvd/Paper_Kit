@@ -132,6 +132,19 @@ def test_start_is_non_blocking(tmp_path: Path, upload_pdf: Path):
     service.wait(job.job_id, timeout=5)
 
 
+def test_start_records_engine_id_on_job(tmp_path: Path, upload_pdf: Path):
+    """票 06：任務要記得用哪個引擎，事後才能算實際成本。"""
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(
+        job.job_id,
+        FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf")),
+        engine_id="deepseek",
+    )
+    service.wait(job.job_id, timeout=5)
+    assert repo.get(job.job_id).engine_id == "deepseek"
+
+
 class _SlowEngine:
     def __init__(self, delay: float):
         self._delay = delay

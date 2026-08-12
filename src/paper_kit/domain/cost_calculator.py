@@ -34,14 +34,19 @@ class CostCalculator:
         total = pages * pricing.per_page_tokens
         input_tokens = int(Decimal(total) * pricing.input_ratio)
         output_tokens = total - input_tokens
-        cost = (
-            Decimal(input_tokens) / 1000 * pricing.input_per_1k
-            + Decimal(output_tokens) / 1000 * pricing.output_per_1k
-        )
         return CostEstimate(
             pages=pages,
             total_tokens=total,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost,
+            cost=self.cost_for_tokens(input_tokens, output_tokens, pricing),
+        )
+
+    def cost_for_tokens(
+        self, input_tokens: int, output_tokens: int, pricing: PricingConfig
+    ) -> Decimal:
+        """實際用量計費（與 estimate 同一公式——單一真相，application 不可複製）。"""
+        return (
+            Decimal(input_tokens) / 1000 * pricing.input_per_1k
+            + Decimal(output_tokens) / 1000 * pricing.output_per_1k
         )

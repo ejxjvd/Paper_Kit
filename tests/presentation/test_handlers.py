@@ -88,3 +88,9 @@ def test_all_statuses_have_traditional_chinese_label():
 def test_file_name_comes_from_source():
     view = build_job_card(completed_job())
     assert view.file_name == "paper.pdf"
+
+
+def test_usage_label_passes_through_to_view():
+    """票 06：成本標籤由 app.py 用 CostService 算好後傳入（handlers 保持純函式）。"""
+    view = build_job_card(completed_job(), usage_label="成本：估 ¥0.169 → 實際 ¥0.032")
+    assert view.usage_label == "成本：估 ¥0.169 → 實際 ¥0.032"

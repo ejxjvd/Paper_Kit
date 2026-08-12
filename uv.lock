@@ -815,21 +815,23 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "nicegui" },
+    { name = "pypdf" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "nicegui", specifier = ">=2.0" }]
+requires-dist = [
+    { name = "nicegui", specifier = ">=2.0" },
+    { name = "pypdf", specifier = ">=5.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pypdf", specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
 ]

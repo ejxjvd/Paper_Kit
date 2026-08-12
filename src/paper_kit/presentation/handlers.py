@@ -31,6 +31,7 @@ class JobCardView:
     dual_url: str | None
     preview_url: str | None
     error: str | None = None
+    usage_label: str | None = None   # 票 06：完成後顯示估算 vs 實際成本
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -39,7 +40,9 @@ def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | 
     return f"{files_base}/{job_id}/{Path(result_path).name}"
 
 
-def build_job_card(job: TranslationJob, files_base: str = "/files") -> JobCardView:
+def build_job_card(
+    job: TranslationJob, files_base: str = "/files", usage_label: str | None = None
+) -> JobCardView:
     """任務 → 卡片 viewmodel（純函式）。"""
     running = job.status in (JobStatus.QUEUED, JobStatus.TRANSLATING)
     urls = None
@@ -61,4 +64,5 @@ def build_job_card(job: TranslationJob, files_base: str = "/files") -> JobCardVi
         dual_url=urls[1] if urls else None,
         preview_url=urls[2] if urls else None,
         error=job.error,
+        usage_label=usage_label,
     )

@@ -39,11 +39,14 @@ class JobService:
         """任務列表（建立順序，UI 輪詢用）。"""
         return [self._jobs.get(job_id) for job_id in self._order if self._jobs.get(job_id)]
 
-    def start(self, job_id: str, engine: TranslationEnginePort) -> None:
-        """背景 thread 執行翻譯；立即回傳。"""
+    def start(
+        self, job_id: str, engine: TranslationEnginePort, engine_id: str | None = None
+    ) -> None:
+        """背景 thread 執行翻譯；立即回傳。engine_id 記在任務上（票 06 計價）。"""
         job = self._jobs.get(job_id)
         if job is None:
             raise KeyError(job_id)
+        job.engine_id = engine_id
         thread = threading.Thread(target=self._run, args=(job, engine), daemon=True)
         thread.start()
         self._threads[job_id] = thread
