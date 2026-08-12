@@ -55,3 +55,27 @@ class SettingsService:
 
     def set_output_dir(self, path: str) -> None:
         self._repo.set("output_dir", path)
+
+    # ── 票 05：術語表挑選＋自動提取 ────────────────────────────
+
+    def selected_glossaries(self) -> list[str] | None:
+        """挑選的術語表名；未存過回 None（呼叫端用「全選」），存過（含空）原樣回傳。"""
+        raw = self._repo.get("selected_glossaries")
+        if raw is None:
+            return None
+        return [n for n in raw.split(",") if n]
+
+    def set_selected_glossaries(self, names: list[str]) -> None:
+        self._repo.set("selected_glossaries", ",".join(names))
+
+    def selected_glossary_names(self, all_names: list[str]) -> list[str]:
+        """「未存過 → 全選」慣例單一入口（UI 呼叫點不再各自寫 None 判斷）。"""
+        stored = self.selected_glossaries()
+        return stored if stored is not None else all_names
+
+    def auto_extract(self) -> bool:
+        """自動術語提取開關（--term-siliconflow）；預設關。"""
+        return (self._repo.get("auto_extract", "0") or "0") == "1"
+
+    def set_auto_extract(self, on: bool) -> None:
+        self._repo.set("auto_extract", "1" if on else "0")

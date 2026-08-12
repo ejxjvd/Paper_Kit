@@ -64,3 +64,43 @@ def test_tgt_lng_normalization(col_value, target_lang, expected):
 def test_len_counts_entries():
     g = Glossary.parse(VALID_CSV)
     assert len(g) == 2
+
+
+# ── 票 05：編輯（CRUD 用）與序列化 ────────────────────────
+
+
+def test_entries_preserve_order():
+    g = Glossary.parse(VALID_CSV)
+    assert g.entries() == [("attention", "注意力機制"), ("softmax", "Softmax")]
+
+
+def test_to_csv_round_trip_preserves_entries():
+    g = Glossary.parse(VALID_CSV)
+    assert Glossary.parse(g.to_csv()).entries() == g.entries()
+
+
+def test_to_csv_has_header():
+    assert Glossary.parse(VALID_CSV).to_csv().startswith("source,target\n")
+
+
+def test_with_entry_adds_or_overwrites():
+    g = Glossary.parse(VALID_CSV)
+    g2 = g.with_entry("attention", "注意力（新）")
+    assert g2.get("attention") == "注意力（新）"
+    assert len(g2) == 2
+    assert g.get("attention") == "注意力機制"  # 原物件不可變
+
+
+def test_without_index_removes_and_keeps_order():
+    g = Glossary.parse(VALID_CSV)
+    g2 = g.without_index(0)
+    assert g2.entries() == [("softmax", "Softmax")]
+    assert len(g) == 2
+
+
+def test_without_index_out_of_range_rejected():
+    g = Glossary.parse(VALID_CSV)
+    with pytest.raises(IndexError):
+        g.without_index(9)
+    with pytest.raises(IndexError):
+        g.without_index(-1)  # 負索引不接受（沒有呼叫者用）

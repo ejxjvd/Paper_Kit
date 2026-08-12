@@ -106,6 +106,17 @@ def test_build_command_no_glossary_omits_flags():
     assert "--no-auto-extract-glossary" not in cmd
 
 
+def test_build_command_term_siliconflow_when_auto_extract_on():
+    """票 05：自動術語提取開關 → --term-siliconflow（Kimi 角色原生版）。"""
+    cmd = build_command(make_job(auto_extract=True), EngineConfig(api_key="KEY"))
+    assert "--term-siliconflow" in cmd
+
+
+def test_build_command_term_siliconflow_absent_by_default():
+    cmd = build_command(make_job(), EngineConfig(api_key="KEY"))
+    assert "--term-siliconflow" not in cmd
+
+
 # ── translate：成功解析 ──────────────────────────────────
 
 

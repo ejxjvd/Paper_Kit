@@ -47,5 +47,31 @@ class Glossary:
     def get(self, source: str) -> str | None:
         return self._terms.get(source)
 
+    def entries(self) -> list[tuple[str, str]]:
+        """有序 (source, target) 列表（票 05：編輯頁顯示、序列化共用）。"""
+        return list(self._terms.items())
+
+    def to_csv(self) -> str:
+        """序列化回 CSV（source,target 標頭）——儲存格式單一真相。"""
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")  # csv 預設 \r\n，統一 \n
+        writer.writerow(["source", "target"])
+        writer.writerows(self.entries())
+        return buf.getvalue()
+
+    def with_entry(self, source: str, target: str) -> "Glossary":
+        """票 05：新增/覆寫一列（不可變——回傳新物件）。"""
+        terms = dict(self._terms)
+        terms[source] = target
+        return Glossary(target_lang=self.target_lang, _terms=terms)
+
+    def without_index(self, index: int) -> "Glossary":
+        """票 05：刪除一列（越界丟 IndexError；不可變）。"""
+        pairs = self.entries()
+        if not 0 <= index < len(pairs):
+            raise IndexError(f"術語列索引越界: {index}")
+        del pairs[index]
+        return Glossary(target_lang=self.target_lang, _terms=dict(pairs))
+
     def __len__(self) -> int:
         return len(self._terms)

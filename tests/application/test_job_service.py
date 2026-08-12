@@ -145,6 +145,22 @@ def test_start_records_engine_id_on_job(tmp_path: Path, upload_pdf: Path):
     assert repo.get(job.job_id).engine_id == "deepseek"
 
 
+def test_engine_receives_glossary_selection_and_auto_extract(tmp_path: Path, upload_pdf: Path):
+    """票 05：挑選的術語表組合＋自動提取開關隨任務帶給引擎（FakeEngine 驗證）。"""
+    service, _ = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    job.glossary_files = ["/gl/dl.csv", "/gl/img.csv"]
+    job.auto_extract = True
+    engine = FakeEngine(result=JobResult(mono_path="/out/a.mono.pdf"))
+
+    service.start(job.job_id, engine)
+    service.wait(job.job_id, timeout=5)
+
+    received = engine.received[0]
+    assert received.glossary_files == ["/gl/dl.csv", "/gl/img.csv"]
+    assert received.auto_extract is True
+
+
 class _SlowEngine:
     def __init__(self, delay: float):
         self._delay = delay

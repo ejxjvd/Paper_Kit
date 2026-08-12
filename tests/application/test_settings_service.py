@@ -64,3 +64,35 @@ def test_output_dir_roundtrip(tmp_path):
 def test_engine_spec_matches_registry(tmp_path):
     svc = make_service(tmp_path)
     assert svc.engine_spec() is ENGINE_SPECS["siliconflow"]
+
+
+# ── 票 05：術語表挑選＋自動提取開關 ──────────────────────────
+
+
+def test_selected_glossaries_default_none_means_all(tmp_path):
+    """未存過選擇 → None（呼叫端用「全選」）；存過（含空）→ 原樣回傳。"""
+    svc = make_service(tmp_path)
+    assert svc.selected_glossaries() is None
+    svc.set_selected_glossaries(["dl", "img"])
+    assert svc.selected_glossaries() == ["dl", "img"]
+    svc.set_selected_glossaries([])
+    assert svc.selected_glossaries() == []  # 明確取消全選要可區分
+
+
+def test_selected_glossary_names_resolves_fallback(tmp_path):
+    """「未存過 → 全選」慣例收進 service（UI 兩個呼叫點不再各自寫）。"""
+    svc = make_service(tmp_path)
+    assert svc.selected_glossary_names(["dl", "img"]) == ["dl", "img"]
+    svc.set_selected_glossaries(["dl"])
+    assert svc.selected_glossary_names(["dl", "img"]) == ["dl"]
+    svc.set_selected_glossaries([])
+    assert svc.selected_glossary_names(["dl", "img"]) == []  # 明確取消就真的是空
+
+
+def test_auto_extract_toggle_roundtrip(tmp_path):
+    svc = make_service(tmp_path)
+    assert svc.auto_extract() is False  # 預設關
+    svc.set_auto_extract(True)
+    assert svc.auto_extract() is True
+    svc.set_auto_extract(False)
+    assert svc.auto_extract() is False

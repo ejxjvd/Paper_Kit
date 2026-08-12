@@ -67,6 +67,8 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
         cmd += [f"--{cfg.provider}"]
     if job.glossary_files:
         cmd += ["--glossaries", ",".join(job.glossary_files), "--no-auto-extract-glossary"]
+    if job.auto_extract:
+        cmd += ["--term-siliconflow"]  # 票 05：Kimi 角色原生版自動術語提取
     return cmd
 
 

@@ -42,6 +42,7 @@ class TranslationJob:
     target_lang: str = "zh-TW"
     pages: str | None = None          # "1-2" 形式；None = 全文
     glossary_files: list[str] = field(default_factory=list)
+    auto_extract: bool = False        # 票 05：--term-siliconflow 自動術語提取
     engine_id: str | None = None      # 用哪個引擎（票 06 計價用）
     estimated_cost: Decimal | None = None  # 票 06：上傳時的前置估算（完成後比對用）
     result: JobResult | None = None
