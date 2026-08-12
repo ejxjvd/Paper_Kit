@@ -170,6 +170,33 @@ def test_generic_error_uses_excerpt_not_full_traceback():
     assert "Traceback" not in str(exc.value)
 
 
+def test_engine_output_leaking_api_key_is_redacted_in_error_and_log(tmp_path):
+    """票 09 紅線（standards review 硬問題）：引擎失敗輸出尾段回顯 key →
+    EngineError 訊息與 log 都不許含 key（job.error 來自 str(e)，再進 SQLite／卡片／log）。"""
+    import json
+    import logging
+
+    from paper_kit.infrastructure.logging_setup import setup_logging
+
+    log_path = setup_logging(tmp_path)
+    try:
+        output = "RuntimeError: boom\n--siliconflow-api-key sk-TOPSECRET\n"  # 末 200 字含 key
+        adapter = Pdf2zhNextAdapter(
+            EngineConfig(api_key="sk-TOPSECRET"),
+            runner=FakeRunner((1, output)),
+        )
+        with pytest.raises(EngineError) as exc:
+            adapter.translate(make_job())
+        assert "sk-TOPSECRET" not in str(exc.value)
+
+        text = log_path.read_text(encoding="utf-8")
+        assert "sk-TOPSECRET" not in text, "log 不得含 API key"
+        last = json.loads(text.strip().splitlines()[-1])
+        assert "***" in last["error"], "error 欄位要顯示遮罩後訊息"
+    finally:
+        logging.getLogger("paper_kit").handlers.clear()
+
+
 # ── translate：retry（50507 暫時性）與逾時 ────────────────
 
 

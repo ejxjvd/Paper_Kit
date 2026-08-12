@@ -3,14 +3,19 @@
 UI 薄層只依賴 JobService；引擎換插頭＝換 engine 參數（Ports & Adapters）。
 """
 
+import logging
 import shutil
 import threading
 import uuid
 from pathlib import Path
 
+from paper_kit.application.errors import to_user_message
 from paper_kit.application.ports import JobRepository, TranslationEnginePort
 from paper_kit.application.start_translation import StartTranslation
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
+from paper_kit.infrastructure.logging_setup import format_error_chain
+
+logger = logging.getLogger("paper_kit.application.job_service")  # 票 09：事件 log 帶 job_id
 
 
 class JobService:
@@ -53,6 +58,7 @@ class JobService:
         )
         self._jobs.add(job)
         self._order.append(job_id)
+        logger.info("任務已建立", extra={"job_id": job_id})
         return job
 
     def list_jobs(self) -> list[TranslationJob]:
@@ -71,6 +77,7 @@ class JobService:
         thread = threading.Thread(target=self._run, args=(job, engine), daemon=True)
         thread.start()
         self._threads[job_id] = thread
+        logger.info("任務開始翻譯", extra={"job_id": job_id, "engine": engine_id})
 
     def retry(self, job_id: str, engine: TranslationEnginePort, engine_id: str | None = None) -> None:
         """票 08：失敗任務重試——回 queued 再跑一次（不需重新上傳）。
@@ -97,6 +104,7 @@ class JobService:
         engine = self._engines.get(job_id)
         if engine is not None:
             engine.cancel()
+        logger.info("任務已取消", extra={"job_id": job_id})
 
     def wait(self, job_id: str, timeout: float = 10.0) -> None:
         """等待背景執行結束（測試／無頭執行用）。"""
@@ -120,6 +128,27 @@ class JobService:
                 engine=engine, jobs=self._jobs, lock=self._lock
             ).run(job)
             self._copy_outputs(done)
+            if done.status is JobStatus.COMPLETED:
+                logger.info("任務完成", extra={"job_id": job.job_id})
+            elif done.status is JobStatus.CANCELLED:
+                logger.info("任務已取消", extra={"job_id": job.job_id})
+            else:
+                logger.error(
+                    "任務失敗",
+                    extra={"job_id": job.job_id, "error": done.error or "(無訊息)"},
+                )
+        except Exception as exc:
+            # 票 09 spec review：非 EngineError 的意外例外（引擎 bug、記憶體…）
+            # 不讓 daemon thread 連 traceback 直接死——job 標 FAILED＋log 錯誤鏈。
+            with self._lock:
+                if job.status is not JobStatus.CANCELLED:  # 取消後引擎才爆 → 維持 cancelled
+                    job.transition(JobStatus.FAILED)
+                    job.error = to_user_message(exc)  # 不吐原始 traceback
+                    self._jobs.save(job)
+            logger.error(
+                "任務失敗（未預期例外）",
+                extra={"job_id": job.job_id, "error_chain": format_error_chain(exc)},
+            )
         finally:
             # 票 08 review：thread/engine 引用收尾清理（歷史任務無界增長）
             self._threads.pop(job.job_id, None)

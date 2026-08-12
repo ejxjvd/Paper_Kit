@@ -8,6 +8,7 @@ POC 教訓（2026-08-12 實測）：
 - 錯誤對映：401/術語表格式 → 友善訊息，不透傳原始 traceback
 """
 
+import logging
 import os
 import re
 import signal
@@ -19,6 +20,9 @@ from pathlib import Path
 from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
+from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
+
+logger = logging.getLogger("paper_kit.infrastructure.pdf2zh_next_adapter")
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
 DEFAULT_MODEL = "google/gemma-4-31B-it"
@@ -180,10 +184,18 @@ class Pdf2zhNextAdapter:
                 time.sleep(2**attempt)  # 退避 2s, 4s
             try:
                 rc, output = self._runner(cmd, timeout=self._config.timeout_seconds, cwd=cwd)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as timeout_exc:
+                logger.error(
+                    "翻譯逾時",
+                    extra={
+                        "job_id": job.job_id,
+                        "error_chain": format_error_chain(timeout_exc),  # 票 09 review：真實鏈
+                        "command": redact_command(cmd),  # 票 09：命令含 key → 遮罩
+                    },
+                )
                 raise EngineError(
                     f"翻譯逾時（超過 {self._config.timeout_seconds} 秒無回應，上游可能掛了）"
-                )
+                ) from timeout_exc
             if self._cancelled:
                 raise EngineError("已取消")  # 子程序被 kill 後回傳的雜訊不算數
             if rc == 0:
@@ -191,4 +203,14 @@ class Pdf2zhNextAdapter:
             last_error = output
             if not _is_transient(output):
                 break
-        raise EngineError(_friendly_error(last_error))
+        # 票 09：失敗 log 記錯誤＋遮罩 key；toast 同樣 redact（review：不只有 log 要守）
+        safe_error = redact(last_error, [self._config.api_key])
+        logger.error(
+            "翻譯失敗",
+            extra={
+                "job_id": job.job_id,
+                "error": _friendly_error(safe_error),
+                "command": redact_command(cmd),
+            },
+        )
+        raise EngineError(_friendly_error(safe_error))

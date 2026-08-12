@@ -444,3 +444,28 @@ def test_retry_without_engine_id_keeps_original_engine(tmp_path: Path, upload_pd
 
     assert repo.get(job.job_id).status is JobStatus.COMPLETED
     assert repo.get(job.job_id).engine_id == job.engine_id
+
+
+# ── 票 09 spec review：意外例外的兜底 ──────────────────────────
+
+
+def test_unexpected_exception_in_worker_marks_failed(tmp_path: Path, upload_pdf: Path):
+    """非 EngineError 意外例外（引擎 bug）不讓 daemon thread 帶 traceback 死亡：
+    job 標 FAILED＋使用者訊息，不再卡 TRANSLATING。"""
+    class ExplodingEngine:
+        def translate(self, job):
+            raise RuntimeError("boom at engine internals")
+
+        def cancel(self):
+            pass
+
+    service, repo = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf)
+    service.start(job.job_id, ExplodingEngine())
+    service.wait(job.job_id, timeout=5)
+
+    done = repo.get(job.job_id)
+    assert done.status is JobStatus.FAILED, "意外例外也要收斂到 FAILED"
+    assert "boom" in done.error
+    assert "Traceback" not in done.error  # 不吐原始 traceback
+    assert done.can_retry is True  # 之後可重試

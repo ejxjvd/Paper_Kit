@@ -13,6 +13,7 @@ from pathlib import Path
 from nicegui import app, ui
 
 from paper_kit.application.cost_service import CostService
+from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
 from paper_kit.application.pages import parse_pages
@@ -25,6 +26,7 @@ from paper_kit.domain.translation_job import JobStatus
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
+from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import JobCardView, build_job_card
 
@@ -60,11 +62,15 @@ def _start_job(
     try:
         pages = parse_pages(pages_text)
     except ValueError as exc:
-        ui.notify(str(exc), type="negative")
+        ui.notify(to_user_message(exc), type="negative")
         return
-    staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.name}"
-    with open(staging, "wb") as f:
-        f.write(e.content.read())
+    try:
+        staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.name}"
+        with open(staging, "wb") as f:
+            f.write(e.content.read())
+    except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
+        ui.notify(to_user_message(exc), type="negative")
+        return
     job = service.create_job(
         staging,
         target_lang=settings.target_lang(),
@@ -78,7 +84,7 @@ def _start_job(
     try:
         engine = settings.resolve_engine()
     except EngineError as exc:
-        ui.notify(str(exc), type="negative")
+        ui.notify(to_user_message(exc), type="negative")
         return
     engine_id = settings.engine_id()
     # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
@@ -116,13 +122,15 @@ def _retry_job(service: JobService, settings: SettingsService, job_id: str) -> N
     try:
         engine = settings.resolve_engine()
     except EngineError as exc:
-        ui.notify(str(exc), type="negative")
+        ui.notify(to_user_message(exc), type="negative")
         return
     try:
         service.retry(job_id, engine, engine_id=settings.engine_id())
         ui.notify("已重新排隊", type="positive")
-    except InvalidTransition:
-        ui.notify("此任務狀態無法重試", type="negative")
+    except InvalidTransition as exc:
+        ui.notify(to_user_message(exc), type="negative")
+    except KeyError:
+        ui.notify("找不到此任務", type="negative")  # KeyError 語境由呼叫端決定（票 09 review）
 
 
 def _cancel_job(service: JobService, job_id: str) -> None:
@@ -130,8 +138,10 @@ def _cancel_job(service: JobService, job_id: str) -> None:
     try:
         service.cancel(job_id)
         ui.notify("已取消", type="warning")
-    except InvalidTransition:
-        ui.notify("此任務狀態無法取消", type="negative")
+    except InvalidTransition as exc:
+        ui.notify(to_user_message(exc), type="negative")
+    except KeyError:
+        ui.notify("找不到此任務", type="negative")  # KeyError 語境由呼叫端決定（票 09 review）
 
 
 def _render_card(view: JobCardView, service: JobService, settings: SettingsService) -> None:
@@ -387,7 +397,7 @@ def _import_glossary(
     try:
         count = glossaries.import_csv(name, text, target_lang=settings.target_lang())
     except (GlossaryFormatError, GlossaryNameError) as exc:
-        ui.notify(str(exc), type="negative")
+        ui.notify(to_user_message(exc), type="negative")
         return
     ui.notify(f"已匯入 {name}（{count} 條）", type="positive")
     _sync_glossary_pickers(
@@ -405,7 +415,7 @@ def _create_glossary(
     try:
         glossaries.create_glossary(name)
     except (GlossaryNameError, OSError) as exc:
-        ui.notify(str(exc), type="negative")
+        ui.notify(to_user_message(exc), type="negative")
         return
     ui.notify(f"已建立 {name}", type="positive")
     new_name_input.set_value("")
@@ -453,8 +463,11 @@ def _rename_glossary(
     new = rename_to_input.value.strip()
     try:
         glossaries.rename_glossary(name, new)
-    except (GlossaryNameError, KeyError, OSError) as exc:
-        ui.notify(str(exc), type="negative")
+    except (GlossaryNameError, OSError) as exc:
+        ui.notify(to_user_message(exc), type="negative")
+        return
+    except KeyError:
+        ui.notify("找不到此術語表", type="negative")  # 語境由呼叫端決定（票 09 review）
         return
     ui.notify(f"已改名 {name} → {new}", type="positive")
     rename_to_input.set_value("")
@@ -520,12 +533,42 @@ def _save_pricing(cost: CostService, engine_id: str, in_price: str, out_price: s
         cost.set_pricing(engine_id, in_price, out_price, int(per_page))
         ui.notify(f"單價已儲存（{engine_id}）", type="positive")
     except (ValueError, TypeError):
-        ui.notify("單價格式錯誤（需為數字）", type="negative")
+        ui.notify("單價格式錯誤（需為數字）", type="negative")  # 表單驗證，固定訊息
+
+
+def _debug_page(log_path: Path) -> None:
+    """票 09：debug 檢視頁——最近任務的 log 可查（job_id 過濾）。"""
+
+    @ui.page("/debug")
+    def debug_page():
+        ui.page_title("Paper_Kit Debug")
+        with ui.header().classes("items-center"):
+            ui.label("🔍 Paper_Kit Debug Log").classes("text-2xl font-bold")
+        with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
+            ui.label(f"log 檔：{log_path}").classes("text-xs text-grey-6")
+            job_filter = ui.input("過濾任務 id（空白 = 全部）").classes("w-full")
+            box = ui.column().classes("w-full gap-1")
+
+            def render():
+                box.clear()
+                entries = recent_log_entries(
+                    log_path, n=200, job_id=(job_filter.value or "").strip() or None
+                )
+                with box:
+                    if not entries:
+                        ui.label("（無 log）").classes("text-grey-6 text-sm")
+                    for entry in entries:
+                        ui.label(format_log_line(entry)).classes("text-xs font-mono")
+
+            job_filter.on_value_change(lambda: render())
+            ui.button("重新整理", on_click=render).props("outline")
+            render()
 
 
 def main() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_PATH = setup_logging(APP_DIR / "logs")  # 票 09：結構化 log 檔（debug 頁讀同一份）
     app.add_static_files(FILES_BASE, str(OUTPUTS_DIR))
     repo = SqliteSettingsRepository(DB_PATH)
     # 票 08：SQLite 任務歷史——重啟 app 後任務仍在（InMemory 只留給無頭執行）
@@ -541,7 +584,9 @@ def main() -> None:
             with ui.row().classes("items-center"):
                 ui.label("📄 Paper_Kit 論文翻譯器").classes("text-2xl font-bold")
                 ui.badge("自建 UI · 免除線上工具綁架").props("outline")
-            ui.link("設定", "/settings").classes("text-white")
+            with ui.row().classes("items-center gap-3"):
+                ui.link("設定", "/settings").classes("text-white")
+                ui.link("Debug", "/debug").classes("text-white text-grey-4")
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
             memo: dict[str, str | None] = {}
@@ -560,6 +605,7 @@ def main() -> None:
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
 
     _settings_page(settings, cost, glossaries)
+    _debug_page(LOG_PATH)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)
 
 
