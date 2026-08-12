@@ -24,13 +24,13 @@ from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
     is_pdf_path,
 )
 from paper_kit.application.pages import parse_pages
-from paper_kit.application.ports import EngineError
+from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.domain.translation_job import InvalidTransition
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
 from paper_kit.domain.translation_job import JobStatus
-from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, build_engine
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
@@ -53,10 +53,45 @@ BADGE_COLORS = {
     JobStatus.CANCELLED: "grey",
 }
 
+# 票 19：主頁引擎三選卡（ticket 明定三支 PDF 主引擎；latex／ppt-vision 走特化路線）
+ENGINE_CARDS = (
+    ("siliconflow", "gemma 視覺模型（圖表精準；預設引擎）"),
+    ("deepseek", "純文字模型（機密文件唯一可用）"),
+    ("babeldoc", "OpenAI 相容雲端（DeepSeek 後端）"),
+)
+
 
 def _real_path(view_url: str) -> Path:
     """/files/<job_id>/<name> → 磁碟真實路徑（下載用）。"""
     return OUTPUTS_DIR / view_url.split(FILES_BASE + "/", 1)[1]
+
+
+def _resolve_task_engine(
+    settings: SettingsService, engine_id: str | None
+) -> tuple[str, TranslationEnginePort]:
+    """票 19：本任務引擎解析——override（主頁引擎卡點選）或設定頁 global。
+
+    override 缺 key 給相同友善錯誤（不 fallback 到 global——使用者明確選了
+    引擎卻被換成別支翻譯是靜默誤動作）。回傳 (engine_id, engine)。
+    """
+    if engine_id is None:
+        return settings.engine_id(), settings.resolve_engine()
+    spec = ENGINE_SPECS.get(engine_id)
+    if spec is None:
+        raise EngineError(f"未知引擎：{engine_id}")
+    if spec.needs_key and not settings.api_key(spec.id):
+        raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
+    return spec.id, build_engine(spec, api_key=settings.api_key(spec.id))
+
+
+def _engine_picker(pick, eid: str):
+    """票 19：0 參數 picker factory——`lambda eid=eid:` 會被 event 參數覆寫
+    （handle_event 依簽名參數數目傳 event；1 參數 lambda 收到的是事件物件）。
+    迴圈內閉包捕獲也要即時綁定（否則三個 handler 全看最後一個 eid）。
+    """
+    def pick_engine() -> None:
+        pick(eid)
+    return pick_engine
 
 
 async def _start_job(
@@ -68,6 +103,8 @@ async def _start_job(
     pages_text: str = "",
     sensitive: bool = False,
     ocr: bool = False,
+    engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
+    target_lang: str | None = None,  # 票 19：語言下拉就地選（None=設定頁值）
 ) -> None:
     # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於寫暫存檔）
     try:
@@ -84,11 +121,10 @@ async def _start_job(
         ui.notify(to_user_message(exc), type="negative")
         return
     try:
-        engine = settings.resolve_engine()
+        engine_id, engine = _resolve_task_engine(settings, engine_id)
     except EngineError as exc:
         ui.notify(to_user_message(exc), type="negative")
         return
-    engine_id = settings.engine_id()
     # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
     # .get()：未知引擎保守視為視覺（機密 fail-closed）
     spec = ENGINE_SPECS.get(engine_id)
@@ -102,7 +138,7 @@ async def _start_job(
         ocr = False
     job = service.create_job(
         staging,
-        target_lang=settings.target_lang(),
+        target_lang=target_lang or settings.target_lang(),  # 票 19：下拉就地選覆寫
         pages=pages,
         output_dir=settings.output_dir(),
         sensitive=sensitive,
@@ -233,7 +269,9 @@ def _cancel_job(service: JobService, job_id: str) -> None:
 
 
 def _render_card(view: JobCardView, service: JobService, settings: SettingsService) -> None:
-    with ui.card().classes("w-full pk-card"):  # 票 11：卡片主題 class（圓角/陰影/背景變數）
+    # 票 19 review：marker 供測試鎖定任務卡——引擎卡也有 spec.label，
+    # 純 content 匹配會假陽性（被引擎卡自身滿足），任務卡必須可獨立定位
+    with ui.card().mark("job-card").classes("w-full pk-card"):  # 票 11：卡片主題 class（圓角/陰影/背景變數）
         with ui.row().classes("items-center justify-between w-full"):
             with ui.column().classes("gap-0"):
                 with ui.row().classes("items-center gap-2"):
@@ -988,6 +1026,46 @@ def _index_page(
             ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
             memo: dict[str, str | None] = {}
             cards = ui.column().classes("w-full gap-4")
+            # 票 19：引擎三選卡——點選即設定「本任務」引擎（不寫進設定頁 global）
+            selected_engine = settings.engine_id()  # closure；預設尊重設定頁
+
+            def _pick_engine(eid: str) -> None:
+                """點選引擎卡：更新本任務引擎＋卡片高亮（同一 render 的 closure）。"""
+                nonlocal selected_engine
+                selected_engine = eid
+                for cid, c in engine_cards.items():
+                    c.classes(
+                        remove="ring-2 ring-primary",
+                        add=("ring-2 ring-primary" if cid == eid else ""),
+                    )
+                ui.notify(f"本任務將使用 {ENGINE_SPECS[eid].label}", type="info")
+
+            engine_cards: dict[str, ui.card] = {}
+            with ui.row().classes("gap-2 w-full"):
+                for eid, desc in ENGINE_CARDS:
+                    spec = ENGINE_SPECS[eid]
+                    card = ui.card().mark(f"engine-card-{eid}").classes(
+                        "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                        + (" ring-2 ring-primary" if eid == selected_engine else "")
+                    )
+                    with card:
+                        ui.label(spec.label).classes("font-semibold text-sm")
+                        ui.label(desc).classes("text-xs text-grey-7")
+                    engine_cards[eid] = card
+                    card.on("click", _engine_picker(_pick_engine, eid))
+
+            # 票 19：目標語言就地下拉（預設＝設定頁值；不跳設定頁就能改本任務語言）
+            # spec review：設定頁語言是自由文字——值不在內建列表時併入選項
+            #（NiceGUI choice_element 對不在 options 的初始值直接 raise ValueError → 主頁 500）
+            lang_options = ["zh-TW", "zh-CN", "en"]
+            current_lang = settings.target_lang()
+            if current_lang and current_lang not in lang_options:
+                lang_options = [current_lang] + lang_options
+            lang_select = ui.select(
+                lang_options,
+                value=current_lang,
+                label="目標語言（本任務）",
+            ).classes("w-full")
             # 票 07：頁面範圍（空白=全部；1-2／3-5／1-2,4-6 區間格式）
             pages_input = ui.input(
                 "頁面範圍（空白=全部；如 1-2、3-5）"
@@ -1002,6 +1080,13 @@ def _index_page(
                         service, settings, cost, glossaries, e,
                         pages_text=pages_input.value, sensitive=sensitive_input.value,
                         ocr=ocr_input.value,
+                        # 票 19：只在使用者實際點選（≠設定頁 global）才 override——
+                        # 未點選走 global 路徑（settings.resolve_engine，測試 seam）
+                        engine_id=(
+                            selected_engine
+                            if selected_engine != settings.engine_id() else None
+                        ),
+                        target_lang=lang_select.value,
                     ),
                 ).classes("w-full")
                 with ui.row().classes("items-center gap-3 w-full"):
