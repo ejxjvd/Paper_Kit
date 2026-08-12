@@ -10,9 +10,12 @@ import uuid
 from pathlib import Path
 
 from paper_kit.application.errors import to_user_message
+from paper_kit.application.fingerprint import fingerprint
 from paper_kit.application.ocr import OcrService
 from paper_kit.application.ports import EngineError, JobRepository, TranslationEnginePort
 from paper_kit.application.start_translation import StartTranslation
+from paper_kit.application.translation_cache import CachedResult, TranslationCache
+from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
 from paper_kit.infrastructure.logging_setup import format_error_chain
 
@@ -23,13 +26,15 @@ class JobService:
     """任務服務：建立（複製上傳檔進 outputs/<job_id>/）、背景執行、等待。"""
 
     def __init__(self, jobs: JobRepository, outputs_dir: str | Path,
-                 ocr: OcrService | None = None):
+                 ocr: OcrService | None = None, cache: TranslationCache | None = None):
+        """cache：任務層快取（票 24）——None＝無快取（無頭模式）；enabled=False＝關閉開關。"""
         self._jobs = jobs
         self._outputs = Path(outputs_dir)
         self._threads: dict[str, threading.Thread] = {}
         self._engines: dict[str, TranslationEnginePort] = {}  # 票 08：cancel 要摸得到引擎
         self._lock = threading.Lock()  # 票 08：cancel vs worker 終態判定互斥（review 修正）
         self._ocr = ocr  # 票 12：掃描件 OCR（None＝未啟用；呼叫端組裝注入）
+        self._cache = cache  # 票 24：翻譯快取（None＝未注入；快取是優化不是依賴）
         # 票 08：重啟後從 repo 載入歷史（SQLite 才有記憶；InMemory 回傳空）
         self._order = [job.job_id for job in jobs.list()]
         self._reclaim_stuck_jobs(jobs)
@@ -210,9 +215,19 @@ class JobService:
     def _run(self, job: TranslationJob, engine: TranslationEnginePort) -> None:
         try:
             self._prepare_ocr(job)
+            fp = self._fingerprint(job)
+            if fp is not None:
+                hit = self._cache.get(fp)  # type: ignore[union-attr]
+                if hit is not None:
+                    self._apply_cache_hit(job, hit)
+                    return
             done = StartTranslation(
                 engine=engine, jobs=self._jobs, lock=self._lock
             ).run(job)
+            if fp is not None and done.status is JobStatus.COMPLETED:
+                self._cache.put(  # type: ignore[union-attr]
+                    fp, done.result.mono_path, done.result.dual_path
+                )
             self._copy_outputs(done)
             if done.status is JobStatus.COMPLETED:
                 logger.info("任務完成", extra={"job_id": job.job_id})
@@ -239,6 +254,55 @@ class JobService:
             # 票 08 review：thread/engine 引用收尾清理（歷史任務無界增長）
             self._threads.pop(job.job_id, None)
             self._engines.pop(job.job_id, None)
+
+    def _fingerprint(self, job: TranslationJob) -> str | None:
+        """票 24：快取指紋——cache 未注入或開關關閉 → None（不查不寫）。
+
+        在 _prepare_ocr 之後呼叫：job.source_path 已是引擎實際讀取的檔、
+        engine_id 已由 start() 寫入、glossary_files 已由 UI 附加。
+        """
+        if self._cache is None or not self._cache.enabled:
+            return None
+        return fingerprint(
+            source_path=job.source_path,
+            engine_id=job.engine_id or "",
+            target_lang=job.target_lang,
+            pages=job.pages,
+            sensitive=job.sensitive,
+            glossary_files=job.glossary_files,
+        )
+
+    def _apply_cache_hit(self, job: TranslationJob, hit: CachedResult) -> None:
+        """票 24：快取命中——複製快取檔進任務目錄（慣例檔名，下載/輸出機制零改動）。
+
+        檔名對齊引擎產出慣例 {stem}.{lang}.mono.pdf（pdf2zh 系）；副檔名取自
+        快取檔（LaTeX/PPT 路線產出不同型別）。複製失敗＝磁碟問題 → 外層 except
+        接手標 FAILED（任務可重試，快取下次仍可命中）。
+        """
+        dest_dir = Path(job.source_path).parent
+        stem = Path(job.source_path).stem
+        mono = self._restore(hit.mono_path, dest_dir / f"{stem}.{job.target_lang}.mono")
+        dual = self._restore(hit.dual_path, dest_dir / f"{stem}.{job.target_lang}.dual")
+        job.result = JobResult(
+            mono_path=str(mono) if mono else None,
+            dual_path=str(dual) if dual else None,
+            from_cache=True,
+        )
+        # 2026-08-12 實測 bug：QUEUED→COMPLETED 是非法轉換（狀態機：QUEUED→
+        # TRANSLATING→COMPLETED）——快取命中跳過引擎但不能跳過狀態機，
+        # 先標 TRANSLATING（語意：進行中→完成，只是瞬間完成）再 COMPLETED。
+        job.transition(JobStatus.TRANSLATING)
+        job.transition(JobStatus.COMPLETED)
+        self._jobs.save(job)
+        logger.info("任務命中快取（引擎未呼叫）", extra={"job_id": job.job_id})
+
+    @staticmethod
+    def _restore(cache_path: str | None, dest: Path) -> Path | None:
+        if not cache_path:
+            return None
+        out = dest.with_suffix(Path(cache_path).suffix)
+        shutil.copy2(cache_path, out)
+        return out
 
     def _copy_outputs(self, job: TranslationJob) -> None:
         """票 07：完成的任務把 mono/dual 複製到設定的輸出目錄（空白=留在預設）。

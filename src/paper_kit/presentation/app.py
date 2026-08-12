@@ -9,6 +9,9 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 import tempfile
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
+
+from nicegui.elements.upload_files import FileUpload  # 票 21：拖放僅選檔（pending）
 
 from fastapi.responses import FileResponse, JSONResponse  # 票 18：批量下載 zip 路由
 from nicegui import app, ui
@@ -337,13 +340,16 @@ def _refresh(
         # memo：完成任務只算一次成本標籤（1s 輪詢下避免每輪重讀 PDF 頁數）
         if job.status is JobStatus.COMPLETED and job.job_id not in memo:
             memo[job.job_id] = cost.usage_label(job)
-        _render_card(
-            build_job_card(
-                job, usage_label=memo.get(job.job_id), engine_labels=engine_labels
-            ),
-            service,
-            settings,
-        )
+        # 2026-08-12 使用者實測 bug：卡片必須進 cards 容器——之前落在頁面 root slot，
+        # 每秒輪詢 clear() 清不到、卡片＋錯誤行無限疊加。
+        with cards:
+            _render_card(
+                build_job_card(
+                    job, usage_label=memo.get(job.job_id), engine_labels=engine_labels
+                ),
+                service,
+                settings,
+            )
 
 
 def _mask_key(key: str) -> str:
@@ -1130,12 +1136,17 @@ def _index_page(
             pages_input = ui.input(
                 "頁面範圍（空白=全部；如 1-2、3-5）"
             ).props("clearable").classes("w-full")
-            # 2026-08-12 使用者回饋：上傳卡卡片化＋「開始翻譯」主動作按鈕
-            # （上傳即開始；按鈕是選檔入口，語意＝「點此選檔並翻譯」）
+            # 2026-08-12 使用者回饋＋實測修正：上傳卡卡片化＋「開始翻譯」主動作按鈕。
+            # 語意修正：拖放/點選＝**選檔**（auto_upload=False，進 QUploader queue）、
+            # 按「開始翻譯」＝**送出翻譯**（run_method("upload") 送 queue）。
+            # 舊版 on_click 直接開檔案選擇器（pickFiles）→ 拖放後按鈕又彈檔案總管
+            # ＝使用者實測 bug；另 NiceGUI 3.15 Upload 無 selection 事件（選檔狀態
+            # 只在瀏覽器端），故「已選 N 檔」提示不可行——保持靜態提示。
             with ui.card().classes("w-full pk-card"):
                 upload_el = ui.upload(
-                    label="拖放 PDF 或點選選擇",
-                    auto_upload=True,
+                    label="拖放 PDF 或點選選擇（可多檔）",
+                    auto_upload=False,
+                    multiple=True,
                     on_upload=lambda e: _start_job(
                         service, settings, cost, glossaries, e,
                         pages_text=pages_input.value, sensitive=sensitive_input.value,
@@ -1152,9 +1163,9 @@ def _index_page(
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",
-                        on_click=lambda: upload_el.run_method("pickFiles"),
+                        on_click=lambda: upload_el.run_method("upload"),
                     ).props("color=primary unelevated").classes("text-lg")
-                    ui.label("點此選檔並翻譯；或直接拖放檔案到上方").classes("text-xs text-grey-7")
+                    ui.label("選擇檔案後按「開始翻譯」送出；或直接拖放檔案到上方").classes("text-xs text-grey-7")
         ui.timer(1.0, lambda: _refresh(cards, service, cost, settings, memo))
 
 

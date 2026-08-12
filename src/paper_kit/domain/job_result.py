@@ -9,3 +9,4 @@ class JobResult:
     dual_path: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    from_cache: bool = False  # 票 24：快取命中（引擎未呼叫）

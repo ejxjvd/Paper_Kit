@@ -286,3 +286,59 @@ async def test_job_card_shows_engine_label_not_raw_id(tmp_path, monkeypatch, mak
         assert any(engine_label in t for t in texts), f"任務卡 meta 應含引擎 label，實際文字：{texts}"
         job = service.list_jobs()[-1]
         assert job.engine_id == "siliconflow", "對照組：raw id 是 siliconflow，與 label 不同"
+
+
+# ── 2026-08-12 使用者實測 bug 回歸 ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_replaces_cards_not_duplicates(
+    tmp_path, monkeypatch, make_blank_pdf
+):
+    """使用者實測：任務卡＋錯誤行每秒疊加到最下面。
+
+    根因：_refresh 每秒 cards.clear() 但 _render_card 的 ui.card() 落在頁面
+    root slot（沒進 cards 容器）——clear 清不到、每輪重畫疊加。
+    修復後：多輪輪詢後 job-card 仍只有一張。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+    monkeypatch.setattr(settings, "resolve_engine", lambda: FileWritingFakeEngine())
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        real_pdf = make_blank_pdf(tmp_path / "CH4.pdf")
+        await upload_el.handle_uploads([
+            SmallFileUpload(
+                name="CH4.pdf", content_type="application/pdf",
+                _data=real_pdf.read_bytes(),
+            ),
+        ])
+        await user.should_see("CH4.pdf", retries=20)
+        await user.should_see("下載 mono", retries=50)  # 完成卡片
+        await asyncio.sleep(2.2)  # 再等 ≥2 輪 1s 輪詢（疊加 bug 的觸發窗口）
+        cards = user.find(kind=ui.card, marker="job-card").elements
+        assert len(cards) == 1, f"輪詢重畫必須替換不疊加（實際 {len(cards)} 張）"
+
+
+@pytest.mark.asyncio
+async def test_start_button_uses_selected_files_not_picker(tmp_path):
+    """使用者實測：拖放檔案後按「開始翻譯」又彈出檔案總管。
+
+    語意守衛：auto_upload=False（拖放/點選＝選檔進 queue）＋按鈕送 queue
+    上傳（run_method("upload")）——改回 pickFiles 或 auto_upload=True 都會紅。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        # set_bool 對 False 不寫入 props（None＝NiceGUI 預設 False）——守衛「不得為 True」
+        assert upload_el._props.get("auto-upload") is not True, "拖放＝選檔，不得自動送出"
+        # 按鈕存在且可點（click 送 run_method("upload")，無頭環境不真執行 JS）
+        user.find("📂 開始翻譯").click()
+        await user.should_see("選擇檔案後按「開始翻譯」送出")
