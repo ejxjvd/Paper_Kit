@@ -219,3 +219,27 @@ def test_old_schema_migrates_estimated_tokens_column(tmp_path: Path):
 
     assert repo.get("legacy1").estimated_tokens is None  # 舊列讀取安全
     assert repo.get("new1").estimated_tokens == 15_700
+
+
+# ── #85 BabelDOC 風格介面：only_selected_pages 隨任務持久化 ──
+
+
+def test_only_selected_pages_survives_roundtrip_and_restart(tmp_path: Path):
+    """#85：「僅選中頁面」toggle 狀態隨任務記錄（SQLite 欄位），重啟也在。"""
+    job = sample_job()
+    job.only_selected_pages = False
+
+    db = tmp_path / "app.db"
+    repo1 = SqliteJobRepository(db)
+    repo1.add(job)
+    assert repo1.get("abc123").only_selected_pages is False
+
+    repo2 = SqliteJobRepository(db)  # 重啟
+    assert repo2.get("abc123").only_selected_pages is False
+
+
+def test_only_selected_pages_defaults_true_in_db(tmp_path: Path):
+    """#85：舊任務/預設 → 僅選中頁面 ON（不送 flag 的唯二時機是 toggle OFF 或無頁面）。"""
+    repo = make_repo(tmp_path)
+    repo.add(TranslationJob(job_id="plain", source_path="/out/plain/a.pdf"))
+    assert repo.get("plain").only_selected_pages is True

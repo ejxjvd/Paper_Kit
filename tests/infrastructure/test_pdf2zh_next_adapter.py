@@ -162,6 +162,15 @@ def test_build_command_no_pages_omits_flag():
     assert "--pages" not in cmd
 
 
+def test_build_command_only_selected_pages_off_omits_flag():
+    """#85：仅选中页面 toggle OFF → 不送 --only-include-translated-page
+    （引擎預設輸出全部頁面、未選頁原樣保留；ON＝現行行為只輸出翻譯頁）。"""
+    cmd = build_command(
+        make_job(only_selected_pages=False), EngineConfig(api_key="KEY")
+    )
+    assert "--only-include-translated-page" not in cmd
+
+
 def test_build_command_glossaries_comma_joined_with_auto_extract_off():
     cmd = build_command(
         make_job(glossary_files=["/gl/a.csv", "/gl/b.csv"]),

@@ -46,8 +46,11 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
     cmd += ["--openai-api-key", cfg.api_key]
     cmd += ["--lang-out", job.target_lang]
     if job.pages:
-        # babeldoc 的 only-include-translated-page 只在 --pages 時有效（CLI help 原文）
-        cmd += ["--pages", job.pages, "--only-include-translated-page"]
+        cmd += ["--pages", job.pages]
+        if job.only_selected_pages:
+            # #85：僅選中頁面 toggle；babeldoc 的 only-include-translated-page 只在
+            # --pages 時有效（CLI help 原文）→ flag 附在 pages 區塊內
+            cmd += ["--only-include-translated-page"]
     if job.glossary_files:
         cmd += ["--glossary-files", ",".join(job.glossary_files)]
         if not job.auto_extract:

@@ -21,6 +21,7 @@ _COLUMNS = (
     "estimated_cost", "sensitive", "ocr", "result", "error",
     "progress",  # #72：翻譯進度（0.0–1.0；None＝無確定進度）
     "estimated_tokens",  # 2026-08-13：上傳時估算的總 tokens（UI 預估顯示用）
+    "only_selected_pages",  # #85：「僅選中頁面」toggle 隨任務記錄
 )
 _PLACEHOLDERS = ", ".join("?" for _ in _COLUMNS)
 
@@ -110,6 +111,7 @@ class SqliteJobRepository:
             job.error,
             str(job.progress) if job.progress is not None else None,
             str(job.estimated_tokens) if job.estimated_tokens is not None else None,
+            int(job.only_selected_pages),
         )
 
     def _deserialize(self, row) -> TranslationJob:
@@ -138,4 +140,6 @@ class SqliteJobRepository:
             error=data["error"],
             # .get：舊 DB 無 progress 欄位 → 預設無確定進度
             progress=float(data["progress"]) if data.get("progress") else None,
+            # .get：舊 DB 無此欄位 → 預設 True（不送 flag 的唯二時機是 toggle OFF 或無頁面）
+            only_selected_pages=bool(int(data.get("only_selected_pages") or 1)),
         )

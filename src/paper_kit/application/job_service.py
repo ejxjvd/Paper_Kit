@@ -48,6 +48,7 @@ class JobService:
         output_dir: str = "",
         sensitive: bool = False,
         ocr: bool = False,
+        only_selected_pages: bool = True,
     ) -> TranslationJob:
         """把上傳檔複製進任務資料夾，建立 queued 任務。
 
@@ -70,6 +71,7 @@ class JobService:
             output_dir=output_dir,
             sensitive=sensitive,
             ocr=ocr,
+            only_selected_pages=only_selected_pages,  # #85：僅翻譯選中頁面 toggle
         )
         self._jobs.add(job)
         self._order.append(job_id)

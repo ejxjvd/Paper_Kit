@@ -92,6 +92,16 @@ def test_build_command_pages_uses_only_include_flag():
     assert "--only-include-translated-page" in cmd
 
 
+def test_build_command_only_selected_pages_off_omits_flag():
+    """#85：仅选中页面 toggle OFF → 不送 --only-include-translated-page。"""
+    cmd = build_babeldoc_command(
+        make_job(pages="3-4", only_selected_pages=False),
+        BabelDocConfig(api_key="KEY"),
+    )
+    assert "--pages" in cmd
+    assert "--only-include-translated-page" not in cmd
+
+
 def test_build_command_no_pages_omits_both_flags():
     cmd = build_babeldoc_command(make_job(pages=None), BabelDocConfig(api_key="KEY"))
     assert "--pages" not in cmd

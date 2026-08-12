@@ -11,6 +11,8 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import pypdf  # #85：選檔即讀頁數（BabelDOC 風格「N of M」頁面範圍下拉）
+
 from nicegui.elements.upload_files import FileUpload  # 票 21：拖放僅選檔（pending）
 
 from fastapi.responses import FileResponse, JSONResponse  # 票 18：批量下載 zip 路由
@@ -112,55 +114,67 @@ def _engine_picker(pick, eid: str):
     return pick_engine
 
 
-async def _start_job(
+def _pages_for_file(selected: list[str], file_pages: int) -> str | None:
+    """#85：頁面範圍（多選頁碼）套用單一檔案——選中頁碼 ∩ 1..file_pages。
+
+    空選擇／全選 → None（全部頁面）；檔案頁數不足 → 交集為空 → None（全文，
+    不把越界頁碼漏到引擎才爆）。回傳 "1,3,5" 式頁面範圍（parse_pages 合法格式）。"""
+    if not selected:
+        return None
+    pages = sorted({int(p) for p in selected if 1 <= int(p) <= file_pages})
+    if not pages or len(pages) >= file_pages:
+        return None  # 空交集或全選＝全部頁面
+    return ",".join(str(p) for p in pages)
+
+
+def _start_job(
     service: JobService,
     settings: SettingsService,
     cost: CostService,
     glossaries: GlossaryService,
-    e,
+    file_path: Path,
+    file_name: str,
     pages_text: str = "",
     sensitive: bool = False,
     ocr: bool = False,
     engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
     target_lang: str | None = None,  # 票 19：語言下拉就地選（None=設定頁值）
-) -> None:
-    # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於寫暫存檔）
+    only_selected_pages: bool = True,  # #85：僅翻譯選中頁面 toggle
+) -> bool:
+    """送暫存檔建立翻譯任務。成功（含引擎已啟動）回 True——呼叫方清理暫存。
+
+    #85 改版：暫存寫入從「選檔時」提前發生（auto_upload=True 暫存流程）——
+    本函只收已暫存的 file_path，不再碰 FileUpload。"""
+    # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於建任務）
     try:
         pages = parse_pages(pages_text)
     except ValueError as exc:
         ui.notify(to_user_message(exc), type="negative")
-        return
-    try:
-        # 2026-08-12 使用者實測 bug：NiceGUI 3.15 的 UploadEventArguments 沒有
-        # name/content——改 e.file: FileUpload（async save，自動分流大小檔）。
-        staging = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}-{e.file.name}"
-        await e.file.save(staging)
-    except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
-        ui.notify(to_user_message(exc), type="negative")
-        return
+        return False
     try:
         engine_id, engine = _resolve_task_engine(settings, engine_id)
     except EngineError as exc:
         ui.notify(to_user_message(exc), type="negative")
-        return
+        return False
     # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
     # .get()：未知引擎保守視為視覺（機密 fail-closed）
     spec = ENGINE_SPECS.get(engine_id)
     if sensitive and (spec is None or not spec.sensitive_ok):
         ui.notify("機密文件只可使用 DeepSeek 純文字引擎（先到設定切換引擎）", type="negative")
-        return
+        return False
     # 票 14 spec review：OCR 只適用 PDF——勾了但上傳非 PDF → 警告＋忽略旗標
     # （ensure_text_layer 同層兜底安全跳過；視覺路徑不需要文字層）
-    if ocr and not is_pdf_path(e.file.name):
+    if ocr and not is_pdf_path(file_name):
         ui.notify("🔍 掃描件 OCR 僅適用 PDF——已忽略（PPT 走視覺翻譯）", type="warning")
         ocr = False
     job = service.create_job(
-        staging,
+        file_path,
         target_lang=target_lang or settings.target_lang(),  # 票 19：下拉就地選覆寫
         pages=pages,
         output_dir=settings.output_dir(),
         sensitive=sensitive,
         ocr=ocr,
+        only_selected_pages=only_selected_pages,  # #85：僅翻譯選中頁面
     )
     # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）。
     # 票 14：只對 PDF 偵測（pptx 上傳不誤報掃描件——has_text_layer 對非 PDF 回 False）
@@ -181,18 +195,19 @@ async def _start_job(
     # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
     # 2026-08-13：挑選術語表 → 預估 tokens 依 ×1.57 倍率更新（research 實測值）
     est = cost.estimate_for_pdf(
-        engine_id, staging, pages=pages, glossary=bool(job.glossary_files)
+        engine_id, file_path, pages=pages, glossary=bool(job.glossary_files)
     )
     if est is not None:
         job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
         job.estimated_tokens = est.total_tokens  # 2026-08-13：UI 預估顯示用（隨任務持久化）
     _notify_estimate(cost, engine_id, est)
-    ui.notify(f"任務已建立：{e.file.name}", type="positive")
+    ui.notify(f"任務已建立：{file_name}", type="positive")
     # 票 10：engine_allows_sensitive 由 UI 層查 ENGINE_SPECS 傳入（service 兜底防衛）
     service.start(
         job.job_id, engine, engine_id=engine_id,
         engine_allows_sensitive=spec.sensitive_ok if spec else False,
     )
+    return True
 
 
 def _notify_estimate(
@@ -1261,24 +1276,52 @@ def _index_page(
                 value=current_lang,
                 label="目標語言（本任務）",
             ).classes("w-full")
-            # 票 07：頁面範圍（空白=全部；1-2／3-5／1-2,4-6 區間格式）
-            pages_input = ui.input(
-                "頁面範圍（空白=全部；如 1-2、3-5）"
-            ).props("clearable").classes("w-full")
-            # 2026-08-12 使用者回饋＋實測修正：上傳卡卡片化＋「開始翻譯」主動作按鈕。
-            # 語意修正：拖放/點選＝**選檔**（auto_upload=False，進 QUploader queue）、
-            # 按「開始翻譯」＝**送出翻譯**（run_method("upload") 送 queue）。
-            # 舊版 on_click 直接開檔案選擇器（pickFiles）→ 拖放後按鈕又彈檔案總管
-            # ＝使用者實測 bug；另 NiceGUI 3.15 Upload 無 selection 事件（選檔狀態
-            # 只在瀏覽器端），故「已選 N 檔」提示不可行——保持靜態提示。
-            with ui.card().classes("w-full pk-card"):
-                upload_el = ui.upload(
-                    label="拖放 PDF 或點選選擇（可多檔）",
-                    auto_upload=False,
-                    multiple=True,
-                    on_upload=lambda e: _start_job(
-                        service, settings, cost, glossaries, e,
-                        pages_text=pages_input.value, sensitive=sensitive_input.value,
+            # #85：BabelDOC 風格暫存流程（2026-08-13 定案）——選檔＝**暫存**：
+            # auto_upload=True 選完即上傳伺服器暫存（不建任務、不花錢），服務端
+            # pypdf 讀頁數 → 「N of M」頁面範圍下拉 → 按「開始翻譯」才消費暫存建任務。
+            # 舊語意（auto_upload=False queue）無法顯示頁數——頁數要等伺服器拿到檔。
+            # 暫存目錄：APP_DIR/staging/（建任務後即清；create_job 已複製源檔）。
+            staged: dict[str, Path] = {}
+
+            async def _on_file_uploaded(e) -> None:
+                """選檔即暫存——讀頁數更新「N of M」下拉；不建任務、不觸發翻譯。"""
+                staging_dir = APP_DIR / "staging"
+                staging_dir.mkdir(parents=True, exist_ok=True)
+                target = staging_dir / f"{uuid.uuid4().hex}-{e.file.name}"
+                try:
+                    await e.file.save(target)
+                except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
+                    ui.notify(to_user_message(exc), type="negative")
+                    return
+                try:
+                    pages = len(pypdf.PdfReader(str(target)).pages)
+                except Exception:
+                    ui.notify(f"無法讀取頁數：{e.file.name}（不是有效 PDF？）", type="warning")
+                    target.unlink(missing_ok=True)
+                    return
+                staged[e.file.name] = target
+                # 下拉以「最新上傳檔案」頁數為基準；語義＝範圍套用全部已暫存檔
+                page_select.set_options([str(i) for i in range(1, pages + 1)], value=[])
+                page_select.label = f"頁面範圍（{e.file.name}：共 {pages} 頁）"
+                range_counter.set_text(f"已選 0 of {pages} 頁")
+                staged_label.set_text(f"已暫存：{'、'.join(staged)}")
+                ui.notify(f"已暫存 {e.file.name}（{pages} 頁）——可選頁面範圍後按「開始翻譯」", type="info")
+
+            def _start_staged() -> None:
+                """「開始翻譯」＝消費暫存檔建任務（不開檔案選擇器；#85 暫存流程）。"""
+                if not staged:
+                    ui.notify("尚未選擇檔案——先拖放 PDF 到上方", type="warning")
+                    return
+                selected = page_select.value or []
+                for name, path in list(staged.items()):
+                    try:
+                        file_pages = len(pypdf.PdfReader(str(path)).pages)
+                    except Exception:
+                        file_pages = 0  # 理論上不會：暫存時已驗證可讀
+                    ok = _start_job(
+                        service, settings, cost, glossaries, path, name,
+                        pages_text=_pages_for_file(selected, file_pages) or "",
+                        sensitive=sensitive_input.value,
                         ocr=ocr_input.value,
                         # 票 19：只在使用者實際點選（≠設定頁 global）才 override——
                         # 未點選走 global 路徑（settings.resolve_engine，測試 seam）
@@ -1287,14 +1330,38 @@ def _index_page(
                             if selected_engine != settings.engine_id() else None
                         ),
                         target_lang=lang_select.value,
-                    ),
+                        only_selected_pages=only_selected_input.value,  # #85：僅選中頁面
+                    )
+                    if ok:
+                        staged.pop(name, None)
+                        path.unlink(missing_ok=True)  # create_job 已複製源檔 → 清暫存
+                if not staged:
+                    page_select.set_options([], value=[])
+                    page_select.label = "頁面範圍（上傳後可選）"
+                    range_counter.set_text("已選 0 of 0 頁")
+                    staged_label.set_text("尚未選取檔案")
+
+            with ui.card().classes("w-full pk-card"):
+                upload_el = ui.upload(
+                    label="拖放 PDF 或點選選擇（可多檔）",
+                    auto_upload=True,  # #85：選檔即上傳伺服器暫存（BabelDOC 風格）
+                    multiple=True,
+                    on_upload=_on_file_uploaded,
                 ).classes("w-full")
+                staged_label = ui.label("尚未選取檔案").classes("text-sm text-grey-8")
+                with ui.row().classes("items-center gap-3 w-full"):
+                    page_select = ui.select(
+                        [], multiple=True, value=[],
+                        label="頁面範圍（上傳後可選）",
+                    ).classes("flex-1")
+                    range_counter = ui.label("已選 0 of 0 頁").classes("text-xs text-grey-7")
+                only_selected_input = ui.checkbox("☑ 僅翻譯選中頁面（未選頁原樣保留）", value=True)
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",
-                        on_click=lambda: upload_el.run_method("upload"),
+                        on_click=_start_staged,
                     ).props("color=primary unelevated").classes("text-lg")
-                    ui.label("選擇檔案後按「開始翻譯」送出；或直接拖放檔案到上方").classes("text-xs text-grey-7")
+                    ui.label("選擇檔案後按「開始翻譯」送出；拖放＝暫存不自動翻譯").classes("text-xs text-grey-7")
         ui.timer(
             1.0,
             lambda: _refresh(

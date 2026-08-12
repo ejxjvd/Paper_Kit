@@ -51,7 +51,10 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
     cmd = ["uv", "tool", "run", "pdf2zh_next", job.source_path]
     if job.pages:
         cmd += ["--pages", job.pages]
-    cmd += ["--only-include-translated-page"]
+    if job.only_selected_pages:
+        # #85：「僅選中頁面」toggle——OFF＝不送（引擎預設輸出全部頁面、未選頁原樣保留）；
+        # 引擎無反向 only-include flag，語義＝只翻譯選中頁面 vs 全文都過引擎
+        cmd += ["--only-include-translated-page"]
     cmd += ["--lang-out", job.target_lang]
     if cfg.provider == "deepseek":
         cmd += ["--deepseek", "--deepseek-api-key", cfg.api_key]

@@ -52,6 +52,7 @@ class TranslationJob:
     estimated_tokens: int | None = None    # 2026-08-13：上傳時估算的總 tokens（UI 顯示預估用）
     sensitive: bool = False           # 票 10：機密文件（R18／隱私）——只准純文字引擎
     ocr: bool = False                 # 票 12：掃描件（無文字層）——執行前先本機 OCR
+    only_selected_pages: bool = True  # #85：僅翻譯選中頁面（引擎預設輸出全部頁面；OFF＝未選頁原樣保留）
     result: JobResult | None = None
     error: str | None = None
     progress: float | None = None     # #72：翻譯進度 0.0–1.0（None＝無確定進度→UI 用 indeterminate）
