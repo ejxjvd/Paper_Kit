@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from paper_kit.application.ports import EngineError
+from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
@@ -118,7 +118,7 @@ class CliAdapterBase:
 
     def translate(self, job: TranslationJob) -> JobResult:
         if not self._api_key():
-            raise EngineError("尚未設定 API key（設定頁填入後再翻譯）")
+            raise EngineError(MISSING_API_KEY_MESSAGE)
         if self._cancelled:
             raise EngineError("已取消")
         cmd = self._build_command(job)

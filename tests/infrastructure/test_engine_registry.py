@@ -18,6 +18,11 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
     Pdf2zhNextAdapter,
     build_command,
 )
+from paper_kit.infrastructure.ppt_vision_adapter import PptVisionAdapter
+from paper_kit.infrastructure.siliconflow_vision import (
+    DEFAULT_VISION_BASE_URL,
+    DEFAULT_VISION_MODEL,
+)
 from paper_kit.domain.translation_job import TranslationJob
 
 
@@ -105,3 +110,30 @@ def test_build_engine_babeldoc_missing_key_fails_at_translate():
     adapter = build_engine(ENGINE_SPECS["babeldoc"], api_key="")
     with pytest.raises(EngineError, match="API key"):
         adapter.translate(TranslationJob(job_id="j", source_path="/in/a.pdf"))
+
+
+# ── 票 14：PPT 視覺路徑第三支插頭 ──────────────────────────
+
+
+def test_registry_has_ppt_vision_spec():
+    """AC2：引擎註冊表新增 → UI 下拉（registry-driven）立即可選（同票 13 模式）。"""
+    spec = ENGINE_SPECS["ppt-vision"]
+    assert spec.label
+    assert spec.needs_key is True
+    assert spec.sensitive_ok is False  # 視覺 = 圖片上雲端（票 10 紅線）
+    assert spec.model == DEFAULT_VISION_MODEL
+    assert spec.base_url == DEFAULT_VISION_BASE_URL
+
+
+def test_build_engine_ppt_vision_returns_adapter_with_config():
+    adapter = build_engine(ENGINE_SPECS["ppt-vision"], api_key="SF-KEY")
+    assert isinstance(adapter, PptVisionAdapter)
+    assert adapter._config.api_key == "SF-KEY"
+    assert adapter._config.model == DEFAULT_VISION_MODEL
+
+
+def test_build_engine_ppt_vision_missing_key_fails_at_translate():
+    """缺 key 的錯誤時點/訊息與既有引擎一致（翻譯時友善錯誤）。"""
+    adapter = build_engine(ENGINE_SPECS["ppt-vision"], api_key="")
+    with pytest.raises(EngineError, match="API key"):
+        adapter.translate(TranslationJob(job_id="j", source_path="/in/a.pptx"))

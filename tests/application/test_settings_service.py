@@ -8,7 +8,9 @@ import pytest
 
 from paper_kit.application.ports import EngineError
 from paper_kit.application.settings_service import SettingsService
+from paper_kit.infrastructure.babeldoc_adapter import BabelDocAdapter
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+from paper_kit.infrastructure.ppt_vision_adapter import PptVisionAdapter
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 
 
@@ -39,8 +41,6 @@ def test_set_unknown_engine_rejected(tmp_path):
 
 def test_babeldoc_engine_resolves_through_registry(tmp_path):
     """票 13：換插頭不破壞——babeldoc 走同一 resolve 路徑（needs_key 守證）。"""
-    from paper_kit.infrastructure.babeldoc_adapter import BabelDocAdapter
-
     svc = make_service(tmp_path)
     with pytest.raises(EngineError, match="API key"):
         svc.resolve_engine()  # 預設 siliconflow 也缺 key——先設 babeldoc
@@ -57,6 +57,18 @@ def test_resolve_engine_missing_key_gives_friendly_error(tmp_path):
     svc = make_service(tmp_path)
     with pytest.raises(EngineError, match="API key"):
         svc.resolve_engine()
+
+
+def test_ppt_vision_engine_resolves_through_registry(tmp_path):
+    """票 14：PPT 視覺走同一 resolve 路徑（needs_key 守證，UI 引擎下拉自動出現）。"""
+    svc = make_service(tmp_path)
+    svc.set_engine("ppt-vision")
+    with pytest.raises(EngineError, match="API key"):
+        svc.resolve_engine()  # needs_key：缺 key 友善錯誤
+    svc.set_api_key("ppt-vision", "SF-KEY")
+    engine = svc.resolve_engine()
+    assert isinstance(engine, PptVisionAdapter)
+    assert engine._config.api_key == "SF-KEY"
 
 
 def test_api_key_roundtrip(tmp_path):

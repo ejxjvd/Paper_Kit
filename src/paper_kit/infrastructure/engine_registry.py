@@ -19,6 +19,14 @@ from paper_kit.infrastructure.pdf2zh_next_adapter import (
     EngineConfig,
     Pdf2zhNextAdapter,
 )
+from paper_kit.infrastructure.ppt_vision_adapter import (
+    PptVisionAdapter,
+    PptVisionConfig,
+)
+from paper_kit.infrastructure.siliconflow_vision import (
+    DEFAULT_VISION_BASE_URL,
+    DEFAULT_VISION_MODEL,
+)
 
 
 @dataclass(frozen=True)
@@ -82,11 +90,22 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         sensitive_ok=False,  # 送雲端 LLM：機密模式不可用（票 10 紅線）
         base_url=DEFAULT_BABELDOC_BASE_URL,
     ),
+    "ppt-vision": EngineSpec(
+        id="ppt-vision",
+        label="PPT 視覺（gemma 眼睛逐頁翻譯，SiliconFlow）",
+        provider="ppt-vision",
+        model=DEFAULT_VISION_MODEL,
+        needs_key=True,
+        sensitive_ok=False,  # 視覺 = 圖片上雲端（票 10 紅線，同 paste-vision）
+        base_url=DEFAULT_VISION_BASE_URL,
+    ),
 }
 
 
-def build_engine(spec: EngineSpec, api_key: str = "") -> Pdf2zhNextAdapter | BabelDocAdapter:
-    """spec → adapter（CLI 旗標對映在 adapter 內部，UI 不知情）。票 13：換插頭＝分派。"""
+def build_engine(
+    spec: EngineSpec, api_key: str = ""
+) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter:
+    """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。"""
     if spec.provider == "babeldoc":
         cfg = BabelDocConfig(
             model=spec.model,
@@ -94,6 +113,13 @@ def build_engine(spec: EngineSpec, api_key: str = "") -> Pdf2zhNextAdapter | Bab
             base_url=spec.base_url,
         )
         return BabelDocAdapter(cfg)
+    if spec.provider == "ppt-vision":
+        cfg = PptVisionConfig(
+            api_key=api_key,
+            model=spec.model,
+            base_url=spec.base_url,
+        )
+        return PptVisionAdapter(cfg)
     cfg = EngineConfig(
         provider=spec.provider,
         model=spec.model,

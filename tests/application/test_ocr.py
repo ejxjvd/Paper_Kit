@@ -16,6 +16,26 @@ from paper_kit.application.ports import EngineError
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
+def test_has_text_layer_non_pdf_returns_false_without_error(tmp_path):
+    """票 14：PPT 上傳走 OCR 偵測不炸——非 PDF 副檔名直接回 False（不上傳即報錯）。"""
+    pptx = tmp_path / "deck.pptx"
+    pptx.write_bytes(b"not a real pptx")
+    assert has_text_layer(pptx) is False
+
+
+def test_ensure_text_layer_skips_non_pdf_without_error(tmp_path):
+    """票 14 spec review：pptx＋勾 OCR 不炸——非 PDF 安全跳過（OCR 不被呼叫）。
+
+    視覺路徑不需要文字層；pypdf 對非 PDF 檔拋 FileDataError，直接短路。
+    """
+    pptx = tmp_path / "deck.pptx"
+    pptx.write_bytes(b"not a real pptx")
+    ocr = FakeOcr()
+    service = OcrService(ocr=ocr, overlay=make_fake_overlay({}))
+    assert service.ensure_text_layer(pptx) is None
+    assert ocr.called == []
+
+
 class FakeOcr:
     def __init__(self, pages: dict[int, str] | None = None, error: str | None = None):
         self._pages = pages or {1: "Fake OCR text page one"}

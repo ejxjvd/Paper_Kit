@@ -33,6 +33,15 @@ def test_babeldoc_default_pricing_follows_deepseek_backend(tmp_path):
     assert p.per_page_tokens == 5000
 
 
+def test_ppt_vision_default_pricing_matches_siliconflow(tmp_path):
+    """票 14：PPT 視覺＝SiliconFlow gemma 眼睛 → 預設單價比照 SiliconFlow 視覺。"""
+    svc = make_service(tmp_path)
+    p = svc.pricing_for("ppt-vision")
+    assert p.input_per_1k == Decimal("0.0012")
+    assert p.output_per_1k == Decimal("0.0012")
+    assert p.per_page_tokens == 5000
+
+
 def test_pricing_can_be_updated_for_price_raises(tmp_path):
     """DeepSeek 漲價只需改設定（2026-08-06 漲價公告教訓）。"""
     svc = make_service(tmp_path)

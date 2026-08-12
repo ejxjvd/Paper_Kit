@@ -16,7 +16,11 @@ from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
-from paper_kit.application.ocr import OcrService, has_text_layer  # 票 12：掃描件 OCR
+from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
+    OcrService,
+    has_text_layer,
+    is_pdf_path,
+)
 from paper_kit.application.pages import parse_pages
 from paper_kit.application.ports import EngineError
 from paper_kit.application.settings_service import SettingsService
@@ -88,6 +92,11 @@ def _start_job(
     if sensitive and (spec is None or not spec.sensitive_ok):
         ui.notify("機密文件只可使用 DeepSeek 純文字引擎（先到設定切換引擎）", type="negative")
         return
+    # 票 14 spec review：OCR 只適用 PDF——勾了但上傳非 PDF → 警告＋忽略旗標
+    # （ensure_text_layer 同層兜底安全跳過；視覺路徑不需要文字層）
+    if ocr and not is_pdf_path(e.name):
+        ui.notify("🔍 掃描件 OCR 僅適用 PDF——已忽略（PPT 走視覺翻譯）", type="warning")
+        ocr = False
     job = service.create_job(
         staging,
         target_lang=settings.target_lang(),
@@ -96,8 +105,14 @@ def _start_job(
         sensitive=sensitive,
         ocr=ocr,
     )
-    # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）
-    if not ocr and job.source_path and not has_text_layer(job.source_path):
+    # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）。
+    # 票 14：只對 PDF 偵測（pptx 上傳不誤報掃描件——has_text_layer 對非 PDF 回 False）
+    if (
+        not ocr
+        and job.source_path
+        and is_pdf_path(job.source_path)
+        and not has_text_layer(job.source_path)
+    ):
         ui.notify(
             "⚠️ 偵測為掃描件（無文字層）——翻譯可能產出空白；建議勾選 🔍 OCR 重試",
             type="warning",
@@ -219,10 +234,11 @@ def _render_card(view: JobCardView, service: JobService, settings: SettingsServi
                     "下載 mono",
                     on_click=lambda: ui.download(str(_real_path(view.mono_url))),
                 ).props("outline")
-                ui.button(
-                    "下載 dual",
-                    on_click=lambda: ui.download(str(_real_path(view.dual_url))),
-                ).props("outline")
+                if view.dual_url:  # 票 14：視覺路徑單一產出（mono=注記版，無 dual）
+                    ui.button(
+                        "下載 dual",
+                        on_click=lambda: ui.download(str(_real_path(view.dual_url))),
+                    ).props("outline")
                 ui.button("瀏覽器內預覽", on_click=lambda: _preview(view.preview_url))
 
 

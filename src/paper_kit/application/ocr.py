@@ -20,8 +20,19 @@ from paper_kit.infrastructure.pdf_overlay import overlay_text_layer
 OverlayFn = Callable[[Path, dict[int, str], Path], Path]
 
 
+def is_pdf_path(path: str | Path) -> bool:
+    """PDF 副檔名判定（票 14 收攏：偵測與 UI 共用同一 predicate）。"""
+    return Path(path).suffix.lower() == ".pdf"
+
+
 def has_text_layer(pdf_path: str | Path) -> bool:
-    """掃描件偵測（AC1）：任一頁有非空白文字 → 有文字層（回 True）。"""
+    """掃描件偵測（AC1）：任一頁有非空白文字 → 有文字層（回 True）。
+
+    票 14：非 PDF 副檔名（.pptx 等）直接回 False——pypdf 對非 PDF 檔會
+    拋警告/例外，PPT 上傳走同一偵測路徑時不該炸 UI。
+    """
+    if not is_pdf_path(pdf_path):
+        return False
     reader = pypdf.PdfReader(str(pdf_path))
     for page in reader.pages:
         text = (page.extract_text() or "").strip()
@@ -38,8 +49,14 @@ class OcrService:
         self._overlay = overlay
 
     def ensure_text_layer(self, pdf_path: str | Path) -> Path | None:
-        """確保 PDF 有文字層；無則 OCR 並回傳 OCR 版路徑（原檔不動）。"""
+        """確保 PDF 有文字層；無則 OCR 並回傳 OCR 版路徑（原檔不動）。
+
+        票 14 spec review：非 PDF（.pptx 等）安全跳過回 None——pypdf 對非
+        PDF 檔拋 FileDataError，而視覺路徑根本不需要文字層。
+        """
         src = Path(pdf_path)
+        if not is_pdf_path(src):
+            return None
         if has_text_layer(src):
             return None
         pages = self._ocr.extract_pages(src)
