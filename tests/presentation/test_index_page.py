@@ -670,6 +670,38 @@ def test_translated_pages_no_info_returns_none():
     assert app_module._translated_pages("", 0) is None
 
 
+# ── #20：瀏覽資料夾路徑語意正規化（純函式——使用者實測「點按無回應」） ──
+
+
+def test_explorer_target_windows_path_passthrough():
+    """Windows 路徑（使用者常見輸入）→ 原樣（explorer 直接可開，實測 C:\\ 開窗）。"""
+    assert app_module._explorer_target(r"C:\Users\qaref\out") == r"C:\Users\qaref\out"
+
+
+def test_explorer_target_unc_passthrough():
+    assert (
+        app_module._explorer_target(r"\\wsl.localhost\Ubuntu\home")
+        == r"\\wsl.localhost\Ubuntu\home"
+    )
+
+
+def test_explorer_target_mnt_converts_to_drive():
+    """WSL /mnt/c/... → C:\\...（手轉，免 subprocess——最可靠路徑）。"""
+    assert app_module._explorer_target("/mnt/c/Users/qaref/out") == r"C:\Users\qaref\out"
+
+
+def test_explorer_target_home_uses_wslpath():
+    """WSL 家目錄（~/.paper_kit/outputs）→ wslpath -w 轉 \\\\wsl.localhost UNC。"""
+    target = app_module._explorer_target("/home/qaref/.paper_kit/outputs")
+    assert target.startswith(r"\\wsl.localhost")
+
+
+def test_win_to_wsl_converts_drive_path():
+    """Windows 路徑 → WSL 對應（mkdir 用：C:\\ → /mnt/c/）。"""
+    assert app_module._win_to_wsl(r"C:\Users\qaref\out") == "/mnt/c/Users/qaref/out"
+    assert app_module._win_to_wsl(r"D:\x\y") == "/mnt/d/x/y"
+
+
 # ── #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎顯示） ──
 
 
@@ -788,6 +820,47 @@ async def test_engine_cards_after_checks_before_output_area(tmp_path):
         assert order.index("engine-card-deepseek") < order.index("engine-card-babeldoc")
         assert order.index("engine-card-babeldoc") < order.index("browse-output-dir"), (
             "引擎卡必須在輸出目錄/任務區上方"
+        )
+
+
+def _find_cards_container(el):
+    """DFS 找「任務卡容器」——ui.column、classes 恰為 w-full gap-4（app.py 1751）。
+
+    #22：卡片容器掉出 max-w-4xl 欄位時，此 DFS 在 root slot 直屬處也找得到——
+    測的是「容器的 parent 是誰」，不是「存不存在」。
+    """
+    if isinstance(el, ui.column) and "gap-4" in el._classes and "max-w-4xl" not in el._classes:
+        return el
+    for child in getattr(el, "default_slot", None) and el.default_slot.children or []:
+        found = _find_cards_container(child)
+        if found is not None:
+            return found
+    return None
+
+
+@pytest.mark.asyncio
+async def test_job_cards_container_inside_maxw_column(tmp_path):
+    """#22：任務卡容器必須是 max-w-4xl 欄位的**後代**（2026-08-13 使用者回報
+    「任務歷史一整排填滿、與上方寬度不一、割裂」——cards 容器縮排掉出欄位、
+    落在 root slot 時任務卡橫跨全頁寬；CDP 實測卡 L=316 R=1889 vs 欄位
+    L=655 R=1551 定案；修復＝容器移回欄位內）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        cards = _find_cards_container(user.client.content)
+        assert cards is not None, "找不到任務卡容器"
+        # 父層存取：default_slot.parent 對 root 層級元素回傳自身——
+        # 用 element._parent_slot()（weakref→Slot）→ .parent（Slot 所屬元素）
+        parent_ref = cards._parent_slot
+        parent = parent_ref().parent if parent_ref else None
+        assert parent is not None and isinstance(parent, ui.column), (
+            "任務卡容器必須在 ui.column 內（不可是 root slot 直屬）"
+        )
+        assert "max-w-4xl" in parent._classes, (
+            "任務卡容器的父層必須是 max-w-4xl 欄位（卡片與上方內容同寬）"
         )
 
 

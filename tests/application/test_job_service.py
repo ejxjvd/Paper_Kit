@@ -267,6 +267,15 @@ def test_job_records_created_at(tmp_path: Path, upload_pdf: Path):
     assert j2.created_at >= j1.created_at
 
 
+def test_list_jobs_newest_first(tmp_path: Path, upload_pdf: Path):
+    """#21：任務列表最新在前（使用者明定「任務應由新而舊往下排列」）。"""
+    service, _ = make_service(tmp_path)
+    j1 = service.create_job(upload_path=upload_pdf)
+    j2 = service.create_job(upload_path=upload_pdf)
+    j3 = service.create_job(upload_path=upload_pdf)
+    assert [j.job_id for j in service.list_jobs()] == [j3.job_id, j2.job_id, j1.job_id]
+
+
 # ── slice B：start（背景執行） ───────────────────────────────────────
 
 
@@ -465,7 +474,11 @@ def test_init_reclaims_stuck_jobs(tmp_path: Path):
     assert repo.get("t1").error == "應用重啟，翻譯中斷（請重試）"
     assert repo.get("q1").status is JobStatus.FAILED
     assert repo.get("c1").status is JobStatus.COMPLETED  # 完成任務不受影響
-    assert service.list_jobs()[0].can_retry is True  # 回收後可重試
+    # #21：列表最新在前——[0] 是 c1（完成）；回收的 t1/q1 各自可重試（不依賴順序）
+    by_id = {j.job_id: j for j in service.list_jobs()}
+    assert by_id["t1"].can_retry is True  # 回收後可重試
+    assert by_id["q1"].can_retry is True
+    assert by_id["c1"].can_retry is False
 
 
 def test_retry_without_engine_id_keeps_original_engine(tmp_path: Path, upload_pdf: Path):

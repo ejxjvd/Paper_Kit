@@ -92,8 +92,12 @@ class JobService:
         return job
 
     def list_jobs(self) -> list[TranslationJob]:
-        """任務列表（建立順序，UI 輪詢用）。"""
-        return [self._jobs.get(job_id) for job_id in self._order if self._jobs.get(job_id)]
+        """任務列表（#21：最新在前——使用者明定「由新而舊往下排列」）。"""
+        return [
+            self._jobs.get(job_id)
+            for job_id in reversed(self._order)
+            if self._jobs.get(job_id)
+        ]
 
     @staticmethod
     def _assert_sensitive_allowed(job: TranslationJob, engine_allows_sensitive: bool | None) -> None:
