@@ -1283,8 +1283,11 @@ async def test_free_engine_section_dom_order(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_free_key_engine_cards_render(tmp_path):
-    """免費 LLM 區渲染：header＋品質提示＋7 張卡（依優先序）＋ⓘ tooltip。"""
+async def test_free_key_engine_section_renders(tmp_path):
+    """免費 LLM 區渲染（2026-08-13 使用者要求「7 卡太多」改下拉）：header＋品質提示＋
+    下拉選單（7 引擎選項＝registry 單點）＋單卡顯示所選引擎（ⓘ tooltip 隨引擎）。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1293,17 +1296,21 @@ async def test_free_key_engine_cards_render(tmp_path):
         await _open_twice(user)
         await user.should_see("免費 LLM（自備免費 key）")
         user.find(marker="free-key-engine-hint")  # 品質提示存在
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
-            card = _engine_card(user, eid)
-            assert next(iter(card.elements)), f"{eid} 免費 LLM 卡應渲染"
-            user.find(kind=ui.icon, marker=f"info-engine-{eid}")  # ⓘ tooltip 存在
+        select = next(iter(user.find(kind=ui.select, marker="free-key-engine-select").elements))
+        assert set(select.options) == set(UI_FREE_KEY_ENGINE_IDS), (
+            "下拉選項＝registry 單點（7 引擎）"
+        )
+        assert select.value in UI_FREE_KEY_ENGINE_IDS, "下拉預設應為某支免費 LLM"
+        user.find(kind=ui.icon, marker=f"info-engine-{select.value}")  # ⓘ tooltip 存在
+        card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
+        assert "pk-engine-card" in card.classes, "免費 LLM 單卡應套引擎卡主題樣式"
 
 
 @pytest.mark.asyncio
 async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_blank_pdf):
-    """免費 LLM 選卡→翻譯：BYOK 模式——填 key 後點卡，build_engine 收到該 key
-    （與零 key 區的 api_key=="" 相反語意；「不能動用個人 API」紅線的另一面：
-    免費 key 是使用者/他人自己申請的免費額度）。"""
+    """免費 LLM 下拉挑選→翻譯：BYOK 模式——填 key 後下拉換引擎，build_engine
+    收到該 key（與零 key 區的 api_key=="" 相反語意；「不能動用個人 API」紅線的
+    另一面：免費 key 是使用者/他人自己申請的免費額度）。"""
     from test_ui_flow import FileWritingFakeEngine
 
     calls = []
@@ -1314,17 +1321,19 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
 
     monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
     service, settings, cost, glossaries = _build(tmp_path)
-    settings.set_api_key("nvidia", "nvapi-test-free-key")
+    settings.set_api_key("bigmodel", "bm-test-free-key")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        nvidia_card = _engine_card(user, "nvidia")
-        card_el = next(iter(nvidia_card.elements))
-        assert "ring-primary" not in card_el.classes, "初始免費 LLM 卡不應被選中"
-        nvidia_card.click()
-        assert "ring-primary" in card_el.classes, "點選免費 LLM 卡後應有選中高亮"
+        free_card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
+        select = next(iter(user.find(kind=ui.select, marker="free-key-engine-select").elements))
+        assert "ring-primary" not in free_card.classes, "初始免費 LLM 單卡不應被選中"
+        select.value = "bigmodel"  # 下拉挑選（公開 property，同 lang_select 模式）
+        assert "ring-primary" in free_card.classes, "下拉挑選後單卡應有選中高亮"
+        assert "pk-engine-card--disabled" not in free_card.classes, "有 key 引擎卡不應灰化"
+        user.find(kind=ui.icon, marker="info-engine-bigmodel")  # ⓘ tooltip 隨引擎切換
         pdf = make_blank_pdf(tmp_path / "NIM1.pdf")
         upload_el = next(iter(user.find(ui.upload).elements))
         await upload_el.handle_uploads([
@@ -1341,8 +1350,8 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
             await asyncio.sleep(0.1)
         job = service.list_jobs()[-1]
         assert job.status is JobStatus.COMPLETED, f"翻譯未在時限內完成：{job.error}"
-        assert job.engine_id == "nvidia", f"任務應記 nvidia，實際 {job.engine_id}"
-        assert calls == [("nvidia", "nvapi-test-free-key")], (
+        assert job.engine_id == "bigmodel", f"任務應記 bigmodel，實際 {job.engine_id}"
+        assert calls == [("bigmodel", "bm-test-free-key")], (
             f"免費 LLM 引擎應收到使用者自備的免費 key，實際 {calls}"
         )
 
@@ -1373,9 +1382,9 @@ def test_resolve_free_key_engine_requires_key(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
-    """機密模式（票 10 紅線）：免費 LLM 卡全禁用（免費層無 SLA／第三方雲端）——
-    勾機密 → 7 卡灰化、點擊不切換（引擎仍 DeepSeek）。"""
+async def test_sensitive_blocks_free_key_engine_card(tmp_path):
+    """機密模式（票 10 紅線）：免費 LLM 單卡禁用（免費層無 SLA／第三方雲端）——
+    勾機密 → 卡灰化、下拉換其它引擎被擋（值復原＋警告）、引擎仍 DeepSeek。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1384,18 +1393,22 @@ async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
         await _open_twice(user)
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
-            card = next(iter(_engine_card(user, eid).elements))
-            assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡應禁用（機密紅線）"
-        _engine_card(user, "nvidia").click()
+        card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
+        assert "pk-engine-card--disabled" in card.classes, "機密下免費 LLM 卡應禁用（機密紅線）"
+        select = next(iter(user.find(kind=ui.select, marker="free-key-engine-select").elements))
+        before = select.value
+        select.value = "gemini"  # 下拉試換（機密下所有免費 LLM 都禁）
+        assert select.value == before, "被機密守衛擋下應復原下拉值"
+        await user.should_see("機密文件僅 DeepSeek", retries=20)  # 警告通知出現
+
         classes = next(iter(_engine_card(user, "deepseek").elements)).classes
-        assert "ring-primary" in classes, "機密下點免費 LLM 卡不得切換引擎"
+        assert "ring-primary" in classes, "機密下換引擎被擋，任務引擎仍 DeepSeek"
 
 
 @pytest.mark.asyncio
 async def test_free_key_engine_section_dom_order(tmp_path):
     """免費 LLM 區 DOM 位置：零 key 免費區之後（bing 末卡 → 新區 header → hint →
-    7 卡依優先序 nvidia 首）；輸出目錄/任務區之前。"""
+    下拉選單 → 單卡）；輸出目錄/任務區之前。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1407,15 +1420,10 @@ async def test_free_key_engine_section_dom_order(tmp_path):
             "免費 LLM 區必須在零 key 免費區（bing 末卡）之後"
         )
         assert order.index("free-key-engine-section") < order.index("free-key-engine-hint")
-        assert order.index("free-key-engine-hint") < order.index("engine-card-nvidia")
-        assert order.index("engine-card-nvidia") < order.index("engine-card-modelscope")
-        assert order.index("engine-card-modelscope") < order.index("engine-card-groq")
-        assert order.index("engine-card-groq") < order.index("engine-card-openrouter")
-        assert order.index("engine-card-openrouter") < order.index("engine-card-bigmodel")
-        assert order.index("engine-card-bigmodel") < order.index("engine-card-dashscope")
-        assert order.index("engine-card-dashscope") < order.index("engine-card-gemini")
-        assert order.index("engine-card-gemini") < order.index("browse-output-dir"), (
-            "免費 LLM 卡必須在輸出目錄/任務區上方"
+        assert order.index("free-key-engine-hint") < order.index("free-key-engine-select")
+        assert order.index("free-key-engine-select") < order.index("free-key-engine-card")
+        assert order.index("free-key-engine-card") < order.index("browse-output-dir"), (
+            "免費 LLM 下拉＋單卡必須在輸出目錄/任務區上方"
         )
 
 
@@ -1445,17 +1453,22 @@ async def test_paid_cards_greyed_out_without_key(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_free_key_cards_greyed_out_without_key(tmp_path):
-    """免費 LLM 卡（BYOK）無 key 也灰化——沒 key 不能翻譯，提示去設定頁填。"""
+async def test_free_key_card_greyed_out_without_key(tmp_path):
+    """免費 LLM 單卡（BYOK）無 key 也灰化——沒 key 不能翻譯，提示去設定頁填；
+    下拉挑選無 key 引擎被擋（值復原＋警告）。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
-            card = next(iter(_engine_card(user, eid).elements))
-            assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡無 key 應灰化"
+        card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
+        assert "pk-engine-card--disabled" in card.classes, "免費 LLM 單卡無 key 應灰化"
+        select = next(iter(user.find(kind=ui.select, marker="free-key-engine-select").elements))
+        before = select.value
+        select.value = "groq"  # 未填 key 的引擎
+        assert select.value == before, "無 key 引擎下拉應被擋並復原"
+        await user.should_see("尚未設定", retries=20)  # 警告通知出現
 
 
 @pytest.mark.asyncio
@@ -1478,7 +1491,7 @@ async def test_paid_card_unlocks_after_key_set(tmp_path):
 
 @pytest.mark.asyncio
 async def test_free_key_card_unlocks_after_key_set(tmp_path):
-    """免費 LLM 卡填 key 後解禁（BYOK 流程完整）。"""
+    """免費 LLM 單卡填 key 後解禁（BYOK 流程完整）。"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("nvidia", "nvapi-test")
 
@@ -1486,5 +1499,5 @@ async def test_free_key_card_unlocks_after_key_set(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        card = next(iter(_engine_card(user, "nvidia").elements))
+        card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
         assert "pk-engine-card--disabled" not in card.classes, "免費 LLM 填 key 後應解禁"

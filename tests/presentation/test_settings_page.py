@@ -387,6 +387,43 @@ async def test_settings_page_cache_section_renders(tmp_path):
         await user.should_see("清除快取")
 
 
+# ── 2026-08-13：引擎 API keys 分付費／免費兩區（使用者要求「不要混雜」）──
+
+
+@pytest.mark.asyncio
+async def test_engine_key_sections_separate_paid_and_free(tmp_path):
+    """引擎 API keys 分兩區——付費四卡在前、免費 LLM 七卡在後，各有區標題
+    （paid-keys-section → free-keys-section），卡不混雜。"""
+    from test_index_page import _dom_markers
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        order = [m for _, m in _dom_markers(user.client.content)]
+        # 區標題順序：付費在前、免費在後
+        assert order.index("paid-keys-section") < order.index("free-keys-section"), (
+            "付費區必須在免費區之前"
+        )
+        # 付費四卡全部落在免費區之前（不混雜）
+        for eid in ("siliconflow", "deepseek", "babeldoc", "latex"):
+            assert order.index(f"engine-key-{eid}") < order.index("free-keys-section"), (
+                f"付費卡 {eid} 應在免費區之前"
+            )
+        # 免費七卡全部落在付費區之後
+        from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
+        for eid in UI_FREE_KEY_ENGINE_IDS:
+            assert order.index(f"engine-key-{eid}") > order.index("free-keys-section"), (
+                f"免費卡 {eid} 應在付費區之後"
+            )
+        # 免費區卡也有完整 key 操作（測試 API 按鈕）
+        user.find(kind=ui.button, marker="engine-key-test-dashscope")
+
+
 @pytest.mark.asyncio
 async def test_cache_toggle_updates_setting_and_runtime(tmp_path):
     """票 25：切「啟用翻譯快取」開關 → settings.cache_enabled 更新＋cache.enabled 即時生效。"""

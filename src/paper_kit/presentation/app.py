@@ -634,6 +634,106 @@ def _probe_api(base_url: str, api_key: str, timeout: int = 10) -> tuple[int, str
         return 0, str(e)[:80]
 
 
+def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
+    """設定頁單一引擎的 key 子卡（2026-08-13：付費／免費兩區共用同一渲染——
+    迴圈主體不複製兩份；marker 各引擎唯一：engine-key-{eid} 等）。
+
+    含：狀態 badge、遮罩 input、儲存/清除/測試 API（GET /models 零成本驗證）、
+    siliconflow 專屬術語提取 key 欄（#84）。
+    """
+    spec = ENGINE_SPECS[eid]
+    # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
+    # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
+    # Quasar 默認樣式造成跨頁視覺分歧
+    with ui.card().mark(f"engine-key-{eid}").classes("pk-card w-full gap-2"):
+        with ui.row().classes("items-center justify-between w-full"):
+            ui.label(spec.label).classes("font-semibold")
+            ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
+        ui.label(spec.card_desc).classes("text-xs text-grey-7")
+        key_input = ui.input(
+            "API key",
+            value=_mask_key(settings.api_key(eid)),
+            password=True,
+            password_toggle_button=True,
+        ).classes("w-full").mark(f"engine-key-input-{eid}")
+        save_key, clear_key = _key_handlers(
+            settings, eid, key_input,
+            getter=settings.api_key,
+            setter=settings.set_api_key,
+            save_msg=f"已儲存 {ENGINE_SPECS[eid].label} 的 API key",
+            clear_msg=f"已清除 {ENGINE_SPECS[eid].label} 的 API key",
+        )
+        with ui.row().classes("gap-2"):
+            ui.button(
+                "儲存 key",
+                on_click=save_key,
+            ).props("outline").mark(f"engine-key-save-{eid}")
+            ui.button(
+                "清除",
+                on_click=clear_key,
+            ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
+            # 2026-08-13（使用者要求）：測試 API 按鈕——填入 key 後確認
+            # 是否成功啟用。GET /models（零成本、不生成 token）驗證。
+            async def _test_api(eid=eid, spec=spec, settings=settings) -> None:
+                key = settings.api_key(eid)
+                if not key:
+                    ui.notify(f"{spec.label}：尚未設定 key", type="warning")
+                    return
+                code, body = await asyncio.to_thread(
+                    _probe_api, spec.base_url, key
+                )
+                if code == 200:
+                    ui.notify(
+                        f"✅ {spec.label} 連線成功（HTTP 200）",
+                        type="positive",
+                    )
+                elif code in (401, 403):
+                    ui.notify(
+                        f"⚠️ {spec.label}：key 無效（HTTP {code}）——"
+                        "請檢查是否複製完整",
+                        type="warning",
+                    )
+                else:
+                    ui.notify(
+                        f"❌ {spec.label}：連線失敗（HTTP {code} {body[:40]}）",
+                        type="negative",
+                    )
+
+            ui.button(
+                "測試 API",
+                on_click=_test_api,
+            ).props("outline").mark(f"engine-key-test-{eid}")
+        if eid == "siliconflow":
+            # #84：術語提取 key 獨立化——term 引擎＝SiliconFlow 專屬
+            # （term 旗標僅 siliconflow provider 發送，#83）；獨立 key
+            # 避免共用主 key（可各自輪替、權限分離）。
+            ui.label("術語提取 API key（自動術語提取專用；空白 = 沿用主 key）").classes(
+                "text-xs text-grey-7"
+            )
+            term_input = ui.input(
+                "術語提取 API key",
+                value=_mask_key(settings.term_api_key(eid)),
+                password=True,
+                password_toggle_button=True,
+            ).classes("w-full").mark(f"term-key-input-{eid}")
+            save_term, clear_term = _key_handlers(
+                settings, eid, term_input,
+                getter=settings.term_api_key,
+                setter=settings.set_term_api_key,
+                save_msg="已儲存術語提取 key",
+                clear_msg="已清除術語提取 key",
+            )
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    "儲存術語 key",
+                    on_click=save_term,
+                ).props("outline").mark(f"term-key-save-{eid}")
+                ui.button(
+                    "清除",
+                    on_click=clear_term,
+                ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
+
+
 def _cache_stats_label(cache: TranslationCache) -> str:
     """「快取 N 筆 · X MB」；stats() 排除索引 DB，只算實際產物。"""
     count, total = cache.stats()
@@ -683,100 +783,19 @@ def _settings_page(
                 ui.label(
                     "各自用自己的 key（存本機 SQLite，不入 repo/log）；已存 key 僅顯示遮罩。"
                 ).classes("text-xs text-grey-6")
-                # P3：與主頁引擎卡同一集合（registry 單點）。免費 LLM（BYOK）也在此
-                # 填 key——免費申請、各自獨立（票 20 每引擎獨立 key 模式）。
-                for eid in (*UI_ENGINE_IDS, *UI_FREE_KEY_ENGINE_IDS):
-                    spec = ENGINE_SPECS[eid]
-                    # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
-                    # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
-                    # Quasar 默認樣式造成跨頁視覺分歧
-                    with ui.card().mark(f"engine-key-{eid}").classes("pk-card w-full gap-2"):
-                        with ui.row().classes("items-center justify-between w-full"):
-                            ui.label(spec.label).classes("font-semibold")
-                            ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
-                        ui.label(spec.card_desc).classes("text-xs text-grey-7")
-                        key_input = ui.input(
-                            "API key",
-                            value=_mask_key(settings.api_key(eid)),
-                            password=True,
-                            password_toggle_button=True,
-                        ).classes("w-full").mark(f"engine-key-input-{eid}")
-                        save_key, clear_key = _key_handlers(
-                            settings, eid, key_input,
-                            getter=settings.api_key,
-                            setter=settings.set_api_key,
-                            save_msg=f"已儲存 {ENGINE_SPECS[eid].label} 的 API key",
-                            clear_msg=f"已清除 {ENGINE_SPECS[eid].label} 的 API key",
-                        )
-                        with ui.row().classes("gap-2"):
-                            ui.button(
-                                "儲存 key",
-                                on_click=save_key,
-                            ).props("outline").mark(f"engine-key-save-{eid}")
-                            ui.button(
-                                "清除",
-                                on_click=clear_key,
-                            ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
-                            # 2026-08-13（使用者要求）：測試 API 按鈕——填入 key 後確認
-                            # 是否成功啟用。GET /models（零成本、不生成 token）驗證。
-                            async def _test_api(eid=eid, spec=spec, settings=settings) -> None:
-                                key = settings.api_key(eid)
-                                if not key:
-                                    ui.notify(f"{spec.label}：尚未設定 key", type="warning")
-                                    return
-                                code, body = await asyncio.to_thread(
-                                    _probe_api, spec.base_url, key
-                                )
-                                if code == 200:
-                                    ui.notify(
-                                        f"✅ {spec.label} 連線成功（HTTP 200）",
-                                        type="positive",
-                                    )
-                                elif code in (401, 403):
-                                    ui.notify(
-                                        f"⚠️ {spec.label}：key 無效（HTTP {code}）——"
-                                        "請檢查是否複製完整",
-                                        type="warning",
-                                    )
-                                else:
-                                    ui.notify(
-                                        f"❌ {spec.label}：連線失敗（HTTP {code} {body[:40]}）",
-                                        type="negative",
-                                    )
-
-                            ui.button(
-                                "測試 API",
-                                on_click=_test_api,
-                            ).props("outline").mark(f"engine-key-test-{eid}")
-                        if eid == "siliconflow":
-                            # #84：術語提取 key 獨立化——term 引擎＝SiliconFlow 專屬
-                            # （term 旗標僅 siliconflow provider 發送，#83）；獨立 key
-                            # 避免共用主 key（可各自輪替、權限分離）。
-                            ui.label("術語提取 API key（自動術語提取專用；空白 = 沿用主 key）").classes(
-                                "text-xs text-grey-7"
-                            )
-                            term_input = ui.input(
-                                "術語提取 API key",
-                                value=_mask_key(settings.term_api_key(eid)),
-                                password=True,
-                                password_toggle_button=True,
-                            ).classes("w-full").mark(f"term-key-input-{eid}")
-                            save_term, clear_term = _key_handlers(
-                                settings, eid, term_input,
-                                getter=settings.term_api_key,
-                                setter=settings.set_term_api_key,
-                                save_msg="已儲存術語提取 key",
-                                clear_msg="已清除術語提取 key",
-                            )
-                            with ui.row().classes("gap-2"):
-                                ui.button(
-                                    "儲存術語 key",
-                                    on_click=save_term,
-                                ).props("outline").mark(f"term-key-save-{eid}")
-                                ui.button(
-                                    "清除",
-                                    on_click=clear_term,
-                                ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
+                # 2026-08-13（使用者要求「付費、免費不要混雜」）：分兩區——付費引擎
+                # 與免費 LLM（自備免費 key）各自成區、各有區標題；卡集合同 registry
+                # 單點（UI_ENGINE_IDS 付費／UI_FREE_KEY_ENGINE_IDS 免費）。
+                ui.label("🔑 付費引擎（自備 key）").classes(
+                    "text-sm font-semibold text-grey-7 mt-3"
+                ).mark("paid-keys-section")
+                for eid in UI_ENGINE_IDS:
+                    _render_engine_key_card(settings, eid)
+                ui.label("🎁 免費 LLM（自備免費 key）").classes(
+                    "text-sm font-semibold text-grey-7 mt-3"
+                ).mark("free-keys-section")
+                for eid in UI_FREE_KEY_ENGINE_IDS:
+                    _render_engine_key_card(settings, eid)
             with ui.card().classes("w-full"):
                 ui.label("預設值").classes("font-bold")
                 ui.input(
@@ -1524,7 +1543,7 @@ def _index_page(
             # ——任務一多不再把引擎卡往下推（cards 容器最後建立，見頁尾）
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
 
-            def _pick_engine(eid: str, force: bool = False) -> None:
+            def _pick_engine(eid: str, force: bool = False) -> bool:
                 """點選引擎卡：更新本任務引擎＋卡片高亮（同一 render 的 closure）。
 
                 2026-08-13（使用者回報）：勾機密後點視覺卡 → 前置阻擋（不讓
@@ -1533,6 +1552,7 @@ def _index_page(
                 前置阻擋＋警告（與機密阻擋同 UX 模式）。
                 force＝程式自動切換（機密紅線優先於 key 檢查——機密模式自動切
                 DeepSeek 即使未填 key 也要切，讓翻譯時報缺 key 而非 UI 卡住）。
+                回傳 True＝已切換；False＝被守衛擋下（下拉選單復原用）。
                 """
                 nonlocal selected_engine
                 if sensitive_input.value and not ENGINE_SPECS[eid].sensitive_ok:
@@ -1540,14 +1560,14 @@ def _index_page(
                         "機密文件僅 DeepSeek 純文字引擎（先取消 🔒 或選 DeepSeek）",
                         type="warning",
                     )
-                    return
+                    return False
                 spec = ENGINE_SPECS[eid]
                 if not force and spec.needs_key and not _has_key(eid):
                     ui.notify(
                         f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）",
                         type="warning",
                     )
-                    return
+                    return False
                 selected_engine = eid
                 for cid, c in engine_cards.items():
                     c.classes(
@@ -1557,6 +1577,7 @@ def _index_page(
                 # #85 切片C：進階選項僅 babeldoc 消費 → 點到 babeldoc 卡才顯示
                 advanced_box.set_visibility(eid == "babeldoc")
                 ui.notify(f"本任務將使用 {ENGINE_SPECS[eid].label}", type="info")
+                return True
 
             engine_cards: dict[str, ui.card] = {}
 
@@ -1627,8 +1648,10 @@ def _index_page(
 
             # 免費 LLM 入口（2026-08-13，Free-LLM-Collection 查證後加入）：BYOK 免費 key
             # 引擎第二層——品質優於上方零 key 區（NVIDIA/ModelScope 等旗艦免費），
-            # 但需各自申請免費 key。卡一樣進 engine_cards dict（ring 清除／機密禁用
-            # 迴圈／_pick_engine 阻擋自動涵蓋）；順序＝品質優先序（registry 單點）。
+            # 但需各自申請免費 key。2026-08-13（使用者要求「7 張卡太多」）：7 卡收斂
+            # 為單卡顯示目前所選引擎＋下拉選單挑選。單卡仍進 engine_cards dict（key＝
+            # 目前顯示引擎——ring 清除／機密禁用迴圈自動涵蓋）；下拉換引擎＝換 dict
+            # key＋重建卡內容（_pick_engine 同款守衛，被擋復原下拉值）。
             ui.label("免費 LLM（自備免費 key）").classes(
                 "text-sm font-semibold text-grey-7 mt-2"
             ).mark("free-key-engine-section")
@@ -1636,23 +1659,67 @@ def _index_page(
                 "免費大模型（NVIDIA/ModelScope 等，品質接近付費）——在設定頁填入各自的"
                 "免費 API key；機密文件請選 DeepSeek"
             ).classes("text-xs text-grey-6").mark("free-key-engine-hint")
-            with ui.row().classes("gap-2 w-full"):
-                for eid in UI_FREE_KEY_ENGINE_IDS:
-                    spec = ENGINE_SPECS[eid]
-                    card = ui.card().mark(f"engine-card-{eid}").classes(
-                        "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
-                        + (" ring-2 ring-primary" if eid == selected_engine else "")
-                        + (" pk-engine-card--disabled" if _card_disabled(eid) else "")
-                    )
-                    with card:
+            # 下拉預設＝目前所選引擎（若為免費 LLM）或優先序首支；選項＝registry 單點
+            free_key_eid = (
+                selected_engine if selected_engine in UI_FREE_KEY_ENGINE_IDS
+                else UI_FREE_KEY_ENGINE_IDS[0]
+            )
+            with ui.row().classes("gap-2 w-full items-stretch"):
+                free_key_select = ui.select(
+                    {eid: ENGINE_SPECS[eid].label for eid in UI_FREE_KEY_ENGINE_IDS},
+                    value=free_key_eid,
+                    label="免費 LLM 引擎",
+                ).classes("w-64").mark("free-key-engine-select")
+                with ui.card().mark("free-key-engine-card").classes(
+                    "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                    + (" ring-2 ring-primary" if selected_engine == free_key_eid else "")
+                    + (" pk-engine-card--disabled" if _card_disabled(free_key_eid) else "")
+                ) as free_key_card:
+                    free_key_body = ui.column().classes("gap-1 w-full")
+
+                def _render_free_key_card() -> None:
+                    """重建單卡內容（下拉換引擎時）——label／ⓘ／desc 對應目前引擎。"""
+                    spec = ENGINE_SPECS[free_key_eid]
+                    free_key_body.clear()
+                    with free_key_body:
                         with ui.row().classes("items-center justify-between w-full"):
                             ui.label(spec.label).classes("font-semibold text-sm")
                             ui.icon("help_outline").props("size=16px").classes(
                                 "text-grey-5"
-                            ).mark(f"info-engine-{eid}").tooltip(spec.info)
-                        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
-                    engine_cards[eid] = card
-                    card.on("click", _engine_picker(_pick_engine, eid))
+                            ).mark(f"info-engine-{free_key_eid}").tooltip(spec.info)
+                        ui.label(spec.card_desc).classes(
+                            "text-xs text-grey-7 pk-engine-desc"
+                        )
+
+                _render_free_key_card()
+                engine_cards[free_key_eid] = free_key_card
+                free_key_card.on("click", lambda: _pick_engine(free_key_eid))
+
+                def _on_free_key_select(e) -> None:
+                    """下拉換引擎＝挑選引擎（同點卡語意）。被機密／key 守衛擋下時
+                    復原下拉值（widget 不回滾，手動復原）。"""
+                    nonlocal free_key_eid
+                    eid = e.value
+                    if eid == free_key_eid:
+                        return
+                    if not _pick_engine(eid):  # 守衛擋下（機密/key）→ 復原
+                        free_key_select.set_value(free_key_eid)
+                        return
+                    engine_cards.pop(free_key_eid, None)  # 換 key：ring/禁用迴圈照新 id
+                    free_key_eid = eid
+                    engine_cards[eid] = free_key_card
+                    _render_free_key_card()
+                    # _pick_engine 的 ring 迴圈跑在換 key 前，單卡高亮手動補；
+                    # 灰化同步重算（舊引擎無 key、新引擎有 key 時卡不該停留灰色）
+                    disabled = _card_disabled(eid)
+                    free_key_card.classes(
+                        remove="ring-2 ring-primary"
+                        + ("" if disabled else " pk-engine-card--disabled"),
+                        add="ring-2 ring-primary"
+                        + (" pk-engine-card--disabled" if disabled else ""),
+                    )
+
+                free_key_select.on_value_change(_on_free_key_select)
 
             # 2026-08-13（使用者回報「為何不用勾選也能開始翻譯」）：
             # 勾「🔒 機密文件」→ 引擎自動切 DeepSeek＋視覺卡禁用（灰化）。
