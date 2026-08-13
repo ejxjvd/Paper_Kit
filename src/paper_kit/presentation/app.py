@@ -1910,8 +1910,13 @@ def _index_page(
                     return
                 try:
                     pages = len(pypdf.PdfReader(str(target)).pages)
-                except Exception:
-                    ui.notify(f"無法讀取頁數：{e.file.name}（不是有效 PDF？）", type="warning")
+                except Exception as exc:
+                    # 帶真實原因（2026-08-14 實測：AES-256 加密 PDF 在缺
+                    # cryptography 時訊息誤導為「不是有效 PDF？」）
+                    ui.notify(
+                        f"無法讀取頁數：{e.file.name}（{type(exc).__name__}: {exc}）",
+                        type="warning",
+                    )
                     target.unlink(missing_ok=True)
                     return
                 staged[e.file.name] = target

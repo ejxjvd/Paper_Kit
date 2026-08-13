@@ -12,7 +12,7 @@ import os
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-_PK_VERSION = os.environ.get("PK_VERSION", "0.1.1")
+_PK_VERSION = os.environ.get("PK_VERSION", "0.1.2")
 _NAME = f"paper-kit-{_PK_VERSION}"
 _IS_MAC = sys.platform == "darwin"
 

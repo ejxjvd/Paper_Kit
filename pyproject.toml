@@ -1,6 +1,6 @@
 [project]
 name = "paper-kit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Paper_Kit：自建學術 PDF/簡報翻譯器（免除線上工具綁架）"
 requires-python = ">=3.12"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
     "pypdf>=5.0",  # 票 06：估算前取 PDF 真實頁數
     "pymupdf>=1.28",  # 票 12：掃描頁 render＋隱形文字層內嵌（OCR 管線）
     "rapidocr_onnxruntime>=1.4",  # 票 12：本機 OCR 引擎（onnxruntime，不上雲）
+    "cryptography>=50.0.0",
 ]
 
 [project.scripts]
