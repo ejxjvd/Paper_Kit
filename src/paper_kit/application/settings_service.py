@@ -44,16 +44,32 @@ class SettingsService:
     def set_term_api_key(self, engine_id: str, api_key: str) -> None:
         self._repo.set(f"term_api_key_{engine_id}", api_key)
 
+    # ── v0.1.3：引擎模型覆寫（設定頁下拉/自訂挑選）────────────────────
+
+    def engine_model(self, engine_id: str) -> str:
+        """引擎 model 覆寫（設定頁挑選）；未設定回空（用 registry 預設）。
+
+        背景（2026-08-14 NVIDIA EOL 410 實測）：registry 寫死的 model 會過期
+        （deepseek-v4-flash 08-07 下線）——使用者可在設定頁即時挑選替代模型。
+        """
+        return self._repo.get(f"engine_model_{engine_id}", "") or ""
+
+    def set_engine_model(self, engine_id: str, model: str) -> None:
+        """設定 model 覆寫（空字串＝清除、用 registry 預設）。"""
+        self._repo.set(f"engine_model_{engine_id}", model)
+
     def resolve_engine(self) -> TranslationEnginePort:
         """依設定建引擎；缺 key 給友善錯誤（FakeEngine 注入路徑不受影響）。"""
         spec = self.engine_spec()
         if spec.needs_key and not self.api_key(spec.id):
             raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
         # #84：術語提取獨立 key 一併帶入（空＝沿用主 key，向後相容）
+        # v0.1.3：model 覆寫（設定頁挑選）取代 registry 預設
         return build_engine(
             spec,
             api_key=self.api_key(spec.id),
             term_api_key=self.term_api_key(spec.id),
+            model_override=self.engine_model(spec.id) or None,
         )
 
     # ── 語言／輸出目錄 ──────────────────────────────────────

@@ -311,7 +311,7 @@ async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_bl
     """
     calls = []
 
-    def spy_build_engine(spec, api_key=""):
+    def spy_build_engine(spec, api_key="", **kw):  # v0.1.3：model_override 新參數
         calls.append(spec.id)
         raise AssertionError("無 key 引擎不應被建")
 
@@ -1207,7 +1207,7 @@ async def test_free_engine_selection_creates_job_without_key(tmp_path, monkeypat
 
     calls = []
 
-    def spy_build_engine(spec, api_key=""):
+    def spy_build_engine(spec, api_key="", **kw):  # v0.1.3：model_override 新參數
         calls.append((spec.id, api_key))
         return FileWritingFakeEngine()
 

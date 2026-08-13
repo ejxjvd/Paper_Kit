@@ -179,14 +179,19 @@ def test_recent_log_entries_filters_by_job_id(tmp_path):
 
 def test_format_log_line_for_display():
     """debug 頁顯示行：time level [component] message；job_id 過濾。"""
+    from datetime import datetime
+
     from paper_kit.infrastructure.logging_setup import format_log_line
 
+    # v0.1.3：時間轉本地時區（log 存 UTC，2026-08-14 使用者指出差 8 小時）——
+    # 期望值用相同轉換自己算（測試時區無關，CI runner 可能是 UTC 或 +8）
+    expected_local = datetime.fromisoformat("2026-08-12T10:00:00+00:00").astimezone().strftime("%Y-%m-%d %H:%M:%S")
     line = format_log_line(
         {"time": "2026-08-12T10:00:00+00:00", "level": "ERROR",
          "component": "paper_kit.application.job_service", "message": "任務失敗",
          "job_id": "abc123"}
     )
-    assert "2026-08-12T10:00:00" in line
+    assert expected_local in line
     assert "ERROR" in line
     assert "[job_service]" in line  # 元件短名
     assert "任務失敗" in line

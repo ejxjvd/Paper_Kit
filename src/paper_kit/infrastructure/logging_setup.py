@@ -91,9 +91,23 @@ def recent_log_entries(
     return entries[-n:] if n > 0 else []
 
 
+def _local_time_str(raw: str) -> str:
+    """UTC ISO → 本地時區顯示（debug 頁；2026-08-14 使用者指出 log 差 8 小時）。"""
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return raw
+
+
 def format_log_line(entry: dict) -> str:
-    """JSON log 行 → debug 頁顯示字串（time level [短元件] message）。"""
-    time_part = str(entry.get("time", ""))[:19]  # ISO 掐秒
+    """JSON log 行 → debug 頁顯示字串（time level [短元件] message）。
+
+    時間轉本地時區（log 存 UTC，2026-08-14 使用者實測 Debug 頁顯示差 8 小時）。
+    """
+    time_part = _local_time_str(str(entry.get("time", "")))
     component = entry.get("component", "").rsplit(".", 1)[-1] or entry.get("component", "")
     parts = [time_part, entry.get("level", ""), f"[{component}]", entry.get("message", "")]
     job_id = entry.get("job_id")

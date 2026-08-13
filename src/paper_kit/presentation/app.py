@@ -7,6 +7,7 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 """
 
 import asyncio
+import json  # v0.1.3：模型清單解析（設定頁載入模型）
 import logging
 import re
 import shutil
@@ -231,7 +232,12 @@ def _resolve_task_engine(
         return spec.id, build_engine(spec, api_key=key)
     if spec.needs_key and not settings.api_key(spec.id):
         raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
-    return spec.id, build_engine(spec, api_key=settings.api_key(spec.id))
+    # v0.1.3：model 覆寫（設定頁挑選）一併套用——主頁選引擎與設定頁 global 同源
+    return spec.id, build_engine(
+        spec,
+        api_key=settings.api_key(spec.id),
+        model_override=settings.engine_model(spec.id) or None,
+    )
 
 
 def _engine_picker(pick, eid: str):
@@ -713,6 +719,30 @@ def _probe_api(base_url: str, api_key: str, timeout: int = 10) -> tuple[int, str
         return 0, str(e)[:80]
 
 
+def _fetch_models(base_url: str, api_key: str, timeout: int = 20) -> list[str]:
+    """GET {base_url}/models → 模型 id 清單（排序；失敗回 []）。
+
+    v0.1.3：設定頁「載入模型清單」——NVIDIA EOL 410 教訓（2026-08-14 使用者
+    實測 deepseek-v4-flash 於 08-07 下線）：registry 寫死的 model 會過期，
+    改由使用者即時拉取挑選。純函式（module 層）——測試 monkeypatch urlopen。
+    """
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/models", method="GET"
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception:
+        return []
+    ids = [
+        m.get("id")
+        for m in payload.get("data", [])
+        if isinstance(m, dict) and m.get("id")
+    ]
+    return sorted(ids)
+
+
 def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
     """設定頁單一引擎的 key 子卡（2026-08-13：付費／免費兩區共用同一渲染——
     迴圈主體不複製兩份；marker 各引擎唯一：engine-key-{eid} 等）。
@@ -811,6 +841,75 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                     "清除",
                     on_click=clear_term,
                 ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
+        if spec.provider == "openai":
+            # v0.1.3：模型挑選（NVIDIA EOL 410 教訓——2026-08-14 使用者實測
+            # deepseek-v4-flash 於 08-07 下線：registry 寫死的 model 會過期）——
+            # 下拉（載入 API 最新清單）＋自訂輸入（with_input）雙軌，永遠不撞 EOL。
+            ui.label("模型（下拉挑選或自行輸入；空白 = 官方預設）").classes(
+                "text-xs text-grey-7"
+            )
+            saved_model = settings.engine_model(eid)
+            default_model = spec.model
+            model_select = ui.select(
+                [default_model] + (
+                    [saved_model] if saved_model and saved_model != default_model else []
+                ),
+                value=saved_model or default_model,
+                label="模型",
+                with_input=True,  # 可自訂輸入（不從清單挑時直接打字）
+            ).classes("w-full").mark(f"engine-model-select-{eid}")
+
+            async def _load_models(
+                eid=eid, spec=spec, settings=settings, model_select=model_select,
+            ) -> None:
+                """拉取 API 最新模型清單填入下拉（用已儲存 key；零成本 GET /models）。"""
+                key = settings.api_key(eid)
+                if not key:
+                    ui.notify(
+                        f"{spec.label}：請先「儲存 key」再載入模型清單",
+                        type="warning",
+                    )
+                    return
+                code, body = await asyncio.to_thread(_probe_api, spec.base_url, key)
+                if code != 200:
+                    ui.notify(
+                        f"{spec.label}：載入模型失敗（HTTP {code} {body[:40]}）"
+                        "——key 可能無效",
+                        type="negative",
+                    )
+                    return
+                models = await asyncio.to_thread(_fetch_models, spec.base_url, key)
+                if not models:
+                    ui.notify(f"{spec.label}：模型清單為空", type="warning")
+                    return
+                current = model_select.value
+                model_select.options = models
+                if current not in models:
+                    model_select.options = [current] + models  # 保留既有值
+                model_select.update()
+                ui.notify(
+                    f"已載入 {len(models)} 個模型——可在下拉挑選或直接輸入",
+                    type="positive",
+                )
+
+            def _save_model() -> None:
+                """儲存挑選的模型（空白 = 清除覆寫、用官方預設）。"""
+                value = (model_select.value or "").strip()
+                settings.set_engine_model(eid, value)
+                ui.notify(
+                    f"已儲存 {spec.label} 的模型：{value or spec.model + '（官方預設）'}",
+                    type="positive",
+                )
+
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    "🔄 載入模型清單",
+                    on_click=_load_models,
+                ).props("outline").mark(f"engine-model-load-{eid}")
+                ui.button(
+                    "儲存模型",
+                    on_click=_save_model,
+                ).props("outline").mark(f"engine-model-save-{eid}")
 
 
 def _cache_stats_label(cache: TranslationCache) -> str:

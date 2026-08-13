@@ -39,6 +39,28 @@ def test_set_unknown_engine_rejected(tmp_path):
         svc.set_engine("no-such-engine")
 
 
+def test_engine_model_override_default_empty_and_roundtrip(tmp_path):
+    """v0.1.3：model 覆寫預設空（用 registry 預設）；set 後回讀一致；空字串清除。"""
+    svc = make_service(tmp_path)
+    assert svc.engine_model("nvidia") == ""
+    svc.set_engine_model("nvidia", "z-ai/glm-5.2")
+    assert svc.engine_model("nvidia") == "z-ai/glm-5.2"
+    svc.set_engine_model("nvidia", "")
+    assert svc.engine_model("nvidia") == ""
+
+
+def test_resolve_engine_applies_model_override(tmp_path):
+    """v0.1.3：設定頁挑選的 model 進入引擎 config（取代 registry 預設）。"""
+    svc = make_service(tmp_path)
+    svc.set_api_key("nvidia", "nvapi-x")
+    svc.set_engine("nvidia")
+    svc.set_engine_model("nvidia", "z-ai/glm-5.2")
+    engine = svc.resolve_engine()
+    assert engine._config.model == "z-ai/glm-5.2"
+    svc.set_engine_model("nvidia", "")
+    assert svc.resolve_engine()._config.model == ENGINE_SPECS["nvidia"].model
+
+
 def test_babeldoc_engine_resolves_through_registry(tmp_path):
     """票 13：換插頭不破壞——babeldoc 走同一 resolve 路徑（needs_key 守證）。"""
     svc = make_service(tmp_path)

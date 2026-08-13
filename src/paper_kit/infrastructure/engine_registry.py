@@ -53,6 +53,10 @@ class EngineSpec:
     base_url: str = DEFAULT_BASE_URL
     card_desc: str = ""   # P3：主頁卡副標題（僅 UI_ENGINE_IDS 內引擎填）
     info: str = ""        # P3：主頁卡 ⓘ tooltip 長敘述（hover 顯示引擎差異）
+    # v0.1.3（2026-08-14 NIM 限制情報）：免費層速率防火牆（40 RPM／並發 2-5 → 503）。
+    # nvidia 內建節流（--qps/--pool-max-workers）；其他引擎 None＝不帶旗標。
+    qps: float | None = None
+    max_workers: int | None = None
 
 
 ENGINE_SPECS: dict[str, EngineSpec] = {
@@ -201,15 +205,23 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         id="nvidia",
         label="NVIDIA NIM（免費旗艦）",
         provider="openai",
-        model="deepseek-ai/deepseek-v4-flash",
+        # v0.1.3（2026-08-14 使用者實測 410 Gone）：deepseek-v4-flash 於
+        # 2026-08-07 EOL 下線 → 改用 0731 快照版（設定頁可下拉挑選＋自訂，見 settings UI）
+        model="deepseek-ai/deepseek-v4-flash-0731",
         needs_key=True,
         sensitive_ok=False,
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://integrate.api.nvidia.com/v1",
+        # v0.1.3（2026-08-14 使用者提供限制情報）：免費層 40 RPM／並發 2-5 →
+        # 503 排隊。qps 0.6＝每 1.67 秒一發＝36 RPM 留餘裕；worker 1＝不併發
+        # （pdf2zh 預設併發瞬間踩爆 40 RPM 拿 429）。
+        qps=0.6,
+        max_workers=1,
         card_desc="DeepSeek-V4-Flash 免費（T1/T2；40 RPM、無日總量）",
         info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：DeepSeek-V4-Flash/GLM-5.2/"
         "Kimi-K2.6 等旗艦模型免費、無日總量、免綁卡。無 SLA——429 會退避重試；"
-        "檔案上 NVIDIA 雲端——機密文件不可用。",
+        "免費層限 40 RPM／並發 2-5——已內建節流（每 1.7 秒一發、不併發），"
+        "長文件需等待。檔案上 NVIDIA 雲端——機密文件不可用。設定頁可下拉挑選模型（API 即時拉取）。",
     ),
     "modelscope": EngineSpec(
         id="modelscope",
@@ -323,15 +335,19 @@ UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
 
 
 def build_engine(
-    spec: EngineSpec, api_key: str = "", term_api_key: str = ""
+    spec: EngineSpec, api_key: str = "", term_api_key: str = "",
+    model_override: str | None = None,  # v0.1.3：設定頁挑選的模型覆寫（NVIDIA EOL 教訓）
 ) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter:
     """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。
 
     #84：term_api_key＝術語提取引擎（SiliconFlow）獨立 key——只對
-    Pdf2zhNextAdapter 有意義（term 旗標僅 siliconflow provider 發送，#83）。"""
+    Pdf2zhNextAdapter 有意義（term 旗標僅 siliconflow provider 發送，#83）。
+    v0.1.3：model_override 非空時取代 spec.model（設定頁下拉/自訂挑選——
+    2026-08-14 NVIDIA deepseek-v4-flash EOL 410 實測教訓）。"""
+    model = model_override or spec.model
     if spec.provider == "babeldoc":
         cfg = BabelDocConfig(
-            model=spec.model,
+            model=model,
             api_key=api_key,
             base_url=spec.base_url,
         )
@@ -339,24 +355,26 @@ def build_engine(
     if spec.provider == "ppt-vision":
         cfg = PptVisionConfig(
             api_key=api_key,
-            model=spec.model,
+            model=model,
             base_url=spec.base_url,
         )
         return PptVisionAdapter(cfg)
     if spec.provider == "latex":
         cfg = LatexConfig(
             api_key=api_key,
-            model=spec.model,
+            model=model,
             base_url=spec.base_url,
         )
         return LatexAdapter(cfg)
     cfg = EngineConfig(
         provider=spec.provider,
-        model=spec.model,
+        model=model,
         api_key=api_key,
         term_api_key=term_api_key,  # #84：術語提取獨立 key（空＝build_command 沿用主 key）
         base_url=spec.base_url,
         requires_key=spec.needs_key,  # 2026-08-13：免費引擎（needs_key=False）translate 守衛放行
+        qps=spec.qps,            # v0.1.3：速率防火牆（NVIDIA 40 RPM）
+        max_workers=spec.max_workers,  # v0.1.3：並發上限（NVIDIA 2-5 → 503）
     )
     return Pdf2zhNextAdapter(cfg)
 

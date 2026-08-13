@@ -43,6 +43,10 @@ class EngineConfig:
     # 免費引擎（siliconflowfree/google/bing）false，translate 守衛放行（指令本就不含 key 旗標）
     requires_key: bool = True
     base_url: str = DEFAULT_BASE_URL        # SiliconFlow 國際站
+    # v0.1.3（NIM 限制情報 2026-08-14）：免費層速率防火牆 40 RPM／並發 2-5 → 503。
+    # spec.qps/spec.max_workers 帶入（nvidia 0.6/1）；None＝不帶旗標（引擎預設）
+    qps: float | None = None
+    max_workers: int | None = None
     retries: int = 2                        # 暫時性錯誤重試次數
     # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
     # 才是「判 hang」——最後一行輸出超過此秒數無新行才逾時（翻譯中有段落行=續命）。
@@ -81,6 +85,13 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
     else:
         # 免費引擎：旗標名＝provider（--google／--bing／--siliconflowfree），不需 key
         cmd += [f"--{cfg.provider}"]
+    # v0.1.3（NIM 40 RPM／並發 2-5 限制，2026-08-14 使用者情報）：spec 內建節流——
+    # --qps 0.6＝每 1.67 秒一發＝36 RPM 留餘裕；--pool-max-workers 1＝不併發
+    # （pdf2zh 預設併發會瞬間踩爆 40 RPM 拿 429）。其他引擎 None＝不帶、用引擎預設。
+    if cfg.qps:
+        cmd += ["--qps", str(cfg.qps)]
+    if cfg.max_workers:
+        cmd += ["--pool-max-workers", str(cfg.max_workers)]
     if job.glossary_files:
         cmd += ["--glossaries", ",".join(job.glossary_files)]
         if not job.auto_extract:

@@ -79,6 +79,16 @@ def test_build_engine_passes_term_api_key_through():
     assert plain._config.term_api_key == ""
 
 
+def test_build_engine_model_override_replaces_spec_model():
+    """v0.1.3：model_override 取代 registry 預設（NVIDIA EOL 410 教訓——
+    設定頁挑選的模型必須勝出；未覆寫時用 registry 預設 deepseek-v4-flash-0731）。"""
+    spec = ENGINE_SPECS["nvidia"]
+    adapter = build_engine(spec, api_key="nvapi-x", model_override="z-ai/glm-5.2")
+    assert adapter._config.model == "z-ai/glm-5.2"
+    plain = build_engine(spec, api_key="nvapi-x")
+    assert plain._config.model == spec.model
+
+
 def test_engine_spec_construction_defaults_base_url():
     spec = EngineSpec(
         id="x", label="X", provider="x", model="", needs_key=False, sensitive_ok=True,

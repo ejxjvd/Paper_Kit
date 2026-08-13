@@ -6,6 +6,11 @@ bug 根因：settings_page 依賴 bind_value_to(locals(), ...) 寫回變數，
 user_simulation 開真實 /settings 頁——渲染拋任何例外都會 500。
 """
 
+import io
+import json
+import urllib.error
+import urllib.request
+
 import pytest
 from nicegui import ui
 from nicegui.testing import user_simulation
@@ -487,3 +492,113 @@ async def test_clear_cache_button_clears(tmp_path):
         user.find("清除快取").click()
         await user.should_see("快取已清除", retries=20)
         assert cache.stats() == (0, 0), "清除後快取應歸零"
+
+
+# ── v0.1.3：引擎模型挑選（NVIDIA EOL 410 教訓）──────────────────
+
+
+class _FakeResp:
+    """urlopen 假的回應（with 語法＋read 支援 BytesIO 語意）。"""
+
+    def __init__(self, body: bytes, status: int = 200):
+        self._io = io.BytesIO(body)
+        self.status = status
+
+    def read(self, size: int = -1) -> bytes:
+        return self._io.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_fetch_models_parses_and_sorts(monkeypatch):
+    """GET /models 回應 data 清單 → sorted id；v0.1.3 下拉選單資料源。"""
+    from paper_kit.presentation.app import _fetch_models
+
+    payload = json.dumps(
+        {
+            "data": [
+                {"id": "z-ai/glm-5.2", "object": "model"},
+                {"id": "deepseek-ai/deepseek-v4-flash-0731"},
+            ]
+        }
+    ).encode()
+    captured = {}
+
+    def fake_urlopen(req, timeout=20):
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        return _FakeResp(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    models = _fetch_models("https://integrate.api.nvidia.com/v1", "nvapi-x")
+    assert models == ["deepseek-ai/deepseek-v4-flash-0731", "z-ai/glm-5.2"]  # 排序
+    assert captured["url"] == "https://integrate.api.nvidia.com/v1/models"
+    assert captured["auth"] == "Bearer nvapi-x"
+
+
+def test_fetch_models_skips_invalid_entries(monkeypatch):
+    """data 內非 dict／缺 id 的項目過濾掉；空 data → []。"""
+    from paper_kit.presentation.app import _fetch_models
+
+    payload = json.dumps(
+        {"data": [{"id": "ok/model"}, "garbage", {"object": "model"}, None]}
+    ).encode()
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, timeout=20: _FakeResp(payload)
+    )
+    assert _fetch_models("https://example.com/v1", "k") == ["ok/model"]
+
+
+def test_fetch_models_failures_return_empty(monkeypatch):
+    """缺 data 欄位／HTTP 錯誤／連線失敗 → []（UI 顯示警告而非崩潰）。"""
+    from paper_kit.presentation.app import _fetch_models
+
+    # 缺 data 欄位
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda req, timeout=20: _FakeResp(b'{"models": []}'),
+    )
+    assert _fetch_models("https://example.com/v1", "k") == []
+
+    # HTTP 錯誤（key 無效 401）
+    def boom(req, timeout=20):
+        raise urllib.error.HTTPError(
+            req.full_url, 401, "Unauthorized", {}, None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert _fetch_models("https://example.com/v1", "bad-key") == []
+
+    # 連線失敗
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, timeout=20: (_ for _ in ()).throw(
+            urllib.error.URLError("connection refused")
+        )
+    )
+    assert _fetch_models("https://example.com/v1", "k") == []
+
+
+@pytest.mark.asyncio
+async def test_settings_page_renders_engine_model_select(tmp_path):
+    """v0.1.3：openai provider 引擎卡渲染模型下拉（with_input 自訂＋預設值）。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")  # 暖身
+        await user.open("/settings")
+        select = next(
+            iter(
+                user.find(kind=ui.select, marker="engine-model-select-nvidia").elements
+            )
+        )
+        assert select.options == [ENGINE_SPECS["nvidia"].model]  # 預設值即 registry 預設
+        assert select.value == ENGINE_SPECS["nvidia"].model

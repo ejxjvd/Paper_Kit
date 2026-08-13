@@ -608,3 +608,21 @@ def test_timeout_log_error_chain_redacts_api_key(tmp_path):
         assert "sk-TOPSECRET" not in text, "逾時 log 的 error_chain 不得含明文 key"
     finally:
         logging.getLogger("paper_kit").handlers.clear()
+
+
+def test_build_command_nim_throttling_flags_when_spec_configured():
+    """v0.1.3（NIM 40 RPM／並發 2-5 限制，2026-08-14 使用者情報）：spec 內建
+    節流——--qps 0.6（每 1.67 秒一發＝36 RPM 留餘裕）＋--pool-max-workers 1
+    （pdf2zh 預設併發會瞬間踩爆 40 RPM 拿 429）。"""
+    cfg = EngineConfig(provider="openai", api_key="nvapi-x", qps=0.6, max_workers=1)
+    cmd = build_command(make_job(), cfg)
+    assert cmd[cmd.index("--qps") + 1] == "0.6"
+    assert cmd[cmd.index("--pool-max-workers") + 1] == "1"
+
+
+def test_build_command_no_throttling_flags_by_default():
+    """其他引擎（spec 未設節流）不帶 --qps/--pool-max-workers——引擎預設行為不變。"""
+    cfg = EngineConfig(api_key="KEY")
+    cmd = build_command(make_job(), cfg)
+    assert "--qps" not in cmd
+    assert "--pool-max-workers" not in cmd
