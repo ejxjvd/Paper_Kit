@@ -38,6 +38,7 @@ class EngineConfig:
     provider: str = "siliconflow"           # "siliconflow" | "deepseek"
     model: str = DEFAULT_MODEL
     api_key: str = ""
+    term_api_key: str = ""                  # #84：術語提取獨立 key（空＝沿用 api_key）
     base_url: str = DEFAULT_BASE_URL        # SiliconFlow 國際站
     retries: int = 2                        # 暫時性錯誤重試次數
     # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
@@ -83,11 +84,12 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
         # term_extraction_engine_settings=None → get_term_translator=None → 提取
         # 整個跳過（不需 key、不呼叫、不上雲）。敏感任務（sensitive_ok 只有
         # deepseek，票 10 紅線）因此同時守護：機密內容不上 SiliconFlow 雲端。
-        # term 引擎 key 獨立化（EngineConfig.term_api_key）留待 #84/#85。
+        # #84：term 引擎 key 獨立化——term_api_key 設定時用獨立 key（設定頁
+        # siliconflow 卡「術語提取 API key」欄）；未設定（空）沿用主 key（向後相容）。
         cmd += [
             "--term-siliconflow",
             "--term-siliconflow-model", cfg.model,
-            "--term-siliconflow-api-key", cfg.api_key,
+            "--term-siliconflow-api-key", cfg.term_api_key or cfg.api_key,
             "--term-siliconflow-base-url", cfg.base_url,
         ]
     return cmd

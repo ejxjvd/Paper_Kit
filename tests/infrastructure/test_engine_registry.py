@@ -66,6 +66,18 @@ def test_build_engine_free_engine_needs_no_key():
     assert adapter._config.api_key == ""
 
 
+def test_build_engine_passes_term_api_key_through():
+    """#84：術語提取 key 獨立化——build_engine 把 term_api_key 帶入 EngineConfig；
+    未傳時預設空（build_command 沿用主 key）。"""
+    adapter = build_engine(
+        ENGINE_SPECS["siliconflow"], api_key="MAIN-KEY", term_api_key="TERM-KEY"
+    )
+    assert adapter._config.api_key == "MAIN-KEY"
+    assert adapter._config.term_api_key == "TERM-KEY"
+    plain = build_engine(ENGINE_SPECS["siliconflow"], api_key="MAIN-KEY")
+    assert plain._config.term_api_key == ""
+
+
 def test_engine_spec_construction_defaults_base_url():
     spec = EngineSpec(id="x", label="X", provider="x", model="", needs_key=False, sensitive_ok=True)
     assert spec.base_url == DEFAULT_BASE_URL  # 未指定就用國際站 .com

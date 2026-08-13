@@ -550,6 +550,27 @@ def _clear_engine_key(settings: SettingsService, eid: str, key_input) -> None:
     return clear
 
 
+# ── #84：術語提取 key 獨立化（handler 仿票 20 防遮罩寫回） ─────
+
+
+def _save_term_key(settings: SettingsService, eid: str, key_input) -> None:
+    def save() -> None:
+        current = settings.term_api_key(eid)
+        value = key_input.value
+        if value and value != _mask_key(current):
+            settings.set_term_api_key(eid, value)
+        ui.notify("已儲存術語提取 key", type="positive")
+    return save
+
+
+def _clear_term_key(settings: SettingsService, eid: str, key_input) -> None:
+    def clear() -> None:
+        settings.set_term_api_key(eid, "")
+        key_input.value = ""
+        ui.notify("已清除術語提取 key", type="warning")
+    return clear
+
+
 def _cache_stats_label(cache: TranslationCache) -> str:
     """「快取 N 筆 · X MB」；stats() 排除索引 DB，只算實際產物。"""
     count, total = cache.stats()
@@ -621,6 +642,28 @@ def _settings_page(
                                 "清除",
                                 on_click=_clear_engine_key(settings, eid, key_input),
                             ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
+                        if eid == "siliconflow":
+                            # #84：術語提取 key 獨立化——term 引擎＝SiliconFlow 專屬
+                            # （term 旗標僅 siliconflow provider 發送，#83）；獨立 key
+                            # 避免共用主 key（可各自輪替、權限分離）。
+                            ui.label("術語提取 API key（自動術語提取專用；空白 = 沿用主 key）").classes(
+                                "text-xs text-grey-7"
+                            )
+                            term_input = ui.input(
+                                "術語提取 API key",
+                                value=_mask_key(settings.term_api_key(eid)),
+                                password=True,
+                                password_toggle_button=True,
+                            ).classes("w-full").mark(f"term-key-input-{eid}")
+                            with ui.row().classes("gap-2"):
+                                ui.button(
+                                    "儲存術語 key",
+                                    on_click=_save_term_key(settings, eid, term_input),
+                                ).props("outline").mark(f"term-key-save-{eid}")
+                                ui.button(
+                                    "清除",
+                                    on_click=_clear_term_key(settings, eid, term_input),
+                                ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
             with ui.card().classes("w-full"):
                 ui.label("預設值").classes("font-bold")
                 ui.input(

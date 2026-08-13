@@ -169,6 +169,55 @@ async def test_clear_key_button_empties_key(tmp_path):
 # ── 票 25：設定頁翻譯快取區（開關＋統計＋清除） ───────────────
 
 
+def _term_key_input(user, eid: str):
+    """術語提取 key input（marker 定位——siliconflow 卡內獨立欄）。"""
+    return next(iter(user.find(kind=ui.input, marker=f"term-key-input-{eid}").elements))
+
+
+def _term_key_save_button(user, eid: str):
+    return user.find(kind=ui.button, marker=f"term-key-save-{eid}")
+
+
+# ── #84：術語提取 key 獨立化（設定頁入口） ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_settings_page_term_key_field_renders(tmp_path):
+    """#84：siliconflow 卡有「術語提取 API key」欄（term 引擎＝SiliconFlow 專屬）。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        _term_key_input(user, "siliconflow")  # 不存在會 raise
+        await user.should_see("術語提取 API key")
+
+
+@pytest.mark.asyncio
+async def test_save_term_key_stores_independently(tmp_path):
+    """#84：儲存術語提取 key → 寫入 term_api_key；主引擎 key 不受影響。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("siliconflow", "sf-main-original")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        term_input = _term_key_input(user, "siliconflow")
+        term_input.value = "sf-term-new"
+        _term_key_save_button(user, "siliconflow").click()
+        await user.should_see("已儲存術語提取 key")
+        assert settings.term_api_key("siliconflow") == "sf-term-new"
+        assert settings.api_key("siliconflow") == "sf-main-original", "術語 key 不得覆寫主 key"
+
+
 def _cache_toggle(user) -> ui.switch:
     """「啟用翻譯快取」開關（label 過濾——設定頁有多個 switch）。"""
     return next(

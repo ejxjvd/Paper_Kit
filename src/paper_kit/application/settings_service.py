@@ -35,12 +35,26 @@ class SettingsService:
     def set_api_key(self, engine_id: str, api_key: str) -> None:
         self._repo.set_api_key(engine_id, api_key)
 
+    # ── #84：術語提取 key 獨立化 ────────────────────────────
+
+    def term_api_key(self, engine_id: str) -> str:
+        """術語提取引擎（SiliconFlow term）獨立 key；未設定回空（build_command 沿用主 key）。"""
+        return self._repo.get(f"term_api_key_{engine_id}", "") or ""
+
+    def set_term_api_key(self, engine_id: str, api_key: str) -> None:
+        self._repo.set(f"term_api_key_{engine_id}", api_key)
+
     def resolve_engine(self) -> TranslationEnginePort:
         """依設定建引擎；缺 key 給友善錯誤（FakeEngine 注入路徑不受影響）。"""
         spec = self.engine_spec()
         if spec.needs_key and not self.api_key(spec.id):
             raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
-        return build_engine(spec, api_key=self.api_key(spec.id))
+        # #84：術語提取獨立 key 一併帶入（空＝沿用主 key，向後相容）
+        return build_engine(
+            spec,
+            api_key=self.api_key(spec.id),
+            term_api_key=self.term_api_key(spec.id),
+        )
 
     # ── 語言／輸出目錄 ──────────────────────────────────────
 

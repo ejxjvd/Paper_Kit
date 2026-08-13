@@ -126,6 +126,18 @@ def test_auto_extract_toggle_roundtrip(tmp_path):
     assert svc.auto_extract() is False
 
 
+def test_term_api_key_defaults_blank_and_roundtrip(tmp_path):
+    """#84：術語提取 key 獨立化——預設空（build_command 沿用主 key）、可獨立設定。"""
+    svc = make_service(tmp_path)
+    assert svc.term_api_key("siliconflow") == ""
+    svc.set_term_api_key("siliconflow", "sf-term-key-123")
+    assert svc.term_api_key("siliconflow") == "sf-term-key-123"
+    # 獨立 key 與主 key 各自存放（不同 repo key）
+    svc.set_api_key("siliconflow", "sf-main-key-456")
+    assert svc.term_api_key("siliconflow") == "sf-term-key-123"
+    assert svc.api_key("siliconflow") == "sf-main-key-456"
+
+
 # ── 票 11：深色模式偏好 ───────────────────────────────────
 
 

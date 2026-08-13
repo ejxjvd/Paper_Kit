@@ -118,9 +118,12 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
 
 
 def build_engine(
-    spec: EngineSpec, api_key: str = ""
+    spec: EngineSpec, api_key: str = "", term_api_key: str = ""
 ) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter:
-    """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。"""
+    """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。
+
+    #84：term_api_key＝術語提取引擎（SiliconFlow）獨立 key——只對
+    Pdf2zhNextAdapter 有意義（term 旗標僅 siliconflow provider 發送，#83）。"""
     if spec.provider == "babeldoc":
         cfg = BabelDocConfig(
             model=spec.model,
@@ -146,6 +149,7 @@ def build_engine(
         provider=spec.provider,
         model=spec.model,
         api_key=api_key,
+        term_api_key=term_api_key,  # #84：術語提取獨立 key（空＝build_command 沿用主 key）
         base_url=spec.base_url,
     )
     return Pdf2zhNextAdapter(cfg)

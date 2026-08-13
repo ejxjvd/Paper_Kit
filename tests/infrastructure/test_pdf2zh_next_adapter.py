@@ -205,6 +205,23 @@ def test_build_command_term_siliconflow_absent_by_default():
     assert "--term-siliconflow" not in cmd
 
 
+def test_build_command_term_api_key_independent():
+    """#84：術語提取 key 獨立化——EngineConfig.term_api_key 設定時
+    --term-siliconflow-api-key 用獨立 key（不再複用主引擎 key）。"""
+    cfg = EngineConfig(api_key="MAIN-KEY", term_api_key="TERM-KEY")
+    cmd = build_command(make_job(auto_extract=True), cfg)
+    assert cmd[cmd.index("--term-siliconflow-api-key") + 1] == "TERM-KEY"
+    # 主引擎旗標不受影響（各用各的 key）
+    assert cmd[cmd.index("--siliconflow-api-key") + 1] == "MAIN-KEY"
+
+
+def test_build_command_term_api_key_blank_falls_back_to_main():
+    """#84：term_api_key 未設定（預設空）→ 沿用主 key（舊行為不變，向後相容）。"""
+    cfg = EngineConfig(api_key="MAIN-KEY")  # term_api_key 預設 ""
+    cmd = build_command(make_job(auto_extract=True), cfg)
+    assert cmd[cmd.index("--term-siliconflow-api-key") + 1] == "MAIN-KEY"
+
+
 def test_build_command_deepseek_auto_extract_no_term_flags():
     """#83（紅）：deepseek provider＋auto_extract → 不得送任何 --term-* 旗標。
 
