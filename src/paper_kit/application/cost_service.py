@@ -15,20 +15,11 @@ from paper_kit.application.pages import page_count_in_range
 from paper_kit.domain.cost_calculator import CostCalculator, CostEstimate, PricingConfig
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
+from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 
-# 預設單價（USD/1K tokens；官方價格頁為準，設定頁可改）。免費引擎為零。
-DEFAULT_PRICING: dict[str, tuple[Decimal, Decimal, int]] = {
-    "deepseek": (Decimal("0.00027"), Decimal("0.0011"), 5000),  # 2026-08-06 漲價後
-    "siliconflow": (Decimal("0.0012"), Decimal("0.0012"), 5000),
-    "siliconflowfree": (Decimal("0"), Decimal("0"), 5000),
-    "google": (Decimal("0"), Decimal("0"), 5000),
-    "bing": (Decimal("0"), Decimal("0"), 5000),
-    "babeldoc": (Decimal("0.00027"), Decimal("0.0011"), 5000),  # 票 13：後端＝deepseek-chat
-    "ppt-vision": (Decimal("0.0012"), Decimal("0.0012"), 5000),  # 票 14：SiliconFlow gemma 眼睛
-    "latex": (Decimal("0.00027"), Decimal("0.0011"), 5000),  # 票 15：後端＝deepseek-chat
-}
-DEFAULT_PER_PAGE_TOKENS = 5000
+# 架構健檢 #3（2026-08-13）：預設定價不再在此定義——單一真相在 EngineSpec.pricing
+# （registry 不變式測試把關「每支引擎必有定價」）；此處只派生。repo 覆寫仍優先。
 
 
 class CostService:
@@ -56,13 +47,15 @@ class CostService:
         return usd * self.usd_twd_rate()
 
     def pricing_for(self, engine_id: str) -> PricingConfig:
+        """repo 覆寫優先（漲價教訓）→ 無則 EngineSpec.pricing 派生（架構健檢 #3）。
+        未知引擎保留舊 fallback（(0,0,5000)——理論上不發生：UI 只從 registry 選）。"""
         row = self._repo.get_pricing(engine_id)
         if row is not None:
             return PricingConfig(Decimal(row[0]), Decimal(row[1]), row[2])
-        input_per_1k, output_per_1k, per_page = DEFAULT_PRICING.get(
-            engine_id, (Decimal("0"), Decimal("0"), DEFAULT_PER_PAGE_TOKENS)
-        )
-        return PricingConfig(input_per_1k, output_per_1k, per_page)
+        spec = ENGINE_SPECS.get(engine_id)
+        if spec is not None:
+            return PricingConfig(*spec.pricing)
+        return PricingConfig(Decimal("0"), Decimal("0"), 5000)
 
     def set_pricing(
         self,

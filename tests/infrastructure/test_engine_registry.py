@@ -5,6 +5,7 @@
 """
 
 import pytest
+from decimal import Decimal
 
 from paper_kit.application.ports import EngineError
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, EngineSpec, build_engine
@@ -79,7 +80,10 @@ def test_build_engine_passes_term_api_key_through():
 
 
 def test_engine_spec_construction_defaults_base_url():
-    spec = EngineSpec(id="x", label="X", provider="x", model="", needs_key=False, sensitive_ok=True)
+    spec = EngineSpec(
+        id="x", label="X", provider="x", model="", needs_key=False, sensitive_ok=True,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 架構健檢 #3：定價必填
+    )
     assert spec.base_url == DEFAULT_BASE_URL  # 未指定就用國際站 .com
 
 
@@ -307,3 +311,44 @@ def test_gemini_spec_carries_data_training_warning():
 
     info = ENGINE_SPECS["gemini"].info
     assert "資料訓練" in info or "訓練" in info, "Gemini info 缺資料訓練警語"
+
+
+# ── 架構健檢 #3（2026-08-13）：定價收進 EngineSpec 單一真相 ──
+# 動機：DEFAULT_PRICING（cost_service）與 ENGINE_SPECS 平行演化失同步——
+# 新增 10 支引擎沒進 DEFAULT_PRICING → 付費引擎估價落 (0,0,5000) fallback，
+# 顯示「免費引擎無費用」。定價與引擎規格同處後，加引擎＝改 registry 單點。
+
+
+def test_all_specs_carry_pricing():
+    """不變式：18 支引擎全部有定價（非 None、非負、per_page>0）——防「加引擎忘定價」。"""
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+
+    for eid, spec in ENGINE_SPECS.items():
+        assert spec.pricing is not None, f"{eid} 缺 pricing"
+        input_1k, output_1k, per_page = spec.pricing
+        assert input_1k >= 0 and output_1k >= 0, f"{eid} 單價異常"
+        assert per_page > 0, f"{eid} per_page_tokens 異常"
+
+
+def test_free_engines_pricing_is_zero():
+    """免費引擎（免 key 三支＋免費 LLM 七支）定價全零——免費額度不該顯示費用。"""
+    from paper_kit.infrastructure.engine_registry import (
+        ENGINE_SPECS,
+        UI_FREE_KEY_ENGINE_IDS,
+    )
+
+    for eid, spec in ENGINE_SPECS.items():
+        if not spec.needs_key or eid in UI_FREE_KEY_ENGINE_IDS:
+            assert spec.pricing == (Decimal("0"), Decimal("0"), 5000), f"{eid} 免費引擎應零價"
+
+
+def test_paid_engines_carry_official_pricing():
+    """OpenAI gpt-5-mini／Gemini 3 Pro 官方價（2026-08-13 WebSearch 查證官方價格頁）。"""
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+
+    assert ENGINE_SPECS["openai"].pricing == (
+        Decimal("0.00025"), Decimal("0.002"), 5000,
+    ), "gpt-5-mini：$0.25/M in、$2.00/M out"
+    assert ENGINE_SPECS["gemini-pro"].pricing == (
+        Decimal("0.002"), Decimal("0.012"), 5000,
+    ), "Gemini 3 Pro：$2.00/M in、$12.00/M out"

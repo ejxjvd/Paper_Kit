@@ -58,6 +58,25 @@ def test_pricing_can_be_updated_for_price_raises(tmp_path):
     assert svc.pricing_for("deepseek").input_per_1k == Decimal("0.003")
 
 
+def test_paid_engines_pricing_comes_from_registry(tmp_path):
+    """架構健檢 #3：付費引擎（openai/gemini-pro）估價由 EngineSpec 定價派生——
+    不再落 (0,0,5000) fallback 顯示「免費引擎無費用」（DEFAULT_PRICING 失同步 bug）。"""
+    svc = make_service(tmp_path)
+    assert svc.pricing_for("openai").input_per_1k == Decimal("0.00025")
+    assert svc.pricing_for("openai").output_per_1k == Decimal("0.002")
+    assert svc.pricing_for("gemini-pro").input_per_1k == Decimal("0.002")
+    assert svc.pricing_for("gemini-pro").output_per_1k == Decimal("0.012")
+    assert svc.estimate("openai", pages=1).cost > 0, "付費引擎估算金額不得為零"
+    assert svc.estimate("gemini-pro", pages=1).cost > 0, "付費引擎估算金額不得為零"
+
+
+def test_repo_override_still_beats_registry_default(tmp_path):
+    """repo 覆寫優先（2026-08-06 漲價教訓）：使用者改價後 spec 預設不得蓋過。"""
+    svc = make_service(tmp_path)
+    svc.set_pricing("openai", input_per_1k="0.003", output_per_1k="0.012", per_page_tokens=5000)
+    assert svc.pricing_for("openai").input_per_1k == Decimal("0.003")
+
+
 def test_estimate_hand_computed(tmp_path):
     """10 頁 × 5000 = 50,000；in=0.77→38,500；成本 = 38.5×0.002 + 11.5×0.008 = 0.169。"""
     svc = make_service(tmp_path)

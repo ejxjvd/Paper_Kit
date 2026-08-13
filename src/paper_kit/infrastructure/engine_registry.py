@@ -8,6 +8,7 @@
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from paper_kit.infrastructure.babeldoc_adapter import (
     BabelDocAdapter,
@@ -45,6 +46,9 @@ class EngineSpec:
     model: str
     needs_key: bool
     sensitive_ok: bool
+    # 架構健檢 #3（2026-08-13）：定價單一真相（USD/1K in、USD/1K out、per-page tokens）。
+    # 免費引擎＝零；設定頁 repo 覆寫仍優先於此預設（2026-08-06 漲價教訓）。
+    pricing: tuple[Decimal, Decimal, int]
     base_url: str = DEFAULT_BASE_URL
     card_desc: str = ""   # P3：主頁卡副標題（僅 UI_ENGINE_IDS 內引擎填）
     info: str = ""        # P3：主頁卡 ⓘ tooltip 長敘述（hover 顯示引擎差異）
@@ -58,6 +62,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model=DEFAULT_MODEL,
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0.0012"), Decimal("0.0012"), 5000),
         card_desc="gemma 視覺模型（圖表精準；預設引擎）",
         info="gemma 視覺模型：圖表／公式版面精準，預設引擎。需 SiliconFlow API key。",
     ),
@@ -68,6 +73,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="",
         needs_key=True,
         sensitive_ok=True,
+        pricing=(Decimal("0.00027"), Decimal("0.0011"), 5000),  # 2026-08-06 漲價後
         # 2026-08-13（測試 API 按鈕）：pdf2zh deepseek 分支固定 api.deepseek.com
         # （build_command 不送 base-url 旗標）——spec 補上供「測試 API」探測用
         base_url="https://api.deepseek.com/v1",
@@ -81,6 +87,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="",
         needs_key=False,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),
         # 免費翻譯入口（2026-08-13）：上游預設、活躍；額度由 SiliconFlow 官方
         # 提供（gui.py「Free translation service provided by SiliconFlow」）
         card_desc="GLM-4-9B 免費模型（上游預設；免 key 推薦）",
@@ -95,6 +102,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="",
         needs_key=False,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),
         # 免費翻譯入口（2026-08-13）：上游已棄用——保留但不推薦
         card_desc="Google 網頁翻譯（上游已棄用）",
         info="Google 網頁翻譯接口、不需 key；上游 pdf2zh-next 已標記棄用，"
@@ -107,6 +115,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="",
         needs_key=False,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),
         card_desc="Bing 網頁翻譯（上游已棄用）",
         info="Bing 網頁翻譯接口、不需 key；上游 pdf2zh-next 已標記棄用，"
         "旗標仍在但可能隨時失效——不建議依賴。品質低於付費引擎。",
@@ -118,6 +127,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model=DEFAULT_BABELDOC_MODEL,
         needs_key=True,
         sensitive_ok=False,  # 送雲端 LLM：機密模式不可用（票 10 紅線）
+        pricing=(Decimal("0.00027"), Decimal("0.0011"), 5000),  # 後端＝deepseek-chat
         base_url=DEFAULT_BABELDOC_BASE_URL,
         card_desc="OpenAI 相容雲端（DeepSeek 後端）",
         info="OpenAI 相容雲端（DeepSeek 後端）：版面重排能力強；"
@@ -130,6 +140,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model=DEFAULT_VISION_MODEL,
         needs_key=True,
         sensitive_ok=False,  # 視覺 = 圖片上雲端（票 10 紅線，同 paste-vision）
+        pricing=(Decimal("0.0012"), Decimal("0.0012"), 5000),  # SiliconFlow gemma 眼睛
         base_url=DEFAULT_VISION_BASE_URL,
     ),
     "latex": EngineSpec(
@@ -139,6 +150,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model=DEFAULT_LATEX_MODEL,
         needs_key=True,
         sensitive_ok=True,  # 純文字源碼：機密模式可用（票 10 紅線合規）
+        pricing=(Decimal("0.00027"), Decimal("0.0011"), 5000),  # 後端＝deepseek-chat
         base_url=DEFAULT_LATEX_BASE_URL,
         # 票 27：成本 4.7× 差距的理由（公式指令原封、token 最省）
         card_desc="DeepSeek 純文字（xelatex 編譯；僅 .tex 源碼適用）",
@@ -155,6 +167,8 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="gpt-5-mini",
         needs_key=True,
         sensitive_ok=True,  # OpenAI API 資料不用於訓練（官方政策）——機密文件可用
+        # gpt-5-mini 官方價（2026-08-13 查證）：$0.25/M in、$2.00/M out
+        pricing=(Decimal("0.00025"), Decimal("0.002"), 5000),
         base_url="https://api.openai.com/v1",
         card_desc="OpenAI 官方（sk- key、用量付費）",
         info="OpenAI 官方端點（api.openai.com，sk- key、pay-as-you-go）：gpt-5-mini 品質 T1、"
@@ -168,6 +182,8 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="gemini-3-pro-latest",
         needs_key=True,
         sensitive_ok=True,  # 付費 API 層不訓練（免費層 gemini 引擎才資料訓練紅線）
+        # Gemini 3 Pro 官方價（2026-08-13 查證）：$2.00/M in、$12.00/M out
+        pricing=(Decimal("0.002"), Decimal("0.012"), 5000),
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         card_desc="Gemini 3 Pro（付費層、不訓練）",
         info="Google Gemini 付費 API（ai.google.dev 付費層 key）：Gemini 3 Pro 品質 T1"
@@ -187,6 +203,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="deepseek-ai/deepseek-v4-flash",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://integrate.api.nvidia.com/v1",
         card_desc="DeepSeek-V4-Flash 免費（T1/T2；40 RPM、無日總量）",
         info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：DeepSeek-V4-Flash/GLM-5.2/"
@@ -200,6 +217,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="deepseek-ai/DeepSeek-V4-Pro",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://api-inference.modelscope.cn/v1",
         card_desc="DeepSeek-V4-Pro/GLM-5.1 免費（T1；2,000 RPD）",
         info="阿里雲 ModelScope 免費端（ms- key，須阿里雲實名）：DeepSeek-V4-Pro/GLM-5.1/"
@@ -213,6 +231,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="openai/gpt-oss-120b",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://api.groq.com/openai/v1",
         card_desc="gpt-oss-120b 免費（T2；30 RPM、14,400 RPD）",
         info="Groq 免費端（免綁卡）：gpt-oss-120b 免費、日額度 14,400 次充裕。"
@@ -226,6 +245,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="nvidia/nemotron-3-super-120b-a12b:free",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://openrouter.ai/api/v1",
         card_desc="nemotron-3-super:free（T2；翻譯 86.7% WMT24++）",
         info="OpenRouter 免費端（免綁卡）：nemotron-3-super-120b 翻譯評測免費群最佳"
@@ -239,6 +259,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="glm-4.7-flash",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://open.bigmodel.cn/api/paas/v4",
         card_desc="GLM-4.7-Flash 免費（無 token 上限）",
         info="智譜官方免費端（實名後建 key）：GLM-4.7-Flash/GLM-4-Flash 永久免費、無 token"
@@ -252,6 +273,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="qwen3.7-flash",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度（1M tokens/90 天）
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         card_desc="Qwen3.7-Flash 免費（1M tokens／90 天）",
         info="阿里雲 Model Studio 國際站（dashscope-intl，新加坡端點）：新帳號每合格模型"
@@ -266,6 +288,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="gemma-4-31b-it",
         needs_key=True,
         sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費層額度
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         card_desc="gemma-4-31b 免費（T2；15 RPM、1,500 RPD）",
         info="Google Gemini OpenAI 相容端點（ai.google.dev 免費層，免綁卡）：gemma-4-31b-it"
