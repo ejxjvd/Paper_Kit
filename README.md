@@ -9,12 +9,13 @@
 
 ## 功能
 
-- 上傳 PDF 翻譯：主頁就地選引擎（SiliconFlow／DeepSeek／BabelDOC 三卡）＋目標語言
+- 上傳 PDF 翻譯：主頁就地選引擎（SiliconFlow／DeepSeek／BabelDOC／LaTeX 四卡）＋目標語言
+- 上傳 `.tex` 源碼：自動鎖定 LaTeX 引擎（票 27）——整份編譯、token 最省（整本 ≈NT$0.34）
 - 每筆任務產 mono（僅譯文）＋ dual（雙語對照）雙輸出，卡片與歷史表格都可下載
 - 歷史頁（/history）：表格化＋分頁＋勾選全選＋批量刪除（二次確認）＋批量下載 mono/dual zip
 - 統一頁框（側欄導覽：翻譯／歷史／設定）＋深色模式
 - 引擎 API keys 每引擎獨立（BYOK——交付他人各用各的 key）、遮罩回顯、未填攔截
-- 掃描件 OCR、PPT 視覺路徑、LaTeX 源碼路線、術語表、成本估算、任務取消重試
+- 掃描件 OCR、PPT 視覺路徑、LaTeX 源碼路線（主 UI 整合）、術語表、成本估算、任務取消重試
 
 ## 文件
 
@@ -25,4 +26,4 @@
 
 ## 狀態
 
-票 01–20 全部完成（426 tests passed）；四頁冒煙全綠。後續批次（快取、批量佇列等）見規格書 Out of Scope。
+票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合——**590 tests passed**（2026-08-13）；冒煙全綠。後續工作以 GitHub issues 追蹤。

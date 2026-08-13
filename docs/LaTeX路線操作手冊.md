@@ -41,7 +41,9 @@ cd /mnt/c/Users/qaref/Code/Paper_Kit
 ```
 
 - 上傳 `.tex` 檔（或多檔論文：先自行合併，見 §4）
-- 選目標語言（zh-TW 等）＋引擎（latex）
+- **票 27（2026-08-13）起 .tex 自動走 LaTeX 引擎**——上傳即自動鎖定 latex 卡（無頁面範圍，
+  整份編譯）；PDF 上傳選 LaTeX 會被拒（「僅適用 .tex」，PDF 請選上方三引擎）
+- 選目標語言（zh-TW 等）；引擎已自動鎖定 latex（其 key 未獨立填則沿用 DeepSeek 槽位）
 - 執行 → 產出編譯 PDF（mono）；tokens 自動記入成本歷史
 - 取消鈕中途可停（分段迴圈檢查旗標）
 
