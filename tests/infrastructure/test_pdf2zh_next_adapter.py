@@ -33,6 +33,9 @@ def test_uv_missing_gives_friendly_error(monkeypatch, tmp_path):
                         lambda _: None)
     # 家目錄也隔離（回退檢查 ~/.local/bin/uv 不存在）→ 仍是安裝指引
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    # v0.1.1：自動安裝也失敗（離線模擬）→ 可操作錯誤（不觸網）
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.resolve_uv",
+                        lambda timeout=60: None)
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 真 runner，不注入
     with pytest.raises(EngineError, match="uv"):
         adapter.translate(make_job())

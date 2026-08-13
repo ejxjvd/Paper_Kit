@@ -1,0 +1,91 @@
+# Paper_Kit 發布管線（v0.1.1）：測試 → 雙平台打包（PyInstaller → 冒煙 → zip）
+# → tag 觸發時附資產到 Release。
+#
+# 觸發：
+#   workflow_dispatch：手動驗證包（出 win/mac 兩包 artifact，不建 Release）
+#   push tag v*：測試＋打包＋自動附資產到該 tag 的 Release
+#
+# 打包細節全在 packaging/build.py（spec 版本由 PK_VERSION/pyproject 帶入）。
+
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  tests:
+    name: tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: 安裝依賴
+        run: uv sync --frozen
+      - name: 測試
+        run: uv run pytest
+
+  build-win-x64:
+    name: build win-x64
+    runs-on: windows-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: 安裝依賴
+        run: uv sync --frozen
+      - name: 測試
+        run: uv run pytest
+      - name: 打包（PyInstaller → 冒煙 → zip）
+        run: uv run python packaging/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: dist/paper-kit-*-win-x64.zip
+
+  build-macos-arm64:
+    name: build macos-arm64
+    runs-on: macos-14
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: 安裝依賴
+        run: uv sync --frozen
+      - name: 測試
+        run: uv run pytest
+      - name: 打包（PyInstaller → 冒煙 → zip）
+        run: uv run python packaging/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist/paper-kit-*-macos-arm64.zip
+
+  release:
+    name: attach assets to Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-win-x64, build-macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: 建立/更新 Release 並附資產
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "${TAG}" artifacts/*.zip \
+            --title "Paper_Kit ${TAG#v}" \
+            --notes "見 zip 內 README-使用手冊.md；詳細更新說明另以 Release 描述補全。" \
+          || gh release upload "${TAG}" artifacts/*.zip --clobber

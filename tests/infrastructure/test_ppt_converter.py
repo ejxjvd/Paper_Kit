@@ -4,6 +4,7 @@ soffice 是系統依賴（本機已裝 LibreOffice）；單測以 FakeRunner 為
 （不碰真實 soffice），真實渲染冒煙在 test_ppt_vision_smoke.py（skip 若無 soffice）。
 """
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -92,7 +93,7 @@ def test_converter_soffice_failure_gives_error(tmp_path):
         conv.convert_to_images(tmp_path / "deck.pptx", tmp_path / "out")
 
 
-@pytest.mark.skipif(subprocess.run(["wslpath", "-w", "/"], capture_output=True).returncode != 0,
+@pytest.mark.skipif(shutil.which("wslpath") is None,
                      reason="需要 WSL interop（wslpath）")
 def test_build_soffice_command_windows_exe_windowsifies_paths():
     """WSL 內跑 soffice.exe：/mnt/c/... 必須轉成 C:\\ 形式（interop 事實）。"""

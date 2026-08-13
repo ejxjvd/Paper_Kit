@@ -1,6 +1,6 @@
 [project]
 name = "paper-kit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Paper_Kit：自建學術 PDF/簡報翻譯器（免除線上工具綁架）"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,6 +18,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "python-pptx>=1.0.2",
+    "pyinstaller>=6.0",  # 打包（packaging/build.py 用）
 ]
 
 [tool.pytest.ini_options]

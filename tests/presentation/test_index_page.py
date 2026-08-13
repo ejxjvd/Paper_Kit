@@ -11,6 +11,8 @@
 """
 
 import asyncio
+import shutil
+import types
 from pathlib import Path
 
 import pytest
@@ -709,10 +711,67 @@ def test_explorer_target_mnt_converts_to_drive():
     assert app_module._explorer_target("/mnt/c/Users/qaref/out") == r"C:\Users\qaref\out"
 
 
+@pytest.mark.skipif(
+    shutil.which("wslpath") is None,
+    reason="需要 WSL interop（wslpath）",
+)
 def test_explorer_target_home_uses_wslpath():
-    """WSL 家目錄（~/.paper_kit/outputs）→ wslpath -w 轉 \\\\wsl.localhost UNC。"""
+    """WSL 家目錄（~/.paper_kit/outputs）→ wslpath -w 轉 \\\\wsl.localhost UNC。
+
+    skipif：Windows/mac CI 無 wslpath（shutil.which 安全——不執行、不拋）。
+    """
     target = app_module._explorer_target("/home/qaref/.paper_kit/outputs")
     assert target.startswith(r"\\wsl.localhost")
+
+
+def test_folder_opener_darwin_linux_win32():
+    """v0.1.1 mac/Linux 分支：darwin→open、linux→xdg-open、win32→None（走 explorer）。"""
+    assert app_module._folder_opener("darwin") == "open"
+    assert app_module._folder_opener("linux") == "xdg-open"
+    assert app_module._folder_opener("win32") is None
+
+
+def test_open_folder_darwin_uses_open(tmp_path, monkeypatch):
+    """v0.1.1：macOS 平台用 open（Finder）開資料夾＋先建目錄。"""
+    monkeypatch.setattr(app_module.sys, "platform", "darwin")
+    calls: list = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(app_module.ui, "notify", lambda *a, **k: None)
+    target = tmp_path / "outputs"
+    app_module._open_folder(target)
+    assert calls == [["open", str(target)]]
+    assert target.is_dir(), "mac 分支也應先建資料夾"
+
+
+def test_open_folder_linux_uses_xdg_open(tmp_path, monkeypatch):
+    """v0.1.1：Linux 平台用 xdg-open。"""
+    monkeypatch.setattr(app_module.sys, "platform", "linux")
+    calls: list = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(app_module.ui, "notify", lambda *a, **k: None)
+    app_module._open_folder(tmp_path / "outputs")
+    assert calls[0][0] == "xdg-open"
+
+
+def test_open_folder_win32_uses_explorer(tmp_path, monkeypatch):
+    """win32 分支維持 explorer.exe（語意正規化＋防呆）。
+
+    註：subprocess.run 內部也是呼叫 Popen——Popen 被 mock 攔截會 TypeError
+    （lambda 不吃 kwargs），故 wslpath 層單獨 mock run 給假 UNC 輸出。
+    """
+    monkeypatch.setattr(app_module.sys, "platform", "win32")
+    calls: list = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(
+        app_module.subprocess,
+        "run",
+        lambda *a, **k: types.SimpleNamespace(
+            returncode=0, stdout="\\\\wsl.localhost\\Ubuntu\\tmp\\x\n"
+        ),
+    )
+    monkeypatch.setattr(app_module.ui, "notify", lambda *a, **k: None)
+    app_module._open_folder(tmp_path / "outputs")
+    assert calls[0][0] == "explorer.exe"
 
 
 def test_win_to_wsl_converts_drive_path():

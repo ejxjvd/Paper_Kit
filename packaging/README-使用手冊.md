@@ -1,0 +1,116 @@
+# 📄 Paper_Kit v0.1.1 使用手冊
+
+**自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
+
+- 拖放 PDF 上傳即翻譯成繁體中文（mono 僅譯文＋dual 雙語並排）
+- LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**
+- 四引擎可插拔、BYOK（Bring Your Own Key）——各用各的 key，您的 key 不外流
+
+---
+
+## 🚀 快速啟動
+
+1. 雙擊 `paper-kit-v0.1.1.exe`（**黑色視窗 = 伺服器本體，請勿關閉**；關閉視窗 = 關閉服務）
+2. 瀏覽器自動開啟 **http://localhost:8080/**（若未自動開啟，請手動輸入此網址）
+3. 首次使用請先到**設定頁**填入引擎 API key（見下方「設定 API keys」）
+4. 拖放 PDF（或 .tex）→ 選引擎 → 開始翻譯
+
+> 伺服器停止：直接關閉黑色視窗即可。重新啟動＝再雙擊一次 exe。
+
+> ⚠️ **首次使用需連網**：第一次選用需要外部引擎的翻譯路線時，程式會自動下載
+> 所需工具與引擎（見下方「首次自動下載」）——之後離線可重複使用已下載的工具。
+
+---
+
+## ⚙️ 設定 API keys（BYOK）
+
+- 每個引擎的 key **獨立**設定、遮罩回顯、可個別清除
+- 未填 key 的引擎無法選用（卡片會灰化）
+- 免費引擎三支不需 key：`google`／`bing`／`siliconflowfree`（限流、品質較低，適合試用）
+
+| 引擎 | 用途 | 需 key |
+|---|---|---|
+| SiliconFlow（預設） | gemma 視覺翻譯，一般 PDF | ✅ |
+| DeepSeek | 純文字翻譯，**機密文件專用** | ✅ |
+| BabelDOC | 版面重排（公式保真） | ✅（DeepSeek key 亦可） |
+| LaTeX | .tex 源碼路線，最省 token | ✅ |
+
+---
+
+## ✨ 功能一覽
+
+- **主頁就地選引擎**：四引擎卡片＋目標語言就地選
+- **LaTeX 源碼路線**：上傳 `.tex` 自動鎖定 LaTeX 引擎——公式指令原封、編譯重排（**前置需求見下**）
+- **雙輸出**：每筆任務產 mono（僅譯文）＋dual（雙語對照），卡片與歷史表格皆可下載
+- **歷史管理**：表格化＋分頁＋勾選全選＋批量刪除（二次確認）＋批量下載 mono/dual zip
+- **機密模式**：勾選 🔒 後引擎自動切 DeepSeek、視覺模型灰化（R18／隱私文件不上視覺模型）
+- **掃描件 OCR**：本機 RapidOCR 預處理（onnxruntime）——**不上雲，機密相容**
+- **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
+- **頁面範圍**：可只翻譯選中頁（未選頁原樣保留）
+
+---
+
+## 🍎 macOS 使用者（v0.1.1 新增）
+
+1. 下載 `paper-kit-v0.1.1-macos-arm64.zip`（Apple 晶片）並解壓
+2. **首次開啟需繞過 Gatekeeper**（未簽名程式）：右鍵 exe → 選「開啟」→ 再點「開啟」
+3. 之後流程與 Windows 相同——「📁 瀏覽資料夾」會用 Finder（open）開啟
+4. 進階路線（LaTeX／BabelDOC）需自裝工具（見下方「進階路線前置需求」）
+
+> x86_64 Mac（Intel）請用 `paper-kit-v0.1.1-macos-x64.zip`（若 CI 有出）。
+
+---
+
+## 📌 進階路線前置需求（非預設功能）
+
+核心翻譯（PDF 路線＋SiliconFlow／DeepSeek 引擎）開箱即用。以下兩條路線需要額外工具：
+
+### LaTeX 路線（.tex 翻譯）
+
+需要 **MiKTeX**（內含 xelatex，中文支援）：
+1. 安裝 MiKTeX：https://miktex.org/download
+2. 安裝時或首次使用時接受套件自動安裝
+3. 重新啟動 Paper_Kit 即可
+
+### BabelDOC 路線（版面重排）
+
+**v0.1.1 起 uv 自動安裝**（不再需要手動裝）：
+1. 首次選用 BabelDOC 時，程式**自動下載 uv 工具**到應用程式專屬資料夾（不需管理員權限、不修改您的 PATH）
+2. 接著自動下載 babeldoc CLI（需連網，首次等待較久——引擎本體數百 MB）
+
+---
+
+## 💾 資料位置
+
+| 內容 | 位置 |
+|---|---|
+| 設定（API keys）、任務歷史 | `%USERPROFILE%\.paper_kit\paper_kit.db` |
+| 輸出翻譯 PDF | `%USERPROFILE%\.paper_kit\outputs\` |
+| 術語表庫 | `%USERPROFILE%\.paper_kit\glossaries\` |
+| 翻譯快取 | `%USERPROFILE%\.paper_kit\cache\` |
+| 除錯 log | `%USERPROFILE%\.paper_kit\logs\` |
+| 自動安裝的 uv 工具 | `%USERPROFILE%\.paper_kit\bin\` |
+
+> 移除全部資料＝刪除 `.paper_kit` 資料夾（程式會自動重建全新乾淨環境）。
+
+---
+
+## ❓ 常見問題
+
+- **8080 埠被佔用**：關閉其他佔用 8080 的程式（例如其他 Paper_Kit 執行個體）後重啟
+- **Windows 安全性警告**：PyInstaller 打包的 exe 首次執行可能觸發 SmartScreen——選擇「仍要執行」（僅此一次）
+- **防毒誤報**：PyInstaller 打包程式有時被誤判——如遭移除，請加入信任清單後重新解壓執行
+- **翻譯品質**：免費引擎（google/bing/siliconflowfree）限流且品質較低——正式使用請用 SiliconFlow 或 DeepSeek key
+- **「系統缺少 uv 工具且自動下載失敗」**：表示離線或 GitHub 無法連線——連網後重試翻譯即可
+
+---
+
+## 🔒 隱私
+
+- 上傳即代表同意：檔案內容將送**您填寫的引擎 API** 翻譯
+- 機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理、不上視覺模型
+- 掃描件 OCR 全程本機執行（RapidOCR），**不上雲**
+
+---
+
+Paper_Kit v0.1.1（2026-08-14）

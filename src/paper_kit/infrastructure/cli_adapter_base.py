@@ -19,6 +19,7 @@ from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
+from paper_kit.infrastructure.uv_bootstrap import resolve_uv
 
 logger = logging.getLogger("paper_kit.infrastructure.cli_adapter_base")
 
@@ -134,24 +135,20 @@ class CliAdapterBase:
         """
 
         def runner(cmd: list[str], timeout: int, cwd: str | None = None):
-            if cmd[0] == "uv" and shutil.which("uv") is None:
-                # 2026-08-12 實機 e2e：非登入 shell（wsl -e bash script.sh、
-                # systemd、無頭）PATH 缺 ~/.local/bin → which 找不到 uv →
-                # 翻譯 1 秒 FAILED。回退 uv 官方安裝位置（~/.local/bin/uv；
-                # Windows 為 uv.exe）——存在就改用絕對路徑執行，任何啟動
-                # 方式免疫；兩者皆無才給可操作訊息（安裝指令），不是裸 Errno。
-                fallback: Path | None = None
-                for name in ("uv", "uv.exe"):
-                    candidate = Path.home() / ".local" / "bin" / name
-                    if candidate.is_file():
-                        fallback = candidate
-                        break
-                if fallback is None:
+            if cmd[0] == "uv":
+                # v0.1.1：uv 自動安裝（uv_bootstrap）——偵測鏈 PATH →
+                # ~/.local/bin → ~/.paper_kit/bin（app 專屬自動落點）→
+                # 自動下載官方二進制。取代舊「which＋home fallback」兩層：
+                # 使用者不需要手動裝任何東西（2026-08-14 使用者要求）。
+                # 全鏈失敗才給可操作訊息（含手動安裝指令），不是裸 Errno。
+                uv = resolve_uv()
+                if uv is None:
                     raise EngineError(
-                        "系統缺少 uv 工具（引擎中介）：執行 "
-                        "`curl -LsSf https://astral.sh/uv/install.sh | sh` 安裝後重試"
+                        "系統缺少 uv 工具（引擎中介）且自動下載失敗（離線？）。"
+                        "可手動執行 `curl -LsSf https://astral.sh/uv/install.sh | sh` "
+                        "安裝後重試"
                     )
-                cmd = [str(fallback), *cmd[1:]]
+                cmd = [uv, *cmd[1:]]
             kwargs = {"cwd": cwd}
             # #23（2026-08-13 實跑定案）：babeldoc（rich）非 TTY 輸出固定寬度折行，
             # token 統計行數字被拆到次行 → parse 誤記 out=0。COLUMNS 放大 → rich 寬

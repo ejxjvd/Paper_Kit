@@ -1,7 +1,7 @@
 # 📄 Paper_Kit
 
 [![Release](https://img.shields.io/github/v/release/ejxjvd/Paper_Kit?label=最新發布)](https://github.com/ejxjvd/Paper_Kit/releases)
-[![Tests](https://img.shields.io/badge/tests-641%20passed-green)](https://github.com/ejxjvd/Paper_Kit/actions)
+[![Tests](https://img.shields.io/badge/tests-660%20passed-green)](https://github.com/ejxjvd/Paper_Kit/actions)
 
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
@@ -19,14 +19,21 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 - 🔒 **機密模式**：R18／隱私文件只准 DeepSeek 純文字引擎（視覺模型不上雲）
 - 🔍 **掃描件 OCR**：本機 RapidOCR（onnxruntime）預處理，不上雲——機密相容
 - 💰 **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
-- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**641 tests passed**
+- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**660 tests passed**
 
 ## 🚀 快速開始
 
 ### 一般使用者（免安裝版）
 
-下載 [**paper-kit-v0.1.0-win-x64.zip**](https://github.com/ejxjvd/Paper_Kit/releases)（Release v0.1.0）→ 解壓 → 雙擊 `paper-kit-v0.1.0.exe` → 瀏覽器自動開啟 http://localhost:8080/。
-自包含免安裝（內建 Python runtime＋全部依賴），操作說明見資料夾內 `README-使用手冊.md`。
+從 [Releases](https://github.com/ejxjvd/Paper_Kit/releases) 下載對應平台的 zip：
+
+| 平台 | 檔案 | 說明 |
+|---|---|---|
+| Windows x64 | `paper-kit-v0.1.1-win-x64.zip` | 解壓 → 雙擊 `paper-kit-v0.1.1.exe` |
+| macOS（Apple 晶片） | `paper-kit-v0.1.1-macos-arm64.zip` | 解壓 → 右鍵 exe →「開啟」（繞過 Gatekeeper） |
+
+瀏覽器自動開啟 http://localhost:8080/。自包含免安裝（內建 Python runtime＋全部依賴），操作說明見資料夾內 `README-使用手冊.md`。
+**首次使用需連網**：第一次選用需要外部引擎的翻譯路線時自動下載所需工具（uv）與引擎；之後離線可重複使用。
 
 ### 開發者（原始碼）
 

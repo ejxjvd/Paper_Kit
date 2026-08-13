@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -131,23 +132,41 @@ def _explorer_target(raw: str) -> str:
     return raw
 
 
-def _open_folder(path: Path) -> None:
-    """開啟系統檔案管理員到指定資料夾（#20 強化：語意正規化＋防呆＋notify）。
+def _folder_opener(platform_name: str | None = None) -> str | None:
+    """平台 → 檔案管理員命令（純函式）。win32 回 None（走 explorer 正規化路徑）。"""
+    plat = platform_name or sys.platform
+    if plat == "darwin":
+        return "open"
+    if plat.startswith("linux"):
+        return "xdg-open"
+    return None
 
-    「瀏覽資料夾」輸入可為 Windows 路徑（C:\\...）或 WSL 路徑（/mnt/c/...、
-    /home/...）——mkdir 與 explorer 目標各自正規化（Windows 路徑在 /mnt
-    對應建、UNC 不需 mkdir）；任何失敗 → notify 錯誤（使用者實測「點按
-    無回應」的靜默感從此消除）。
+
+def _open_folder(path: Path) -> None:
+    """開啟系統檔案管理員到指定資料夾（#20 強化＋v0.1.1 mac/Linux 分支）。
+
+    win32：「瀏覽資料夾」輸入可為 Windows 路徑（C:\\...）或 WSL 路徑
+    （/mnt/c/...、/home/...）——mkdir 與 explorer 目標各自正規化（Windows
+    路徑在 /mnt 對應建、UNC 不需 mkdir）；任何失敗 → notify 錯誤（使用者
+    實測「點按無回應」的靜默感從此消除）。
+    darwin/linux：macOS 用 open（Finder）、Linux 用 xdg-open——直接吃本機
+    路徑（WSL 語意僅 win32 存在）；mkdir 後 Popen。
     """
     try:
         raw = str(path)
-        if _WIN_DRIVE_RE.match(raw):
-            Path(_win_to_wsl(raw)).mkdir(parents=True, exist_ok=True)
-        elif not _WIN_UNC_RE.match(raw):
+        opener = _folder_opener()
+        if opener is None:
+            if _WIN_DRIVE_RE.match(raw):
+                Path(_win_to_wsl(raw)).mkdir(parents=True, exist_ok=True)
+            elif not _WIN_UNC_RE.match(raw):
+                path.mkdir(parents=True, exist_ok=True)
+            target = _explorer_target(raw)
+            subprocess.Popen(["explorer.exe", target])
+            ui.notify(f"已開啟資料夾：{target}", type="positive")
+        else:
             path.mkdir(parents=True, exist_ok=True)
-        target = _explorer_target(raw)
-        subprocess.Popen(["explorer.exe", target])
-        ui.notify(f"已開啟資料夾：{target}", type="positive")
+            subprocess.Popen([opener, raw])
+            ui.notify(f"已開啟資料夾：{raw}", type="positive")
     except Exception as exc:
         logger.error("開啟資料夾失敗", extra={"path": str(path), "error": str(exc)})
         ui.notify(f"開啟資料夾失敗：{exc}", type="negative")
