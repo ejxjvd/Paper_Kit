@@ -113,9 +113,11 @@ def parse_output(output: str, job: TranslationJob) -> JobResult:
             "引擎未產出任何 PDF（log 無 MonoPDF/DualPDF 行）——上游可能失敗但回傳成功"
         )
     stem = job.source_path.rsplit(".", 1)[0] if job.source_path else "output"
+    # 缺其一時 fallback 慣例檔名必須用實際 target_lang（引擎產出
+    # {stem}.{lang}.mono.pdf）——舊硬編碼 .zh. 與 zh-TW 不符 → 假路徑。
     return JobResult(
-        mono_path=mono.group(1) if mono else f"{stem}.zh.mono.pdf",
-        dual_path=dual.group(1) if dual else f"{stem}.zh.dual.pdf",
+        mono_path=mono.group(1) if mono else f"{stem}.{job.target_lang}.mono.pdf",
+        dual_path=dual.group(1) if dual else f"{stem}.{job.target_lang}.dual.pdf",
         input_tokens=int(tokens.group(1)) if tokens else 0,
         output_tokens=int(tokens.group(2)) if tokens else 0,
     )

@@ -283,6 +283,16 @@ def test_parse_output_no_path_lines_raises_engine_error():
         parse_output(out, make_job())
 
 
+def test_parse_output_missing_mono_fallback_uses_target_lang():
+    """檔名小瑕疵（frontier）：log 只有 DualPDF 行 → mono fallback 檔名必須用
+    實際 target_lang（zh-TW）——舊行為硬編碼 .zh.mono.pdf 與引擎產出
+    zh-TW.mono.pdf 不符 → fallback 路徑不存在 → 下載失敗。"""
+    out = "INFO Dual PDF: /out/paper.zh-TW.dual.pdf\n"
+    result = parse_output(out, make_job())
+    assert result.mono_path == "/in/paper.zh-TW.mono.pdf", f"實際 {result.mono_path}"
+    assert result.dual_path == "/out/paper.zh-TW.dual.pdf"  # 既有行不受影響
+
+
 # ── translate：錯誤對映 ──────────────────────────────────
 
 
