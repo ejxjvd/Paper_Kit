@@ -3,6 +3,8 @@
 - sensitive_ok：機密模式紅線（票 10）——視覺/雲端影像引擎不可用，純文字引擎可用
 - needs_key：free 引擎（google/bing/siliconflowfree）不需 key
 - 票 13：BabelDocAdapter（OpenAI 相容雲端）第二支插頭——spec 分派不同 adapter 類
+- P3（2026-08-13 架構重構）：顯示知識收斂——card_desc/info（主頁卡副標題＋ⓘ tooltip）
+  併入 spec；UI_ENGINE_IDS 定義主頁卡集合與順序。加引擎＝改此檔單點。
 """
 
 from dataclasses import dataclass
@@ -44,6 +46,8 @@ class EngineSpec:
     needs_key: bool
     sensitive_ok: bool
     base_url: str = DEFAULT_BASE_URL
+    card_desc: str = ""   # P3：主頁卡副標題（僅 UI_ENGINE_IDS 內引擎填）
+    info: str = ""        # P3：主頁卡 ⓘ tooltip 長敘述（hover 顯示引擎差異）
 
 
 ENGINE_SPECS: dict[str, EngineSpec] = {
@@ -54,6 +58,8 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model=DEFAULT_MODEL,
         needs_key=True,
         sensitive_ok=False,
+        card_desc="gemma 視覺模型（圖表精準；預設引擎）",
+        info="gemma 視覺模型：圖表／公式版面精準，預設引擎。需 SiliconFlow API key。",
     ),
     "deepseek": EngineSpec(
         id="deepseek",
@@ -62,6 +68,8 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         model="",
         needs_key=True,
         sensitive_ok=True,
+        card_desc="純文字模型（機密文件唯一可用）",
+        info="純文字模型：機密文件唯一可用（不上視覺模型）；成本最省。",
     ),
     "siliconflowfree": EngineSpec(
         id="siliconflowfree",
@@ -95,6 +103,9 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         needs_key=True,
         sensitive_ok=False,  # 送雲端 LLM：機密模式不可用（票 10 紅線）
         base_url=DEFAULT_BABELDOC_BASE_URL,
+        card_desc="OpenAI 相容雲端（DeepSeek 後端）",
+        info="OpenAI 相容雲端（DeepSeek 後端）：版面重排能力強；"
+        "下方的「BabelDOC 進階選項」（僅翻譯選中頁面／相容模式等）僅此引擎顯示。",
     ),
     "ppt-vision": EngineSpec(
         id="ppt-vision",
@@ -113,8 +124,16 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         needs_key=True,
         sensitive_ok=True,  # 純文字源碼：機密模式可用（票 10 紅線合規）
         base_url=DEFAULT_LATEX_BASE_URL,
+        # 票 27：成本 4.7× 差距的理由（公式指令原封、token 最省）
+        card_desc="DeepSeek 純文字（xelatex 編譯；僅 .tex 源碼適用）",
+        info="LaTeX 源碼：公式指令原封保留、xelatex 編譯重排，token 最省"
+        "（整本 NT$0.3 級，票 15 實測 NT$0.34）。僅適用 .tex 源碼上傳；PDF 請選上方三引擎。",
     ),
 }
+
+# P3：主頁引擎卡集合與顯示順序（票 19 明定三支 PDF 主引擎；latex 票 27 第 4 卡；
+# ppt-vision 走特化路線、free 引擎不設卡）。app.py 只迭代此 tuple——加引擎單點。
+UI_ENGINE_IDS: tuple[str, ...] = ("siliconflow", "deepseek", "babeldoc", "latex")
 
 
 def build_engine(

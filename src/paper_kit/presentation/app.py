@@ -38,7 +38,11 @@ from paper_kit.application.translation_cache import TranslationCache  # 票 25�
 from paper_kit.domain.translation_job import InvalidTransition, JobStatus, TranslationJob
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
-from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, build_engine
+from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也收斂至 registry
+    ENGINE_SPECS,
+    UI_ENGINE_IDS,
+    build_engine,
+)
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
@@ -47,6 +51,7 @@ from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import (  # P2：純函式統一在 handlers（零 nicegui import）
     FREE_TOKEN_QUOTA,
     JobCardView,
+    StartJobParams,  # P4：_start_job 參數收斂物件（.tex/PDF 分支各自組裝）
     _aggregate_used_tokens,
     _is_tex_path,  # 票 27：.tex 判別
     _mask_key,  # 票 20：key 遮罩
@@ -73,28 +78,9 @@ BADGE_COLORS = {
     JobStatus.CANCELLED: "grey",
 }
 
-# 票 19：主頁引擎三選卡（ticket 明定三支 PDF 主引擎；latex／ppt-vision 走特化路線）
-# 票 27（2026-08-13 使用者決策）：第 4 卡 LaTeX——成本 4.7× 差距、.tex 預設走 LaTeX；
-# 引擎層 latex 早已 registry 註冊（票 15），本卡讓 UI 選得到（僅適用 .tex 上傳）
-ENGINE_CARDS = (
-    ("siliconflow", "gemma 視覺模型（圖表精準；預設引擎）"),
-    ("deepseek", "純文字模型（機密文件唯一可用）"),
-    ("babeldoc", "OpenAI 相容雲端（DeepSeek 後端）"),
-    ("latex", "DeepSeek 純文字（xelatex 編譯；僅 .tex 源碼適用）"),
-)
-
-# 2026-08-13（使用者要求）：引擎卡 ⓘ 說明文字（hover 顯示差異——「開啟 babeldoc
-# 後多了一堆選項，差別在哪裡」的答案直接在卡上）
-ENGINE_INFO = {
-    "siliconflow": "gemma 視覺模型：圖表／公式版面精準，預設引擎。需 SiliconFlow API key。",
-    "deepseek": "純文字模型：機密文件唯一可用（不上視覺模型）；成本最省。",
-    "babeldoc": "OpenAI 相容雲端（DeepSeek 後端）：版面重排能力強；"
-    "下方的「BabelDOC 進階選項」（僅翻譯選中頁面／相容模式等）僅此引擎顯示。",
-    # 票 27：LaTeX 卡 ⓘ 說明——成本 4.7× 差距的理由（公式指令原封、token 最省）
-    "latex": "LaTeX 源碼：公式指令原封保留、xelatex 編譯重排，token 最省"
-    "（整本 NT$0.3 級，票 15 實測 NT$0.34）。僅適用 .tex 源碼上傳；PDF 請選上方三引擎。",
-}
-
+# P3（2026-08-13 架構重構）：引擎卡集合/順序/副標題/ⓘ tooltip 全部收斂至
+# engine_registry（UI_ENGINE_IDS＋EngineSpec.card_desc/info）——加引擎＝改 registry 單點。
+# 票 19 主頁三卡＋票 27 第 4 卡 LaTeX（成本 4.7× 差距、.tex 預設走 LaTeX）。
 
 logger = logging.getLogger("paper_kit.presentation.app")
 
@@ -218,26 +204,22 @@ def _start_job(
     settings: SettingsService,
     cost: CostService,
     glossaries: GlossaryService,
-    file_path: Path,
-    file_name: str,
-    pages_text: str = "",
-    total_pages: int | None = None,  # #27：翻譯頁數（進度框「N/M 頁」的 N）
-    pdf_pages: int | None = None,    # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
-    sensitive: bool = False,
-    ocr: bool = False,
-    engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
-    target_lang: str | None = None,  # 票 19：語言下拉就地選（None=設定頁值）
-    only_selected_pages: bool = True,  # #85：僅翻譯選中頁面 toggle
-    # #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎消費；其他引擎忽略）
-    enhance_compatibility: bool = False,
-    merge_alternating_line_numbers: bool = True,
-    remove_non_formula_lines: bool = False,
-    font_family: str = "serif",
+    params: StartJobParams,  # P4：任務參數收斂物件（.tex/PDF 分支各自組裝）
 ) -> bool:
     """送暫存檔建立翻譯任務。成功（含引擎已啟動）回 True——呼叫方清理暫存。
 
     #85 改版：暫存寫入從「選檔時」提前發生（auto_upload=True 暫存流程）——
     本函只收已暫存的 file_path，不再碰 FileUpload。"""
+    # P4：參數解包（內部維持既有變數語意，改動面最小）
+    file_path, file_name, pages_text = params.file_path, params.file_name, params.pages_text
+    total_pages, pdf_pages = params.total_pages, params.pdf_pages
+    sensitive, ocr = params.sensitive, params.ocr
+    engine_id, target_lang = params.engine_id, params.target_lang
+    only_selected_pages = params.only_selected_pages
+    enhance_compatibility = params.enhance_compatibility
+    merge_alternating_line_numbers = params.merge_alternating_line_numbers
+    remove_non_formula_lines = params.remove_non_formula_lines
+    font_family = params.font_family
     # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於建任務）
     try:
         pages = parse_pages(pages_text)
@@ -674,7 +656,7 @@ def _settings_page(
                 ui.label(
                     "各自用自己的 key（存本機 SQLite，不入 repo/log）；已存 key 僅顯示遮罩。"
                 ).classes("text-xs text-grey-6")
-                for eid, desc in ENGINE_CARDS:
+                for eid in UI_ENGINE_IDS:  # P3：與主頁引擎卡同一集合（registry 單點）
                     spec = ENGINE_SPECS[eid]
                     # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
                     # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
@@ -683,7 +665,7 @@ def _settings_page(
                         with ui.row().classes("items-center justify-between w-full"):
                             ui.label(spec.label).classes("font-semibold")
                             ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
-                        ui.label(desc).classes("text-xs text-grey-7")
+                        ui.label(spec.card_desc).classes("text-xs text-grey-7")
                         key_input = ui.input(
                             "API key",
                             value=_mask_key(settings.api_key(eid)),
@@ -1507,7 +1489,7 @@ def _index_page(
 
             engine_cards: dict[str, ui.card] = {}
             with ui.row().classes("gap-2 w-full"):
-                for eid, desc in ENGINE_CARDS:
+                for eid in UI_ENGINE_IDS:  # P3：卡集合/順序/文字全來自 registry
                     spec = ENGINE_SPECS[eid]
                     card = ui.card().mark(f"engine-card-{eid}").classes(
                         "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
@@ -1519,8 +1501,8 @@ def _index_page(
                             # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示引擎差異
                             ui.icon("help_outline").props("size=16px").classes(
                                 "text-grey-5"
-                            ).mark(f"info-engine-{eid}").tooltip(ENGINE_INFO[eid])
-                        ui.label(desc).classes("text-xs text-grey-7 pk-engine-desc")
+                            ).mark(f"info-engine-{eid}").tooltip(spec.info)
+                        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
                     engine_cards[eid] = card
                     card.on("click", _engine_picker(_pick_engine, eid))
 
@@ -1642,17 +1624,18 @@ def _index_page(
                         # 票 27：.tex 無頁數語意——總頁數 None（進度框不顯示頁數）、
                         # 整份編譯；engine override 已由暫存時自動鎖定 latex
                         ok = _start_job(
-                            service, settings, cost, glossaries, path, name,
-                            pages_text="",
-                            total_pages=None,
-                            pdf_pages=None,
-                            sensitive=sensitive_input.value,
-                            ocr=False,
-                            engine_id=(
-                                selected_engine
-                                if selected_engine != settings.engine_id() else None
+                            service, settings, cost, glossaries,
+                            # P4：.tex 分支——pages_text/total_pages/ocr 無語意（走 StartJobParams 預設）
+                            StartJobParams(
+                                file_path=path,
+                                file_name=name,
+                                sensitive=sensitive_input.value,
+                                engine_id=(
+                                    selected_engine
+                                    if selected_engine != settings.engine_id() else None
+                                ),
+                                target_lang=lang_select.value,
                             ),
-                            target_lang=lang_select.value,
                         )
                         if ok:
                             staged.pop(name, None)
@@ -1664,27 +1647,31 @@ def _index_page(
                         file_pages = 0  # 理論上不會：暫存時已驗證可讀
                     pages_text = _pages_for_file(selected, file_pages)
                     ok = _start_job(
-                        service, settings, cost, glossaries, path, name,
-                        pages_text=pages_text or "",
-                        # #27：翻譯頁數（選取頁碼數）與 PDF 總頁數分開——
-                        # 挑 2 頁翻譯 → 「完成 100% · 2/2 頁」＋歷史「2/58 頁」（先前錯顯示 58/58）
-                        total_pages=_translated_pages(pages_text, file_pages),
-                        pdf_pages=file_pages or None,
-                        sensitive=sensitive_input.value,
-                        ocr=ocr_input.value,
-                        # 票 19：只在使用者實際點選（≠設定頁 global）才 override——
-                        # 未點選走 global 路徑（settings.resolve_engine，測試 seam）
-                        engine_id=(
-                            selected_engine
-                            if selected_engine != settings.engine_id() else None
+                        service, settings, cost, glossaries,
+                        StartJobParams(
+                            file_path=path,
+                            file_name=name,
+                            pages_text=pages_text or "",
+                            # #27：翻譯頁數（選取頁碼數）與 PDF 總頁數分開——
+                            # 挑 2 頁翻譯 → 「完成 100% · 2/2 頁」＋歷史「2/58 頁」（先前錯顯示 58/58）
+                            total_pages=_translated_pages(pages_text, file_pages),
+                            pdf_pages=file_pages or None,
+                            sensitive=sensitive_input.value,
+                            ocr=ocr_input.value,
+                            # 票 19：只在使用者實際點選（≠設定頁 global）才 override——
+                            # 未點選走 global 路徑（settings.resolve_engine，測試 seam）
+                            engine_id=(
+                                selected_engine
+                                if selected_engine != settings.engine_id() else None
+                            ),
+                            target_lang=lang_select.value,
+                            only_selected_pages=only_selected_input.value,  # #85：僅選中頁面
+                            # #85 切片C：babeldoc 進階選項（其他引擎忽略）
+                            enhance_compatibility=enhance_compat_input.value,
+                            merge_alternating_line_numbers=merge_lines_input.value,
+                            remove_non_formula_lines=remove_lines_input.value,
+                            font_family=font_select.value,
                         ),
-                        target_lang=lang_select.value,
-                        only_selected_pages=only_selected_input.value,  # #85：僅選中頁面
-                        # #85 切片C：babeldoc 進階選項（其他引擎忽略）
-                        enhance_compatibility=enhance_compat_input.value,
-                        merge_alternating_line_numbers=merge_lines_input.value,
-                        remove_non_formula_lines=remove_lines_input.value,
-                        font_family=font_select.value,
                     )
                     if ok:
                         staged.pop(name, None)
