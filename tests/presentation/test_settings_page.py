@@ -72,7 +72,7 @@ def _engine_key_save_button(user, eid: str):
 
 def test_mask_key_masks_all_but_first_six_chars():
     """遮罩：前 6 字符＋其餘星號；短 key 全星號；空 key 空字串。"""
-    from paper_kit.presentation.app import _mask_key
+    from paper_kit.presentation.handlers import _mask_key  # P2：純函式已收斂至 handlers
 
     assert _mask_key("sk-test123456") == "sk-tes*******"
     assert _mask_key("abc") == "***"

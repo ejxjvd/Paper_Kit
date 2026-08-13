@@ -177,3 +177,68 @@ def build_batch_zip(
         for path, arcname in files:
             zf.write(path, arcname)
     return zip_path
+
+
+# ── 純函式收斂（2026-08-13 架構重構 P2：由 app.py 遷入，零 nicegui import） ──
+
+
+def _is_tex_path(name: str | Path) -> bool:
+    """票 27：LaTeX 源碼判別（副檔名 .tex，大小寫不拘）——.tex 預設走 LaTeX 引擎。"""
+    return str(name).lower().endswith(".tex")
+
+
+def _translated_pages(pages_text: str | None, file_pages: int | None) -> int | None:
+    """#27：翻譯頁數——選取頁碼數（pages_text 非空）或 PDF 總頁數（無選取）。
+
+    total_pages 語意＝「本次實際翻譯的頁數」：挑 2 頁（29,30）→ 2（不是 58——
+    使用者實測「完成 100% · 58/58 頁」是錯誤顯示）；全文 → file_pages。
+    檔案頁數讀不到 → None（舊任務相容，進度框省略頁數）。
+    """
+    if pages_text:
+        return len(pages_text.split(","))
+    return file_pages or None
+
+
+def _pages_for_file(selected: list[str], file_pages: int) -> str | None:
+    """#85：頁面範圍（多選頁碼）套用單一檔案——選中頁碼 ∩ 1..file_pages。
+
+    空選擇／全選 → None（全部頁面）；檔案頁數不足 → 交集為空 → None（全文，
+    不把越界頁碼漏到引擎才爆）。回傳 "1,3,5" 式頁面範圍（parse_pages 合法格式）。"""
+    if not selected:
+        return None
+    pages = sorted({int(p) for p in selected if 1 <= int(p) <= file_pages})
+    if not pages or len(pages) >= file_pages:
+        return None  # 空交集或全選＝全部頁面
+    return ",".join(str(p) for p in pages)
+
+
+# #85 切片D：免費額度資訊條——BabelDOC 風格（沉浸式翻譯 UI 的 0/500,000 Tokens）。
+# 本地工具無真正額度──聚合已完成任務 tokens 顯示「已用」參考值，不強制限流。
+FREE_TOKEN_QUOTA = 500_000
+
+
+def _aggregate_used_tokens(jobs: list[TranslationJob]) -> int:
+    """已用 tokens＝全部已完成任務 in+out 加總（失敗/排隊/翻譯中不計）。"""
+    return sum(
+        (job.result.input_tokens or 0) + (job.result.output_tokens or 0)
+        for job in jobs
+        if job.status is JobStatus.COMPLETED and job.result
+    )
+
+
+def _quota_label(used: int) -> str:
+    """額度條文字：`免費額度 10,000/500,000 Tokens`（千分位）。"""
+    return f"免費額度 {used:,}/{FREE_TOKEN_QUOTA:,} Tokens"
+
+
+def _mask_key(key: str) -> str:
+    """票 20：已存 key 回顯遮罩——前 6 字符＋其餘星號；短 key（≤6）全星號。
+
+    短 key 全遮（前 6 明文是規格明定；短 key 全顯示＝整把 key 曝光）。
+    input 顯示遮罩；儲存時值等於遮罩＝未修改（防遮罩寫回）。
+    """
+    if not key:
+        return ""
+    if len(key) <= 6:
+        return "*" * len(key)
+    return key[:6] + "*" * (len(key) - 6)

@@ -27,6 +27,7 @@ from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 import paper_kit.presentation.app as app_module  # 同 module 物件（見下註）
 from paper_kit.presentation.app import _index_page
+from paper_kit.presentation.handlers import _translated_pages  # P2：純函式已收斂至 handlers
 
 from test_ui_flow import FileWritingFakeEngine  # noqa: E402
 
@@ -584,7 +585,7 @@ def test_aggregate_used_tokens_counts_only_completed():
     """#85 切片D：已用 tokens＝已完成任務 in+out 加總；失敗/排隊/翻譯中不計。"""
     from paper_kit.domain.job_result import JobResult
     from paper_kit.domain.translation_job import JobStatus, TranslationJob
-    from paper_kit.presentation.app import _aggregate_used_tokens, _quota_label
+    from paper_kit.presentation.handlers import _aggregate_used_tokens, _quota_label
 
     done = _completed_job("a", in_t=3000, out_t=7000)
     failed = TranslationJob(job_id="b", source_path="/out/x.pdf")
@@ -627,14 +628,14 @@ async def test_free_quota_bar_shows_aggregated_tokens(tmp_path, make_blank_pdf):
 
 
 def test_pages_for_file_empty_selection_means_all():
-    from paper_kit.presentation.app import _pages_for_file
+    from paper_kit.presentation.handlers import _pages_for_file
 
     assert _pages_for_file([], 7) is None
     assert _pages_for_file(None, 7) is None
 
 
 def test_pages_for_file_subset_and_full_selection():
-    from paper_kit.presentation.app import _pages_for_file
+    from paper_kit.presentation.handlers import _pages_for_file
 
     assert _pages_for_file(["1", "3"], 7) == "1,3"
     assert _pages_for_file(["3", "1", "2"], 7) == "1,2,3"  # 排序去重
@@ -642,7 +643,7 @@ def test_pages_for_file_subset_and_full_selection():
 
 
 def test_pages_for_file_out_of_range_pages_dropped():
-    from paper_kit.presentation.app import _pages_for_file
+    from paper_kit.presentation.handlers import _pages_for_file
 
     # 檔案頁數不足 → 越界頁碼剔除；交集空 → None（全文，不把越界頁碼漏到引擎）
     assert _pages_for_file(["1", "5"], 3) == "1"
@@ -654,20 +655,20 @@ def test_pages_for_file_out_of_range_pages_dropped():
 
 def test_translated_pages_selection_counts_selected():
     """挑 2 頁（29,30）→ 翻譯頁數 2（不是 PDF 總頁數 58——使用者實測 bug）。"""
-    assert app_module._translated_pages("29,30", 58) == 2
-    assert app_module._translated_pages("1,2,3", 58) == 3
+    assert _translated_pages("29,30", 58) == 2
+    assert _translated_pages("1,2,3", 58) == 3
 
 
 def test_translated_pages_no_selection_uses_file_pages():
     """全文（無選取）→ 翻譯頁數＝PDF 總頁數。"""
-    assert app_module._translated_pages(None, 58) == 58
-    assert app_module._translated_pages("", 58) == 58
+    assert _translated_pages(None, 58) == 58
+    assert _translated_pages("", 58) == 58
 
 
 def test_translated_pages_no_info_returns_none():
     """檔案頁數讀不到（理論上不會）→ None（舊任務相容）。"""
-    assert app_module._translated_pages(None, None) is None
-    assert app_module._translated_pages("", 0) is None
+    assert _translated_pages(None, None) is None
+    assert _translated_pages("", 0) is None
 
 
 # ── #20：瀏覽資料夾路徑語意正規化（純函式——使用者實測「點按無回應」） ──

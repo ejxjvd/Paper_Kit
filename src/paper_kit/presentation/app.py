@@ -44,8 +44,15 @@ from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
-from paper_kit.presentation.handlers import (
+from paper_kit.presentation.handlers import (  # P2：純函式統一在 handlers（零 nicegui import）
+    FREE_TOKEN_QUOTA,
     JobCardView,
+    _aggregate_used_tokens,
+    _is_tex_path,  # 票 27：.tex 判別
+    _mask_key,  # 票 20：key 遮罩
+    _pages_for_file,  # #85：頁面範圍套用
+    _quota_label,  # #85 切片D：額度條文字
+    _translated_pages,  # #27：翻譯頁數
     build_batch_zip,
     build_job_card,
     progress_label,  # #15：進度框文字（「完成 100% · 10/10 頁」）
@@ -204,55 +211,6 @@ def _engine_picker(pick, eid: str):
     def pick_engine() -> None:
         pick(eid)
     return pick_engine
-
-
-def _is_tex_path(name: str | Path) -> bool:
-    """票 27：LaTeX 源碼判別（副檔名 .tex，大小寫不拘）——.tex 預設走 LaTeX 引擎。"""
-    return str(name).lower().endswith(".tex")
-
-
-def _translated_pages(pages_text: str | None, file_pages: int | None) -> int | None:
-    """#27：翻譯頁數——選取頁碼數（pages_text 非空）或 PDF 總頁數（無選取）。
-
-    total_pages 語意＝「本次實際翻譯的頁數」：挑 2 頁（29,30）→ 2（不是 58——
-    使用者實測「完成 100% · 58/58 頁」是錯誤顯示）；全文 → file_pages。
-    檔案頁數讀不到 → None（舊任務相容，進度框省略頁數）。
-    """
-    if pages_text:
-        return len(pages_text.split(","))
-    return file_pages or None
-
-
-def _pages_for_file(selected: list[str], file_pages: int) -> str | None:
-    """#85：頁面範圍（多選頁碼）套用單一檔案——選中頁碼 ∩ 1..file_pages。
-
-    空選擇／全選 → None（全部頁面）；檔案頁數不足 → 交集為空 → None（全文，
-    不把越界頁碼漏到引擎才爆）。回傳 "1,3,5" 式頁面範圍（parse_pages 合法格式）。"""
-    if not selected:
-        return None
-    pages = sorted({int(p) for p in selected if 1 <= int(p) <= file_pages})
-    if not pages or len(pages) >= file_pages:
-        return None  # 空交集或全選＝全部頁面
-    return ",".join(str(p) for p in pages)
-
-
-# #85 切片D：免費額度資訊條——BabelDOC 風格（沉浸式翻譯 UI 的 0/500,000 Tokens）。
-# 本地工具無真正額度──聚合已完成任務 tokens 顯示「已用」參考值，不強制限流。
-FREE_TOKEN_QUOTA = 500_000
-
-
-def _aggregate_used_tokens(jobs: list[TranslationJob]) -> int:
-    """已用 tokens＝全部已完成任務 in+out 加總（失敗/排隊/翻譯中不計）。"""
-    return sum(
-        (job.result.input_tokens or 0) + (job.result.output_tokens or 0)
-        for job in jobs
-        if job.status is JobStatus.COMPLETED and job.result
-    )
-
-
-def _quota_label(used: int) -> str:
-    """額度條文字：`免費額度 10,000/500,000 Tokens`（千分位）。"""
-    return f"免費額度 {used:,}/{FREE_TOKEN_QUOTA:,} Tokens"
 
 
 def _start_job(
@@ -625,19 +583,6 @@ def _refresh(
             )
 
 
-def _mask_key(key: str) -> str:
-    """票 20：已存 key 回顯遮罩——前 6 字符＋其餘星號；短 key（≤6）全星號。
-
-    短 key 全遮（前 6 明文是規格明定；短 key 全顯示＝整把 key 曝光）。
-    input 顯示遮罩；儲存時值等於遮罩＝未修改（防遮罩寫回，見 _save_engine_key）。
-    """
-    if not key:
-        return ""
-    if len(key) <= 6:
-        return "*" * len(key)
-    return key[:6] + "*" * (len(key) - 6)
-
-
 def _save_engine_choice(settings: SettingsService, engine_id: str) -> None:
     """票 20：儲存「預設引擎」選擇（key 已由各引擎卡獨立管理，不再經此寫）。"""
     try:
@@ -647,52 +592,37 @@ def _save_engine_choice(settings: SettingsService, engine_id: str) -> None:
         ui.notify("未知引擎", type="negative")
 
 
-def _save_engine_key(settings: SettingsService, eid: str, key_input) -> None:
-    """票 20：0 參數 factory（`lambda eid=eid:` 會被 event 覆寫，票 19 教訓）。
+def _key_handlers(
+    settings: SettingsService,
+    eid: str,
+    key_input,
+    *,
+    getter,
+    setter,
+    save_msg: str,
+    clear_msg: str,
+) -> tuple:
+    """票 20/#84：0 參數 factory（`lambda eid=eid:` 會被 event 覆寫，票 19 教訓）。
 
-    防遮罩寫回：input 回顯的是遮罩——值等於遮罩視為未修改，不得存成 key。
+    引擎 key 與術語提取 key（#84）共用同一份包裝——差異只有 getter/setter 與
+    通知文案（2026-08-13 架構重構 P1：原四胞胎收斂）。防遮罩寫回：input 回顯的
+    是遮罩——值等於遮罩視為未修改，不得存成 key；spec review（票 20）：清除後
+    一併清 input 顯示值——否則殘留遮罩在「清除後再按儲存」會被當新 key 寫回
+    （current="" 時任何值都過防遮罩判斷）。回傳 (save, clear) 0 參數 closures。
     """
     def save() -> None:
-        current = settings.api_key(eid)
+        current = getter(eid)
         value = key_input.value
         if value and value != _mask_key(current):
-            settings.set_api_key(eid, value)
-        ui.notify(f"已儲存 {ENGINE_SPECS[eid].label} 的 API key", type="positive")
-    return save
+            setter(eid, value)
+        ui.notify(save_msg, type="positive")
 
-
-def _clear_engine_key(settings: SettingsService, eid: str, key_input) -> None:
-    """票 20：0 參數 factory——清除該引擎 key（清空後 api_key 回傳空）。
-
-    spec review（票 20）：一併清 input 顯示值——否則殘留遮罩在「清除後再按儲存」
-    會被 `_save_engine_key` 當新 key 寫回（current="" 時任何值都過防遮罩判斷）。
-    """
     def clear() -> None:
-        settings.set_api_key(eid, "")
+        setter(eid, "")
         key_input.value = ""
-        ui.notify(f"已清除 {ENGINE_SPECS[eid].label} 的 API key", type="warning")
-    return clear
+        ui.notify(clear_msg, type="warning")
 
-
-# ── #84：術語提取 key 獨立化（handler 仿票 20 防遮罩寫回） ─────
-
-
-def _save_term_key(settings: SettingsService, eid: str, key_input) -> None:
-    def save() -> None:
-        current = settings.term_api_key(eid)
-        value = key_input.value
-        if value and value != _mask_key(current):
-            settings.set_term_api_key(eid, value)
-        ui.notify("已儲存術語提取 key", type="positive")
-    return save
-
-
-def _clear_term_key(settings: SettingsService, eid: str, key_input) -> None:
-    def clear() -> None:
-        settings.set_term_api_key(eid, "")
-        key_input.value = ""
-        ui.notify("已清除術語提取 key", type="warning")
-    return clear
+    return save, clear
 
 
 def _cache_stats_label(cache: TranslationCache) -> str:
@@ -760,14 +690,21 @@ def _settings_page(
                             password=True,
                             password_toggle_button=True,
                         ).classes("w-full").mark(f"engine-key-input-{eid}")
+                        save_key, clear_key = _key_handlers(
+                            settings, eid, key_input,
+                            getter=settings.api_key,
+                            setter=settings.set_api_key,
+                            save_msg=f"已儲存 {ENGINE_SPECS[eid].label} 的 API key",
+                            clear_msg=f"已清除 {ENGINE_SPECS[eid].label} 的 API key",
+                        )
                         with ui.row().classes("gap-2"):
                             ui.button(
                                 "儲存 key",
-                                on_click=_save_engine_key(settings, eid, key_input),
+                                on_click=save_key,
                             ).props("outline").mark(f"engine-key-save-{eid}")
                             ui.button(
                                 "清除",
-                                on_click=_clear_engine_key(settings, eid, key_input),
+                                on_click=clear_key,
                             ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
                         if eid == "siliconflow":
                             # #84：術語提取 key 獨立化——term 引擎＝SiliconFlow 專屬
@@ -782,14 +719,21 @@ def _settings_page(
                                 password=True,
                                 password_toggle_button=True,
                             ).classes("w-full").mark(f"term-key-input-{eid}")
+                            save_term, clear_term = _key_handlers(
+                                settings, eid, term_input,
+                                getter=settings.term_api_key,
+                                setter=settings.set_term_api_key,
+                                save_msg="已儲存術語提取 key",
+                                clear_msg="已清除術語提取 key",
+                            )
                             with ui.row().classes("gap-2"):
                                 ui.button(
                                     "儲存術語 key",
-                                    on_click=_save_term_key(settings, eid, term_input),
+                                    on_click=save_term,
                                 ).props("outline").mark(f"term-key-save-{eid}")
                                 ui.button(
                                     "清除",
-                                    on_click=_clear_term_key(settings, eid, term_input),
+                                    on_click=clear_term,
                                 ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
             with ui.card().classes("w-full"):
                 ui.label("預設值").classes("font-bold")
