@@ -67,10 +67,13 @@ BADGE_COLORS = {
 }
 
 # 票 19：主頁引擎三選卡（ticket 明定三支 PDF 主引擎；latex／ppt-vision 走特化路線）
+# 票 27（2026-08-13 使用者決策）：第 4 卡 LaTeX——成本 4.7× 差距、.tex 預設走 LaTeX；
+# 引擎層 latex 早已 registry 註冊（票 15），本卡讓 UI 選得到（僅適用 .tex 上傳）
 ENGINE_CARDS = (
     ("siliconflow", "gemma 視覺模型（圖表精準；預設引擎）"),
     ("deepseek", "純文字模型（機密文件唯一可用）"),
     ("babeldoc", "OpenAI 相容雲端（DeepSeek 後端）"),
+    ("latex", "DeepSeek 純文字（xelatex 編譯；僅 .tex 源碼適用）"),
 )
 
 # 2026-08-13（使用者要求）：引擎卡 ⓘ 說明文字（hover 顯示差異——「開啟 babeldoc
@@ -80,6 +83,9 @@ ENGINE_INFO = {
     "deepseek": "純文字模型：機密文件唯一可用（不上視覺模型）；成本最省。",
     "babeldoc": "OpenAI 相容雲端（DeepSeek 後端）：版面重排能力強；"
     "下方的「BabelDOC 進階選項」（僅翻譯選中頁面／相容模式等）僅此引擎顯示。",
+    # 票 27：LaTeX 卡 ⓘ 說明——成本 4.7× 差距的理由（公式指令原封、token 最省）
+    "latex": "LaTeX 源碼：公式指令原封保留、xelatex 編譯重排，token 最省"
+    "（整本 NT$0.3 級，票 15 實測 NT$0.34）。僅適用 .tex 源碼上傳；PDF 請選上方三引擎。",
 }
 
 
@@ -178,6 +184,13 @@ def _resolve_task_engine(
     spec = ENGINE_SPECS.get(engine_id)
     if spec is None:
         raise EngineError(f"未知引擎：{engine_id}")
+    if spec.id == "latex":
+        # 票 27：latex 後端＝deepseek-chat（README 唯一推薦後端）——key 未獨立
+        # 填時沿用 deepseek 槽位（同後端同 key；設定頁 latex 卡可覆寫）
+        key = settings.api_key("latex") or settings.api_key("deepseek")
+        if not key:
+            raise EngineError("尚未設定 LaTeX／DeepSeek 的 API key（設定頁填入後再翻譯）")
+        return spec.id, build_engine(spec, api_key=key)
     if spec.needs_key and not settings.api_key(spec.id):
         raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
     return spec.id, build_engine(spec, api_key=settings.api_key(spec.id))
@@ -191,6 +204,11 @@ def _engine_picker(pick, eid: str):
     def pick_engine() -> None:
         pick(eid)
     return pick_engine
+
+
+def _is_tex_path(name: str | Path) -> bool:
+    """票 27：LaTeX 源碼判別（副檔名 .tex，大小寫不拘）——.tex 預設走 LaTeX 引擎。"""
+    return str(name).lower().endswith(".tex")
 
 
 def _translated_pages(pages_text: str | None, file_pages: int | None) -> int | None:
@@ -272,6 +290,11 @@ def _start_job(
         engine_id, engine = _resolve_task_engine(settings, engine_id)
     except EngineError as exc:
         ui.notify(to_user_message(exc), type="negative")
+        return False
+    # 票 27：LaTeX 引擎僅適用 .tex 源碼（選錯卡／設定頁 global 設 latex＋上傳 PDF
+    # → 前置擋下；不悄悄 fallback 到別支引擎——#83 靜默誤動作教訓）
+    if engine_id == "latex" and not _is_tex_path(file_name):
+        ui.notify("LaTeX 引擎僅適用 .tex 源碼——PDF 請選上方三引擎", type="negative")
         return False
     # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
     # .get()：未知引擎保守視為視覺（機密 fail-closed）
@@ -1637,6 +1660,19 @@ def _index_page(
                 except OSError as exc:  # 票 09：暫存寫入失敗也要有 toast，不吐 traceback
                     ui.notify(to_user_message(exc), type="negative")
                     return
+                if _is_tex_path(e.file.name):
+                    # 票 27：LaTeX 源碼——無「頁數」概念（xelatex 編譯後才有）；
+                    # 不讀 pypdf；自動鎖 LaTeX 引擎（.tex 預設走 LaTeX 路線）
+                    staged[e.file.name] = target
+                    page_select.set_options([], value=[])
+                    page_select.label = "LaTeX 源碼：整份編譯（無頁面範圍）"
+                    range_counter.set_text("—")
+                    staged_label.set_text(f"已暫存：{'、'.join(staged)}")
+                    if selected_engine != "latex":
+                        _pick_engine("latex")  # 自動鎖定（含卡片高亮＋notify）
+                    else:
+                        ui.notify(f"已暫存 {e.file.name}（LaTeX 源碼——LaTeX 引擎）", type="info")
+                    return
                 try:
                     pages = len(pypdf.PdfReader(str(target)).pages)
                 except Exception:
@@ -1658,6 +1694,26 @@ def _index_page(
                     return
                 selected = page_select.value or []
                 for name, path in list(staged.items()):
+                    if _is_tex_path(name):
+                        # 票 27：.tex 無頁數語意——總頁數 None（進度框不顯示頁數）、
+                        # 整份編譯；engine override 已由暫存時自動鎖定 latex
+                        ok = _start_job(
+                            service, settings, cost, glossaries, path, name,
+                            pages_text="",
+                            total_pages=None,
+                            pdf_pages=None,
+                            sensitive=sensitive_input.value,
+                            ocr=False,
+                            engine_id=(
+                                selected_engine
+                                if selected_engine != settings.engine_id() else None
+                            ),
+                            target_lang=lang_select.value,
+                        )
+                        if ok:
+                            staged.pop(name, None)
+                            path.unlink(missing_ok=True)  # create_job 已複製源檔 → 清暫存
+                        continue
                     try:
                         file_pages = len(pypdf.PdfReader(str(path)).pages)
                     except Exception:

@@ -975,3 +975,121 @@ async def test_completed_card_shows_pages_and_percent(tmp_path, monkeypatch, mak
         assert "完成 100% · 3/3 頁" in texts, f"完成卡應顯示「完成 100% · 3/3 頁」（got {texts}）"
         bar = next(iter(user.find(ui.linear_progress).elements))
         assert bar._props.get("size") == "4px", "show_value=False（無內嵌「1」label）"
+
+# ── 票 27：LaTeX 源碼路線整合主 UI（.tex 自動鎖定、第 4 引擎卡、PDF 守衛）──
+
+
+@pytest.mark.asyncio
+async def test_engine_cards_include_latex_card(tmp_path):
+    """票 27 切片B：主頁引擎卡含第 4 卡 LaTeX（engine-card-latex marker）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        card = _engine_card(user, "latex")
+        assert len(card.elements) == 1, "主頁應有 LaTeX 引擎卡（第 4 卡）"
+
+
+@pytest.mark.asyncio
+async def test_tex_upload_auto_selects_latex_engine(tmp_path, monkeypatch):
+    """票 27 切片A/C：上傳 .tex → 自動鎖 LaTeX 引擎（不點卡）→ 任務記 latex。
+
+    build_engine 注入 FakeEngine（不打真 API）——key fallback 語意
+    （latex 沿用 deepseek 槽位）由純函式測試 test_resolve_latex_engine_falls_back_to_deepseek_key
+    單獨驗證（user_simulation 順序污染敏感，spy 不進 UI 測試）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("deepseek", "sk-ds-test")  # latex 共用 deepseek key
+    monkeypatch.setattr(
+        "paper_kit.presentation.app.build_engine",
+        lambda spec, api_key="", **kw: FileWritingFakeEngine(),
+    )
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(
+                name="paper.tex",
+                content_type="application/x-tex",
+                _data=(
+                    rb"\documentclass{article}\n\begin{document}\n"
+                    rb"Hello world\n\end{document}"
+                ),
+            ),
+        ])
+        await user.should_see("已暫存：paper.tex", retries=20)
+        # 自動鎖定：LaTeX 卡高亮（ring-primary class——與點選引擎卡同款視覺）
+        latex_card = _engine_card(user, "latex")
+        card_el = next(iter(latex_card.elements))
+        assert "ring-primary" in card_el.classes, \
+            "上傳 .tex 後 LaTeX 卡應自動高亮（預設走 LaTeX）"
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        jobs = service.list_jobs()
+        assert jobs and jobs[0].engine_id == "latex", \
+            f".tex 任務應記 latex 引擎，實際 {jobs[0].engine_id if jobs else None}"
+
+
+@pytest.mark.asyncio
+async def test_latex_engine_rejects_pdf_upload(tmp_path, monkeypatch, make_blank_pdf):
+    """票 27 切片B AC4：選 LaTeX 卡＋上傳 PDF → 前置擋下（notify）＋不建任務。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("deepseek", "sk-ds-test")
+    monkeypatch.setattr(
+        "paper_kit.presentation.app.build_engine",
+        lambda spec, api_key="", **kw: FileWritingFakeEngine(),
+    )
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _engine_card(user, "latex").click()
+        pdf = make_blank_pdf(tmp_path / "P.pdf")
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(
+                name="P.pdf", content_type="application/pdf", _data=pdf.read_bytes()
+            ),
+        ])
+        await user.should_see("已暫存：P.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("僅適用 .tex", retries=20)
+        assert service.list_jobs() == [], "LaTeX 引擎＋PDF 不得建立任務"
+
+def test_resolve_latex_engine_falls_back_to_deepseek_key(tmp_path, monkeypatch):
+    """票 27 切片A：latex 未獨立填 key → 沿用 deepseek 槽位（同後端
+    deepseek-chat，README 唯一推薦後端）；build_engine 收到 deepseek key。
+    純函式（不經 user_simulation——UI 測試順序污染敏感）。"""
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("deepseek", "sk-ds-test")
+    seen: dict = {}
+
+    def spy(spec, api_key="", **kw):
+        seen["eid"] = spec.id
+        seen["key"] = api_key
+        return FileWritingFakeEngine()
+
+    monkeypatch.setattr("paper_kit.presentation.app.build_engine", spy)
+    from paper_kit.presentation.app import _resolve_task_engine
+    eid, engine = _resolve_task_engine(settings, "latex")
+    assert eid == "latex"
+    assert seen.get("eid") == "latex"
+    assert seen.get("key") == "sk-ds-test", "latex 未填 key 時應 fallback deepseek key"
+    assert ENGINE_SPECS["latex"].id == "latex"
+
+
+def test_resolve_latex_engine_raises_without_any_key(tmp_path, monkeypatch):
+    """票 27：latex 與 deepseek 都無 key → 友善錯誤（不 build_engine）。"""
+    from paper_kit.presentation.app import _resolve_task_engine
+    from paper_kit.application.ports import EngineError
+
+    service, settings, cost, glossaries = _build(tmp_path)
+    with pytest.raises(EngineError, match="LaTeX"):
+        _resolve_task_engine(settings, "latex")

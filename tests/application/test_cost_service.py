@@ -286,3 +286,11 @@ def test_usage_label_unreestimateable_shows_actual_with_twd(tmp_path):
 def test_usage_label_without_result_is_none(tmp_path):
     job = TranslationJob(job_id="j1", source_path="/in/a.pdf")
     assert make_service(tmp_path).usage_label(job) is None
+
+def test_estimate_for_pdf_returns_none_for_tex_source(tmp_path):
+    """票 27 切片D：LaTeX 源碼（非 PDF）不可估 → None（pypdf 解析失敗防護，
+    UI 靜默跳過估算——不把 .tex 當 PDF 讀）。"""
+    svc = make_service(tmp_path)
+    tex = tmp_path / "paper.tex"
+    tex.write_text(r"\documentclass{article}\n\begin{document}\nHi\n\end{document}")
+    assert svc.estimate_for_pdf("latex", tex) is None
