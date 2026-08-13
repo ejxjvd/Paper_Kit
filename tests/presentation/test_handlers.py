@@ -139,6 +139,30 @@ def test_ocr_job_carries_flag_to_card():
     assert view.ocr is True
 
 
+# ── 票 26：命中快取標記顯示 ────────────────────────────────
+
+
+def test_cache_hit_job_marks_from_cache():
+    job = completed_job()
+    job.result = JobResult(
+        mono_path="/outputs/abc123/paper.zh.mono.pdf",
+        dual_path="/outputs/abc123/paper.zh.dual.pdf",
+        from_cache=True,  # 票 24：快取命中（引擎未呼叫）
+    )
+    view = build_job_card(job)
+    assert view.from_cache is True
+
+
+def test_completed_job_defaults_not_from_cache():
+    view = build_job_card(completed_job())
+    assert view.from_cache is False
+
+
+def test_no_result_job_not_from_cache():
+    view = build_job_card(TranslationJob(job_id="n1", source_path="/outputs/n1/a.pdf"))
+    assert view.from_cache is False
+
+
 def test_plain_job_card_not_ocr():
     job = TranslationJob(job_id="p1", source_path="/outputs/p1/a.pdf")
     view = build_job_card(job, files_base="/files")

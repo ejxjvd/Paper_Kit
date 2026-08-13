@@ -43,6 +43,7 @@ class JobCardView:
     can_delete: bool = False         # #74：終態任務可刪除（清掉舊任務不堆積）
     sensitive: bool = False          # 票 10：機密文件（卡片顯示 🔒）
     ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
+    from_cache: bool = False         # 票 26：快取命中（引擎未呼叫——卡片顯示 ⚡）
     pages_label: str = "全文"        # 票 17：歷史表格「頁數」欄（None→「全文」對映在 build_job_card）
 
 
@@ -103,6 +104,7 @@ def build_job_card(
         can_delete=job.can_delete,  # #74：非執行中任務可刪除
         sensitive=job.sensitive,   # 票 10：機密標記顯示（🔒）
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
+        from_cache=bool(job.result and job.result.from_cache),  # 票 26：快取命中（⚡）
         pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）
     )
 

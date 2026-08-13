@@ -385,6 +385,8 @@ def _render_card(
                         ui.badge("🔒 機密").props("outline color=orange")
                     if view.ocr:  # 票 12：掃描件標記顯示
                         ui.badge("🔍 掃描件").props("outline color=teal")
+                    if view.from_cache:  # 票 26：快取命中標記（引擎未呼叫）
+                        ui.badge("⚡ 快取").props("outline color=cyan")
                 # 票 08：歷史卡片顯示建立時間＋引擎
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
@@ -1081,6 +1083,7 @@ def _history_page(
                 {"name": "created", "label": "創建時間", "field": "created_label", "align": "left"},
                 {"name": "pages", "label": "頁數", "field": "pages_label", "align": "left"},
                 {"name": "engine", "label": "引擎", "field": "engine_label", "align": "left"},
+                {"name": "cache", "label": "來源", "field": "cache_label", "align": "left"},
                 {"name": "status", "label": "狀態", "field": "status_label", "align": "left"},
                 {"name": "actions", "label": "操作", "field": "actions", "align": "left"},
             ]
@@ -1230,6 +1233,7 @@ def _history_row(view: JobCardView) -> dict:
         "created_label": view.created_label,
         "pages_label": view.pages_label,
         "engine_label": view.engine_label or "",
+        "cache_label": "⚡ 快取" if view.from_cache else "—",  # 票 26：來源欄
         "status_label": view.status_label,
         "status_color": BADGE_COLORS[view.status],
         "mono_url": view.mono_url,

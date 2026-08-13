@@ -69,6 +69,44 @@ async def test_history_page_renders_table_with_all_columns(tmp_path, make_blank_
 
 
 @pytest.mark.asyncio
+async def test_history_page_has_cache_source_column(tmp_path, make_blank_pdf):
+    """票 26：歷史表格有「來源」欄；快取命中任務標「⚡ 快取」、一般任務「—」。
+
+    from_cache 只由 JobResult 帶出（票 24 快取命中→_apply_cache_hit 寫入），
+    與引擎欄互補——使用者可一眼看出哪幾筆「沒花引擎錢」。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+    # 快取命中任務：COMPLETED＋from_cache=True
+    pdf = make_blank_pdf(tmp_path / "cached.pdf")
+    cached = service.create_job(
+        pdf, target_lang="zh-TW", pages=None, output_dir=tmp_path / "outputs"
+    )
+    cached.status = JobStatus.COMPLETED
+    cached.result = JobResult(
+        mono_path="cached.zh.mono.pdf", dual_path="cached.zh.dual.pdf", from_cache=True
+    )
+    # 一般完成任務（引擎翻譯）
+    pdf2 = make_blank_pdf(tmp_path / "regular.pdf")
+    regular = service.create_job(
+        pdf2, target_lang="zh-TW", pages=None, output_dir=tmp_path / "outputs"
+    )
+    regular.status = JobStatus.COMPLETED
+    regular.result = JobResult(mono_path="r.zh.mono.pdf", dual_path="r.zh.dual.pdf")
+
+    async with user_simulation(
+        root=lambda: _history_page(service, settings, engine_labels=ENGINE_LABELS)
+    ) as user:
+        await user.open("/history")
+        await user.open("/history")
+        table = list(user.find(ui.table).elements)[0]
+        labels = {c["label"] for c in table.columns}
+        assert "來源" in labels, f"表格應有「來源」欄，實際 {labels}"
+        by_name = {r["file_name"]: r for r in table.rows}
+        assert by_name["cached.pdf"]["cache_label"] == "⚡ 快取"
+        assert by_name["regular.pdf"]["cache_label"] == "—"
+
+
+@pytest.mark.asyncio
 async def test_history_page_pagination_default_10(tmp_path, make_blank_pdf):
     """20 筆任務 → 表格分頁每頁 10 筆（與沉浸式翻譯記錄頁一致）。"""
     service, settings, cost, glossaries = _build(tmp_path)
