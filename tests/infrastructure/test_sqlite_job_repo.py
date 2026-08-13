@@ -6,6 +6,8 @@
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
@@ -54,7 +56,8 @@ def test_add_get_roundtrip_full_fidelity(tmp_path: Path):
     assert got.error == "先前錯誤"
     assert got.result.mono_path == "/out/abc123/a.zh.mono.pdf"
     assert got.result.input_tokens == 7127
-    assert got.created_at == job.created_at
+    # SQLite REAL 存 IEEE double——time.time() 極小尾差容許（CI 實測 7e-6 差）
+    assert got.created_at == pytest.approx(job.created_at)
 
 
 def test_save_updates_existing_job(tmp_path: Path):

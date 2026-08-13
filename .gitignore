@@ -11,6 +11,8 @@ build/
 .coverage
 htmlcov/
 *.pdf
+# 測試 fixture 小樣本 PDF 必須進 repo（CI 乾淨環境要跑 OCR/掃描測試）
+!tests/fixtures/*.pdf
 
 # babeldoc 自動提取術語表等產出副產物
 *.glossary.csv

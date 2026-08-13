@@ -5,6 +5,8 @@ FakeRunner 注入慣例同 LibreOfficeConverter；缺 xelatex → 友善錯誤
 錯誤中斷等輸入（配合 -halt-on-error 即停）。
 """
 
+import shutil
+
 import pytest
 
 from paper_kit.application.ports import EngineError
@@ -62,6 +64,8 @@ def test_compile_missing_xelatex_gives_install_guidance(monkeypatch, tmp_path):
         compiler.compile(tex, tmp_path / "out")
 
 
+@pytest.mark.skipif(shutil.which("xelatex") is None,
+                     reason="需要 xelatex（本機有；CI 乾淨環境無）")
 def test_compile_missing_source_gives_friendly_error(tmp_path):
     compiler = TeXCompiler()
     with pytest.raises(EngineError, match="找不到"):
