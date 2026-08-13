@@ -43,6 +43,26 @@ body { background: var(--pk-bg); color: var(--pk-text); }
 .pk-meta, .pk-cost { color: var(--pk-text-muted); }
 .pk-error { color: var(--pk-error); }
 .pk-progress { color: var(--pk-progress); }
+/* 2026-08-13 引擎三卡等高統一（使用者回報「格式大小不一、框框大小不一致」）：
+   min-height 等高三卡、flex column 垂直置中、邊框/圓角用主題 token；
+   desc 區固定兩行高（min-height 2.4em），短描述不再造成卡高參差。 */
+.pk-engine-card {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius);
+  background: var(--pk-card-bg);
+}
+.pk-engine-card--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pk-engine-card .pk-engine-desc {
+  min-height: 2.4em;
+  line-height: 1.2em;
+}
 """
 
 

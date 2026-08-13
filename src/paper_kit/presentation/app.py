@@ -1274,8 +1274,18 @@ def _index_page(
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
 
             def _pick_engine(eid: str) -> None:
-                """點選引擎卡：更新本任務引擎＋卡片高亮（同一 render 的 closure）。"""
+                """點選引擎卡：更新本任務引擎＋卡片高亮（同一 render 的 closure）。
+
+                2026-08-13（使用者回報）：勾機密後點視覺卡 → 前置阻擋（不讓
+                使用者選了視覺引擎按「開始翻譯」才被 _start_job 拒絕——UX 前置化）。
+                """
                 nonlocal selected_engine
+                if sensitive_input.value and not ENGINE_SPECS[eid].sensitive_ok:
+                    ui.notify(
+                        "機密文件僅 DeepSeek 純文字引擎（先取消 🔒 或選 DeepSeek）",
+                        type="warning",
+                    )
+                    return
                 selected_engine = eid
                 for cid, c in engine_cards.items():
                     c.classes(
@@ -1296,9 +1306,28 @@ def _index_page(
                     )
                     with card:
                         ui.label(spec.label).classes("font-semibold text-sm")
-                        ui.label(desc).classes("text-xs text-grey-7")
+                        ui.label(desc).classes("text-xs text-grey-7 pk-engine-desc")
                     engine_cards[eid] = card
                     card.on("click", _engine_picker(_pick_engine, eid))
+
+            # 2026-08-13（使用者回報「為何不用勾選也能開始翻譯」）：
+            # 勾「🔒 機密文件」→ 引擎自動切 DeepSeek＋視覺卡禁用（灰化）。
+            # 舊行為＝勾了機密仍可選視覺引擎，按「開始翻譯」才被 _start_job
+            # 拒絕（被動擋）；現在連動前置，紅線不靠「按了才知道」。
+            def _on_sensitive_change(e) -> None:
+                # handle_event 依簽名傳參：1 參數 handler 收到**事件物件**（非值）——
+                # 直接 `def f(value: bool)` 會把 True/False 都當 truthy（#85 同款陷阱）
+                value = bool(e.value)
+                if value:
+                    _pick_engine("deepseek")
+                for cid, card in engine_cards.items():
+                    disabled = value and not ENGINE_SPECS[cid].sensitive_ok
+                    card.classes(
+                        remove=("pk-engine-card--disabled" if not disabled else ""),
+                        add=("pk-engine-card--disabled" if disabled else ""),
+                    )
+
+            sensitive_input.on_value_change(_on_sensitive_change)
 
             # 票 19：目標語言就地下拉（預設＝設定頁值；不跳設定頁就能改本任務語言）
             # spec review：設定頁語言是自由文字——值不在內建列表時併入選項
@@ -1425,6 +1454,20 @@ def _index_page(
                         value="serif",
                         label="字體",
                     ).classes("w-48")
+                # 2026-08-13（使用者回報）：輸出目錄主頁就地設定——與設定頁共用
+                # SettingsService.set_output_dir 後端（空白=預設 ~/.paper_kit/outputs）
+                out_dir_input = ui.input(
+                    "輸出目錄（空白 = 預設 ~/.paper_kit/outputs）",
+                    value=settings.output_dir(),
+                ).classes("w-full")
+
+                def _apply_output_dir() -> None:
+                    settings.set_output_dir(out_dir_input.value.strip())
+                    ui.notify("輸出目錄已更新", type="positive")
+
+                with ui.row().classes("items-center gap-3 w-full"):
+                    ui.button("套用輸出目錄", on_click=_apply_output_dir).props("outline")
+                    ui.label("輸出目錄為產出 mono/dual PDF 的位置（設定頁同步）").classes("text-xs text-grey-7")
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",

@@ -37,6 +37,23 @@ def test_theme_css_has_card_beautification_classes():
     assert "box-shadow" in THEME_CSS
 
 
+def test_theme_css_defines_engine_card_rules():
+    """2026-08-13 使用者回報「3 個按鈕大小不一」：引擎三卡須等高統一
+    （min-height＋flex column 垂直置中＋卡片邊框/圓角 token）。"""
+    assert ".pk-engine-card" in THEME_CSS
+    card_section = THEME_CSS.split(".pk-engine-card", 1)[1]
+    assert "min-height" in card_section, "三卡等高（min-height）"
+    assert "var(--pk-border)" in card_section, "邊框用主題 token"
+    assert "var(--pk-radius)" in card_section, "圓角用主題 token"
+
+
+def test_theme_css_defines_disabled_engine_card():
+    """機密模式禁用視覺卡（灰化＋不可點擊游標）——class 由主題 CSS 提供。"""
+    assert ".pk-engine-card--disabled" in THEME_CSS
+    assert "opacity" in THEME_CSS.split(".pk-engine-card--disabled", 1)[1]
+    assert "not-allowed" in THEME_CSS.split(".pk-engine-card--disabled", 1)[1]
+
+
 def test_apply_theme_returns_dark_mode_controller():
     """主題切換不重載：回傳 NiceGUI DarkMode 控制器（enable/disable/toggle 即時生效）。"""
     dark = apply_theme()
