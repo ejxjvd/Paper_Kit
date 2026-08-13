@@ -7,6 +7,7 @@
 
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,18 +31,55 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
-def setup_logging(log_dir: str | Path, level: int = logging.INFO) -> Path:
-    """paper_kit logger 掛檔案 handler（JSON）。回傳 log 檔路徑（debug 頁用）。"""
+class ConsoleFormatter(logging.Formatter):
+    """CMD 狀態列人類可讀行（2026-08-14 使用者要求 exe CMD 顯示 log）：
+    `2026-08-14 14:05:03 INFO [job_service] 任務已建立 (任務 abc123) ← 錯誤鏈`。
+
+    檔案維持 JSON（JsonFormatter）——console 讀者是人類，可讀優先；
+    顯示格式與 debug 頁（format_log_line）同源（時間本地時區）。
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "time": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "component": record.name,
+            "message": record.getMessage(),
+        }
+        for key in ("job_id", "error_chain", "error"):
+            value = getattr(record, key, None)
+            if value is not None:
+                entry[key] = value
+        return format_log_line(entry)
+
+
+def setup_logging(
+    log_dir: str | Path, level: int = logging.INFO, console: bool = True
+) -> Path:
+    """paper_kit logger 掛檔案 handler（JSON）＋console handler（人類可讀）。
+
+    2026-08-14（使用者：「你的視窗應該要顯示 LOG 紀錄，不然都看不到執行碼或
+    錯誤碼」→「我指的是 CMD 的狀態列」）：console 預設開啟——exe（console=True）
+    的 CMD 視窗即時滾動顯示任務／引擎 log，不再只剩 uvicorn 啟動訊息；
+    檔案維持 JSON（debug 頁與後續分析讀同一份）。回傳 log 檔路徑（debug 頁用）。
+    """
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "paper_kit.log"
     root = logging.getLogger("paper_kit")
     root.setLevel(level)
-    # 防重複掛 handler（setup_logging 可能被多次呼叫）
+    # 防重複掛 handler（setup_logging 可能被多次呼叫；file 與 console 各自防重複）
     if not any(getattr(h, "baseFilename", None) == str(log_path) for h in root.handlers):
         handler = logging.FileHandler(log_path, encoding="utf-8")
         handler.setFormatter(JsonFormatter())
         root.addHandler(handler)
+    if console and not any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        for h in root.handlers
+    ):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(ConsoleFormatter())
+        root.addHandler(console_handler)
     return log_path
 
 

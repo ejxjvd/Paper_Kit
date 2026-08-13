@@ -208,3 +208,50 @@ def test_format_log_line_shows_error_field_too():
          "message": "翻譯失敗", "error": "API key 無效或已過期"}
     )
     assert "API key 無效或已過期" in line
+
+
+# ── CMD 狀態列 log（2026-08-14 使用者：「你的視窗應該要顯示 LOG 紀錄，
+#    不然都看不到執行碼或錯誤碼」→「我指的是 CMD 的狀態列」→
+#    「也就是 paper-kit-0.1.4.exe」）────────────────────────────
+
+
+def test_setup_logging_adds_console_handler(tmp_path, capsys):
+    """exe 的 CMD 視窗即時顯示 log（人類可讀，非 JSON 行）；檔案維持 JSON。"""
+    log_path = setup_logging(tmp_path)
+    logger = logging.getLogger("paper_kit.application.job_service")
+    logger.info("任務已建立", extra={"job_id": "abc123"})
+
+    out = capsys.readouterr().out
+    assert "任務已建立" in out, f"CMD 狀態列應印出 log，實際：{out!r}"
+    assert "abc123" in out, "console 行應含任務 id（格式化行同 debug 頁格式）"
+    assert not out.lstrip().startswith("{"), "console 人類可讀，不得是 JSON 行"
+    # 檔案仍為 JSON（debug 頁/後續分析用）
+    line = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert line["message"] == "任務已建立" and line["job_id"] == "abc123"
+
+
+def test_console_handler_not_duplicated_on_repeat_setup(tmp_path, capsys):
+    """setup_logging 重複呼叫不得疊加 console handler（同 file handler 防重複）。"""
+    setup_logging(tmp_path)
+    setup_logging(tmp_path)
+    root = logging.getLogger("paper_kit")
+    console_handlers = [
+        h for h in root.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+    assert len(console_handlers) == 1, "console handler 只應有一個"
+    file_handlers = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+    assert len(file_handlers) == 1, "file handler 只應有一個"
+
+
+def test_console_line_has_error_chain_when_failed(tmp_path, capsys):
+    """失敗 log 在 CMD 狀態列也帶錯誤鏈（使用者看得到錯誤碼）。"""
+    setup_logging(tmp_path)
+    logger = logging.getLogger("paper_kit.infrastructure.pdf2zh_next_adapter")
+    logger.error(
+        "翻譯失敗",
+        extra={"error_chain": "翻譯失敗 | caused by 上游 500", "job_id": "abc123"},
+    )
+    out = capsys.readouterr().out
+    assert "翻譯失敗" in out
+    assert "上游 500" in out, "CMD 狀態列應顯示錯誤鏈"
