@@ -22,6 +22,12 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
+# Windows runner 的 stdout/stderr 預設 cp1252——中文輸出（進度行、錯誤訊息）
+# 直接 UnicodeEncodeError 秒炸（CI win-x64 實測 2026-08-14）；強制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
 SPEC_PATH = REPO_ROOT / "packaging" / "paper-kit.spec"
