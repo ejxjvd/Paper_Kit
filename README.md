@@ -1,29 +1,76 @@
-# Paper_Kit
+# 📄 Paper_Kit
 
-自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。
+**自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
-- **引擎**：pdf2zh-next（BabelDOC 管線，公式保真＋原像重排版）
-- **UI**：NiceGUI（純 Python 一體、事件驅動、可大量美化）
-- **架構**：務實 DDD + Ports & Adapters（引擎可插拔，不被單一供應商綁死）
-- **開發流程**：TDD（紅→綠）、垂直切片
+純 Python 一體的 Web UI：拖放 PDF 上傳即翻譯成繁體中文（mono 僅譯文＋dual 雙語並排）。
+LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引擎可插拔、BYOK——
+交付他人各用各的 key，您的 key 不外流。
 
-## 功能
+## ✨ 功能
 
-- 上傳 PDF 翻譯：主頁就地選引擎（SiliconFlow／DeepSeek／BabelDOC／LaTeX 四卡）＋目標語言
-- 上傳 `.tex` 源碼：自動鎖定 LaTeX 引擎（票 27）——整份編譯、token 最省（整本 ≈NT$0.34）
-- 每筆任務產 mono（僅譯文）＋ dual（雙語對照）雙輸出，卡片與歷史表格都可下載
-- 歷史頁（/history）：表格化＋分頁＋勾選全選＋批量刪除（二次確認）＋批量下載 mono/dual zip
-- 統一頁框（側欄導覽：翻譯／歷史／設定）＋深色模式
-- 引擎 API keys 每引擎獨立（BYOK——交付他人各用各的 key）、遮罩回顯、未填攔截
-- 掃描件 OCR、PPT 視覺路徑、LaTeX 源碼路線（主 UI 整合）、術語表、成本估算、任務取消重試
+- 🖼️ **主頁就地選引擎**：SiliconFlow（gemma 視覺，預設）／DeepSeek（機密文件專用）／BabelDOC（版面重排）／LaTeX 四卡＋目標語言就地選
+- 📐 **LaTeX 源碼路線**（票 27）：上傳 `.tex` 自動鎖定 LaTeX 引擎——公式指令原封、xelatex 編譯重排，token 最省（整本 ≈NT$0.34）
+- 📑 **雙輸出**：每筆任務產 mono（僅譯文）＋dual（雙語對照），卡片與歷史表格皆可下載
+- 🗂️ **歷史管理**：表格化＋分頁＋勾選全選＋批量刪除（二次確認）＋批量下載 mono/dual zip
+- 🔑 **BYOK**：引擎 API keys 每引擎獨立——交付他人各用各的 key；遮罩回顯、未填攔截
+- 🔒 **機密模式**：R18／隱私文件只准 DeepSeek 純文字引擎（視覺模型不上雲）
+- 🔍 **掃描件 OCR**：本機 RapidOCR（onnxruntime）預處理，不上雲——機密相容
+- 💰 **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
+- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**590 tests passed**
 
-## 文件
+## 🚀 快速開始
+
+先決條件：Python ≥3.12＋[uv](https://docs.astral.sh/uv/)、任一引擎的 API key
+（SiliconFlow 為預設；`google`／`bing`／`siliconflowfree` 三支免費引擎不需 key）。
+
+```bash
+uv sync                # 安裝依賴
+uv run paper-kit       # 啟動（預設 http://localhost:8080）
+```
+
+開啟 http://localhost:8080 → 拖放 PDF 或 .tex →（選頁面範圍）→ 選引擎 → 開始翻譯。
+
+### 交付他人使用
+
+- **BYOK（推薦）**：每個使用者在自己的設定頁填各自的 API key（每引擎獨立、遮罩回顯）——您的 key 不會外流、費用各自承擔
+- **免費引擎**：三支不需 key 的引擎已內建（`google`／`bing`／`siliconflowfree`）——限流／品質較低，適合試用入口
+- **自架選項**：本機 ollama 等 OpenAI 相容後端可直接插（引擎註冊表單點）——零 API 費用
+- 詳細評估見 `docs/research/免費LLM-API-分析與套用評估.md`
+
+## 📖 使用教學
+
+| 想做什麼 | 怎麼做 |
+|---|---|
+| 翻譯 PDF | 拖放上傳 → 勾選頁面範圍（可多選）→ 選引擎 → 開始；完成後卡片／歷史頁下載 mono、dual |
+| 翻譯 .tex | 拖放 `.tex` → 自動鎖定 LaTeX 引擎（整份編譯、無頁面範圍） |
+| 機密文件 | 勾選 🔒——引擎自動切 DeepSeek、視覺卡灰化（R18／隱私不上雲） |
+| 掃描 PDF | 勾選 🔍——本機 OCR 抽出文字層再翻譯 |
+| 設定 keys／預設值 | 設定頁：引擎 keys、目標語言、輸出目錄、引擎單價、術語表庫、翻譯快取 |
+
+## 🏗️ 架構
+
+> 換引擎＝換插頭，不被單一供應商綁死。
+
+- **Ports & Adapters**：`TranslationEnginePort`／`JobRepository`／`OcrPort`／`TeXCompilePort`——引擎註冊表（`engine_registry`）單點分派四支 adapter
+- **務實 DDD**：domain（`TranslationJob` 狀態機）→ application（`JobService` 等）→ infrastructure（SQLite repo／adapter）→ presentation（NiceGUI＋handlers 純函式，widget 邏輯盡量薄）
+- **TDD**：紅→綠、垂直切片、590 tests；20+ 張票全部完成，後續工作以 GitHub issues 追蹤
+
+## 📁 文件
 
 - `docs/規格書.md` — 原始規格書（PRD，GitHub issue #1 同步）
 - `docs/UI補強-規格書.md` — UI 補強規格書（issue #17 同步）
 - `docs/tickets/` — 20 張開發票（GitHub issues #2–#16 與 #18–#22 同步）
-- 完整研究與計畫存於 Obsidian Vault（`_personal/Paper_Kit/`）
+- `docs/research/` — 免費 API 分析／三引擎成本比較／架構研究
+- `docs/problems/` — 問題與修復紀錄（票 27 等）
+- 完整研究與計畫庫存於 Obsidian Vault（`_personal/Paper_Kit/`）
 
-## 狀態
+## 📊 狀態
 
-票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合——**590 tests passed**（2026-08-13）；冒煙全綠。後續工作以 GitHub issues 追蹤。
+票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合——**590 tests passed**
+（2026-08-13）；冒煙全綠。後續工作以 GitHub issues 追蹤。
+
+## 🙏 致謝
+
+- [pdf2zh-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next)（BabelDOC 管線：公式保真＋原像重排版）
+- [NiceGUI](https://nicegui.io/)（純 Python 一體 Web UI）
+- SiliconFlow／DeepSeek 引擎、xelatex（LaTeX 編譯）
