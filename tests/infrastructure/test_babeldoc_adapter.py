@@ -24,6 +24,7 @@ from paper_kit.infrastructure.babeldoc_adapter import (
     BabelDocAdapter,
     BabelDocConfig,
     build_babeldoc_command,
+    parse_output,
 )
 
 
@@ -197,6 +198,57 @@ def test_translate_zero_tokens_when_log_lacks_usage():
     result = adapter.translate(make_job())
     assert result.input_tokens == 0
     assert result.output_tokens == 0
+
+
+def test_default_runner_sets_wide_columns_env():
+    """#23 root fix：runner 必須把 COLUMNS=1000 傳給子程序——rich 才不會折行
+    （實測 COLUMNS=1000 後 babeldoc 三行 token 統計皆單行完整）。"""
+    import sys
+
+    adapter = BabelDocAdapter(BabelDocConfig(api_key="KEY"))  # 真實 runner
+    rc, out = adapter._runner(
+        [sys.executable, "-c", "import os; print(os.environ.get('COLUMNS'))"],
+        timeout=15,
+    )
+    assert rc == 0
+    assert out.strip() == "1000"
+
+
+# ── #23：rich 折行 token 解析（2026-08-13 實跑定案） ──────
+
+# 實跑實證（CH4 頁 29,30 同參數重現）：babeldoc 0.6.2 非 TTY 輸出由 rich 以
+# 固定寬度折行——"Completion tokens: 2830" 被拆成兩行、source 標記 main.py:774
+# 夾在冒號與數字之間 → 原 regex 同行搜不到 → DB 誤記 out=0（10070=7240+2830
+# 驗算：真實 completion 就是 2830，不是 0）。
+WRAPPED_LOG = (
+    "INFO     INFO:babeldoc.main:Total tokens: 10070  main.py:772\n"
+    "INFO     INFO:babeldoc.main:Prompt tokens: 7240  main.py:773\n"
+    "INFO     INFO:babeldoc.main:Completion tokens:   main.py:774\n"
+    "                             2830\n"
+    "INFO     INFO:babeldoc.main:Cache hit prompt     main.py:775\n"
+    "                             tokens: 2688\n"
+)
+
+
+def test_parse_output_unwraps_rich_wrapped_completion():
+    result = parse_output(WRAPPED_LOG, make_job())
+    assert result.input_tokens == 7240
+    assert result.output_tokens == 2830  # 折行前是 0（bug）
+
+
+def test_parse_output_unwraps_wrapped_total_and_prompt():
+    """折行也可能落在 Total/Prompt 行——正規化後三者都要能解析。"""
+    wrapped = (
+        "INFO     INFO:babeldoc.main:Total tokens:       main.py:772\n"
+        "                             10070\n"
+        "INFO     INFO:babeldoc.main:Prompt tokens:      main.py:773\n"
+        "                             7240\n"
+        "INFO     INFO:babeldoc.main:Completion tokens:  main.py:774\n"
+        "                             2830\n"
+    )
+    result = parse_output(wrapped, make_job())
+    assert result.input_tokens == 7240
+    assert result.output_tokens == 2830
 
 
 # ── translate：共用骨架行為（跨插頭守證） ────────────────

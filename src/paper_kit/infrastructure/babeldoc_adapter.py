@@ -25,6 +25,30 @@ DEFAULT_BABELDOC_BASE_URL = "https://api.deepseek.com/v1"  # OpenAI 相容端點
 _RE_TOTAL = re.compile(r"Total tokens:\s*(\d+)")
 _RE_PROMPT = re.compile(r"Prompt tokens:\s*(\d+)")
 _RE_COMPLETION = re.compile(r"Completion tokens:\s*(\d+)")
+# rich log source 標記（{module}.py:{line}，如 " main.py:774"）
+_RE_SOURCE_TAG = re.compile(r"\s+[\w.]+\.py:\d+")
+_LOG_PREFIXES = ("INFO", "WARNING", "ERROR", "DEBUG")
+
+
+def _unwrap_rich(output: str) -> str:
+    """還原 rich console 折行（#23 實跑定案，2026-08-13）。
+
+    babeldoc 0.6.2 非 TTY 輸出 rich 固定寬度折行：token 統計行的數字
+    （"Completion tokens: 2830" 的 2830）與 source 標記（main.py:774）被拆到
+    次行 → 原 regex 同行搜不到 → DB 誤記 out=0（10070=7240+2830 驗算一致，
+    真實 completion 是 2830 不是 0）。兩步還原：①移除 rich 的 {module}.py:{line}
+    source 標記（夾在冒號與數字之間，regex 擋路）；②行首純空白（且非 log 層級
+    前綴）的折行殘片併回上一行。log 層級行與 progress bar 行（非空白開頭）不受影響。
+    """
+    stripped = _RE_SOURCE_TAG.sub("", output)
+    merged: list[str] = []
+    for line in stripped.splitlines():
+        head = line.lstrip()
+        if merged and line[:1].isspace() and not head.startswith(_LOG_PREFIXES):
+            merged[-1] = merged[-1] + " " + head  # rich wrap 殘片：併回上一行
+        else:
+            merged.append(line)
+    return "\n".join(merged)
 
 
 @dataclass(frozen=True)
@@ -77,6 +101,7 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
 
 
 def parse_output(output: str, job: TranslationJob) -> JobResult:
+    output = _unwrap_rich(output)  # #23：防禦任何來源的 rich 折行
     total = _RE_TOTAL.search(output)
     prompt = _RE_PROMPT.search(output)
     completion = _RE_COMPLETION.search(output)

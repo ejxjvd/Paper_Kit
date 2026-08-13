@@ -148,6 +148,11 @@ class CliAdapterBase:
                     )
                 cmd = [str(fallback), *cmd[1:]]
             kwargs = {"cwd": cwd}
+            # #23（2026-08-13 實跑定案）：babeldoc（rich）非 TTY 輸出固定寬度折行，
+            # token 統計行數字被拆到次行 → parse 誤記 out=0。COLUMNS 放大 → rich 寬
+            # console → token 行單行完整（實測 COLUMNS=1000 三行皆單行）。共用骨架
+            # 統一設——pdf2zh_next 同為 rich 輸出，一併受益；對非 rich 引擎無害。
+            kwargs["env"] = {**os.environ, "COLUMNS": "1000"}
             if sys.platform != "win32":
                 kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
             proc = subprocess.Popen(
