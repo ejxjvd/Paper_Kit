@@ -225,8 +225,10 @@ async def test_engine_cards_select_task_engine(tmp_path, monkeypatch, make_blank
 
 @pytest.mark.asyncio
 async def test_engine_card_selection_highlights_card(tmp_path, monkeypatch):
-    """點選引擎卡後該卡有選中視覺（ring-primary），提示本任務引擎。"""
+    """點選引擎卡後該卡有選中視覺（ring-primary），提示本任務引擎。
+    （2026-08-13 灰化：付費卡需 key 才能點——先填 key 模擬正常使用。）"""
     service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("deepseek", "sk-ds-test")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -303,7 +305,8 @@ async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_bl
     from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 
     service, settings, cost, glossaries = _build(tmp_path)
-    monkeypatch.setattr("paper_kit.presentation.app.build_engine", spy_build_engine)
+    # 物件式 patch：分裂免疫（conftest unload 後 dotted-path 會 patch 到別 module）
+    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -731,8 +734,10 @@ async def test_babeldoc_advanced_panel_hidden_by_default(tmp_path):
 
 @pytest.mark.asyncio
 async def test_babeldoc_advanced_panel_shows_when_babeldoc_selected(tmp_path):
-    """#85 切片C：點選 BabelDOC 卡 → 進階選項區顯示（引擎＝babeldoc 才消費這些旗標）。"""
+    """#85 切片C：點選 BabelDOC 卡 → 進階選項區顯示（引擎＝babeldoc 才消費這些旗標）。
+    （2026-08-13 灰化：付費卡需 key 才能點——先填 key。）"""
     service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("babeldoc", "bk-test")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -883,8 +888,10 @@ async def test_engine_card_info_icons_exist(tmp_path):
 @pytest.mark.asyncio
 async def test_babeldoc_advanced_option_info_icons_exist(tmp_path):
     """#17：babeldoc 進階選項 4 個 ⓘ（相容模式/行號增強/非公式線條/字體）——
-    先點 babeldoc 卡顯示進階區（find 預設 only_visible=True）。"""
+    先點 babeldoc 卡顯示進階區（find 預設 only_visible=True）。
+    （2026-08-13 灰化：付費卡需 key 才能點——先填 key。）"""
     service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("babeldoc", "bk-test")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -1077,8 +1084,10 @@ def test_resolve_latex_engine_falls_back_to_deepseek_key(tmp_path, monkeypatch):
         seen["key"] = api_key
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr("paper_kit.presentation.app.build_engine", spy)
-    from paper_kit.presentation.app import _resolve_task_engine
+    monkeypatch.setattr(app_module, "build_engine", spy)
+    # 分裂免疫：unload 後函式內 from-import 會拿新 module（patch 舊 module 無效）——
+    # 直接經 app_module 物件取屬性（同一 globals 字典）
+    _resolve_task_engine = app_module._resolve_task_engine
     eid, engine = _resolve_task_engine(settings, "latex")
     assert eid == "latex"
     assert seen.get("eid") == "latex"
@@ -1094,3 +1103,387 @@ def test_resolve_latex_engine_raises_without_any_key(tmp_path, monkeypatch):
     service, settings, cost, glossaries = _build(tmp_path)
     with pytest.raises(EngineError, match="LaTeX"):
         _resolve_task_engine(settings, "latex")
+
+
+# ── 免費翻譯入口（2026-08-13：交付他人免費翻譯、不動個人 API） ──────────
+
+
+@pytest.mark.asyncio
+async def test_free_engine_cards_render(tmp_path):
+    """免費翻譯區渲染：header＋品質提示＋三張免費卡（marker 定位，與付費卡同機制）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("免費翻譯（不需 API key）")
+        user.find(marker="free-engine-hint")  # 品質提示存在
+        for eid in ("siliconflowfree", "google", "bing"):
+            card = _engine_card(user, eid)
+            assert next(iter(card.elements)), f"{eid} 免費卡應渲染"
+            user.find(kind=ui.icon, marker=f"info-engine-{eid}")  # ⓘ tooltip 存在
+
+
+@pytest.mark.asyncio
+async def test_free_engine_selection_creates_job_without_key(tmp_path, monkeypatch, make_blank_pdf):
+    """免費翻譯入口主流程：點免費卡不需任何 key → 任務建立且引擎被呼叫
+    （側信道 job.engine_id＋build_engine spy——與 test_upload_with_missing_key_is_blocked
+    的 calls==[] 相反語意：免費引擎應被呼叫且 api_key 為空）。"""
+    from test_ui_flow import FileWritingFakeEngine
+
+    calls = []
+
+    def spy_build_engine(spec, api_key=""):
+        calls.append((spec.id, api_key))
+        return FileWritingFakeEngine()
+
+    # 物件式 patch（分裂免疫）：conftest 的 nicegui_reset_globals 會在測試間
+    # unload paper_kit.* module——dotted-path monkeypatch 會 re-import 出第二個
+    # module，而本檔頂部 import 的 app_module／_index_page 仍引用舊 globals，
+    # spy 永遠不被呼叫（2026-08-13 免費卡測試踩中：真 adapter 建出 → 缺 key 失敗）。
+    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    service, settings, cost, glossaries = _build(tmp_path)  # 全程不設任何 key
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        free_card = _engine_card(user, "siliconflowfree")
+        card_el = next(iter(free_card.elements))
+        assert "ring-primary" not in card_el.classes, "初始免費卡不應被選中（預設付費 siliconflow）"
+        free_card.click()
+        assert "ring-primary" in card_el.classes, "點選免費卡後應有選中高亮"
+        pdf = make_blank_pdf(tmp_path / "FREE1.pdf")
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(name=pdf.name, content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("FREE1.pdf", retries=20)  # 暫存 label 出現
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        job = service.list_jobs()[-1]
+        assert job.engine_id == "siliconflowfree", (
+            f"點免費卡後任務應記 siliconflowfree，實際 {job.engine_id}"
+        )
+        # build_engine 在 background 翻譯執行時才呼叫（同既有測試模式）——
+        # 等 FakeEngine 立即完成（背景執行寫檔）後 spy 必已收到呼叫；
+        # 逾時失敗訊息帶 job.error 以利診斷
+        from paper_kit.domain.translation_job import JobStatus
+        import asyncio
+
+        for _ in range(50):
+            if service.list_jobs()[-1].status is JobStatus.COMPLETED:
+                break
+            await asyncio.sleep(0.1)
+        job = service.list_jobs()[-1]
+        assert job.status is JobStatus.COMPLETED, f"翻譯未在時限內完成：{job.error}"
+        assert calls == [("siliconflowfree", "")], (
+            f"免費引擎應被呼叫且零 key（不動個人 API），實際 {calls}"
+        )
+
+
+def test_resolve_free_engine_requires_no_key(tmp_path, monkeypatch):
+    """免費引擎解析不需 key：_resolve_task_engine 回 ("siliconflowfree", engine)
+    且 build_engine 收到空 api_key（純函式——user_simulation 順序污染敏感，spy 拆出）。"""
+    from test_ui_flow import FileWritingFakeEngine
+
+    service, settings, cost, glossaries = _build(tmp_path)  # 不設任何 key
+    seen: dict = {}
+
+    def spy(spec, api_key="", **kw):
+        seen["eid"] = spec.id
+        seen["key"] = api_key
+        return FileWritingFakeEngine()
+
+    monkeypatch.setattr(app_module, "build_engine", spy)
+    # 分裂免疫：unload 後函式內 from-import 會拿新 module（patch 舊 module 無效）——
+    # 直接經 app_module 物件取屬性（同一 globals 字典）
+    _resolve_task_engine = app_module._resolve_task_engine
+    eid, engine = _resolve_task_engine(settings, "siliconflowfree")
+    assert eid == "siliconflowfree"
+    assert seen.get("eid") == "siliconflowfree"
+    assert seen.get("key") == "", "免費引擎應收到空 key（不需 key、不動個人 API）"
+
+
+# ── 切片 4-5：機密阻擋免費卡＋免費區 DOM 順序（2026-08-13） ──────────
+
+
+def _sensitive_checkbox(user) -> ui.checkbox:
+    """機密文件勾選框（同 test_sensitive_output_ui 的 helper）。"""
+    return next(
+        iter(
+            c for c in user.find(ui.checkbox).elements
+            if "機密" in (c.text or "")
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_sensitive_blocks_free_engine_cards(tmp_path):
+    """機密模式（票 10 紅線）：免費卡全禁用（sensitive_ok=False，同付費視覺卡）——
+    勾機密 → 三卡灰化、點擊不切換（引擎仍 DeepSeek）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _sensitive_checkbox(user).set_value(True)
+        await user.should_see("本任務將使用 DeepSeek", retries=20)
+        for eid in ("siliconflowfree", "google", "bing"):
+            card = next(iter(_engine_card(user, eid).elements))
+            assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費卡應禁用（機密紅線）"
+        # 點免費卡不切換（仍 DeepSeek）
+        _engine_card(user, "siliconflowfree").click()
+        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
+        assert "ring-primary" in classes, "機密下點免費卡不得切換引擎"
+
+
+@pytest.mark.asyncio
+async def test_unchecking_sensitive_restores_free_engine_cards(tmp_path):
+    """取消機密 → 免費卡解禁（與付費視覺卡同機制）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _sensitive_checkbox(user).set_value(True)
+        await user.should_see("本任務將使用 DeepSeek", retries=20)
+        _sensitive_checkbox(user).set_value(False)
+        card = next(iter(_engine_card(user, "siliconflowfree").elements))
+        assert "pk-engine-card--disabled" not in card.classes, "取消機密後免費卡應解禁"
+
+
+@pytest.mark.asyncio
+async def test_free_engine_section_dom_order(tmp_path):
+    """免費翻譯區 DOM 位置：付費卡之後、目標語言/輸出區之前；區內
+    header → hint → 三卡（siliconflowfree 首）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        order = [m for _, m in _dom_markers(user.client.content)]
+        assert order.index("engine-card-babeldoc") < order.index("free-engine-section"), (
+            "免費區必須在付費卡（babeldoc 末卡）之後"
+        )
+        assert order.index("free-engine-section") < order.index("free-engine-hint")
+        assert order.index("free-engine-hint") < order.index("engine-card-siliconflowfree")
+        assert order.index("engine-card-siliconflowfree") < order.index("engine-card-google")
+        assert order.index("engine-card-google") < order.index("engine-card-bing")
+        assert order.index("engine-card-bing") < order.index("browse-output-dir"), (
+            "免費卡必須在輸出目錄/任務區上方"
+        )
+
+
+# ── 免費 LLM key 引擎（2026-08-13：Free-LLM-Collection 查證後加入，BYOK 免費 key）──
+
+
+@pytest.mark.asyncio
+async def test_free_key_engine_cards_render(tmp_path):
+    """免費 LLM 區渲染：header＋品質提示＋6 張卡（依優先序）＋ⓘ tooltip。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("免費 LLM（自備免費 key）")
+        user.find(marker="free-key-engine-hint")  # 品質提示存在
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+            card = _engine_card(user, eid)
+            assert next(iter(card.elements)), f"{eid} 免費 LLM 卡應渲染"
+            user.find(kind=ui.icon, marker=f"info-engine-{eid}")  # ⓘ tooltip 存在
+
+
+@pytest.mark.asyncio
+async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_blank_pdf):
+    """免費 LLM 選卡→翻譯：BYOK 模式——填 key 後點卡，build_engine 收到該 key
+    （與零 key 區的 api_key=="" 相反語意；「不能動用個人 API」紅線的另一面：
+    免費 key 是使用者/他人自己申請的免費額度）。"""
+    from test_ui_flow import FileWritingFakeEngine
+
+    calls = []
+
+    def spy_build_engine(spec, api_key="", **kw):
+        calls.append((spec.id, api_key))
+        return FileWritingFakeEngine()
+
+    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("nvidia", "nvapi-test-free-key")
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        nvidia_card = _engine_card(user, "nvidia")
+        card_el = next(iter(nvidia_card.elements))
+        assert "ring-primary" not in card_el.classes, "初始免費 LLM 卡不應被選中"
+        nvidia_card.click()
+        assert "ring-primary" in card_el.classes, "點選免費 LLM 卡後應有選中高亮"
+        pdf = make_blank_pdf(tmp_path / "NIM1.pdf")
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(name=pdf.name, content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("NIM1.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        from paper_kit.domain.translation_job import JobStatus
+
+        for _ in range(50):
+            if service.list_jobs()[-1].status is JobStatus.COMPLETED:
+                break
+            await asyncio.sleep(0.1)
+        job = service.list_jobs()[-1]
+        assert job.status is JobStatus.COMPLETED, f"翻譯未在時限內完成：{job.error}"
+        assert job.engine_id == "nvidia", f"任務應記 nvidia，實際 {job.engine_id}"
+        assert calls == [("nvidia", "nvapi-test-free-key")], (
+            f"免費 LLM 引擎應收到使用者自備的免費 key，實際 {calls}"
+        )
+
+
+def test_resolve_free_key_engine_requires_key(tmp_path, monkeypatch):
+    """免費 LLM 解析需 key（BYOK）：未填 key 選卡翻譯被擋（友善訊息），
+    填 key 後 build_engine 收到該 key（純函式）。"""
+    from test_ui_flow import FileWritingFakeEngine
+
+    service, settings, cost, glossaries = _build(tmp_path)
+    seen: dict = {}
+
+    def spy(spec, api_key="", **kw):
+        seen["eid"] = spec.id
+        seen["key"] = api_key
+        return FileWritingFakeEngine()
+
+    monkeypatch.setattr(app_module, "build_engine", spy)
+    from paper_kit.application.ports import EngineError
+
+    _resolve_task_engine = app_module._resolve_task_engine
+    with pytest.raises(EngineError, match="尚未設定.*key"):
+        _resolve_task_engine(settings, "groq")  # 未填 key → 擋
+    settings.set_api_key("groq", "gsk-free-key")
+    eid, engine = _resolve_task_engine(settings, "groq")
+    assert eid == "groq"
+    assert seen.get("key") == "gsk-free-key", "填 key 後應傳給引擎"
+
+
+@pytest.mark.asyncio
+async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
+    """機密模式（票 10 紅線）：免費 LLM 卡全禁用（免費層無 SLA／第三方雲端）——
+    勾機密 → 6 卡灰化、點擊不切換（引擎仍 DeepSeek）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _sensitive_checkbox(user).set_value(True)
+        await user.should_see("本任務將使用 DeepSeek", retries=20)
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+            card = next(iter(_engine_card(user, eid).elements))
+            assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡應禁用（機密紅線）"
+        _engine_card(user, "nvidia").click()
+        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
+        assert "ring-primary" in classes, "機密下點免費 LLM 卡不得切換引擎"
+
+
+@pytest.mark.asyncio
+async def test_free_key_engine_section_dom_order(tmp_path):
+    """免費 LLM 區 DOM 位置：零 key 免費區之後（bing 末卡 → 新區 header → hint →
+    6 卡依優先序 nvidia 首）；輸出目錄/任務區之前。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        order = [m for _, m in _dom_markers(user.client.content)]
+        assert order.index("engine-card-bing") < order.index("free-key-engine-section"), (
+            "免費 LLM 區必須在零 key 免費區（bing 末卡）之後"
+        )
+        assert order.index("free-key-engine-section") < order.index("free-key-engine-hint")
+        assert order.index("free-key-engine-hint") < order.index("engine-card-nvidia")
+        assert order.index("engine-card-nvidia") < order.index("engine-card-modelscope")
+        assert order.index("engine-card-modelscope") < order.index("engine-card-groq")
+        assert order.index("engine-card-groq") < order.index("engine-card-openrouter")
+        assert order.index("engine-card-openrouter") < order.index("engine-card-bigmodel")
+        assert order.index("engine-card-bigmodel") < order.index("engine-card-gemini")
+        assert order.index("engine-card-gemini") < order.index("browse-output-dir"), (
+            "免費 LLM 卡必須在輸出目錄/任務區上方"
+        )
+
+
+# ── 付費卡灰化（2026-08-13 使用者要求：無 API key 時 4 付費卡灰色不可點）──
+
+
+@pytest.mark.asyncio
+async def test_paid_cards_greyed_out_without_key(tmp_path):
+    """無任何 API key：4 張付費卡（siliconflow/deepseek/babeldoc/latex）灰化
+    （pk-engine-card--disabled）且點擊不切換（notify 阻擋）。"""
+    service, settings, cost, glossaries = _build(tmp_path)  # 不設任何 key
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        for eid in ("siliconflow", "deepseek", "babeldoc", "latex"):
+            card = next(iter(_engine_card(user, eid).elements))
+            assert "pk-engine-card--disabled" in card.classes, (
+                f"{eid} 付費卡無 key 應灰化"
+            )
+        # 點擊付費卡（deepseek，非預設）→ 阻擋：不切換＋警告通知
+        deepseek = next(iter(_engine_card(user, "deepseek").elements))
+        _engine_card(user, "deepseek").click()
+        assert "ring-primary" not in deepseek.classes, "無 key 時點付費卡不得切換"
+        await user.should_see("尚未設定", retries=20)  # 警告通知出現
+
+
+@pytest.mark.asyncio
+async def test_free_key_cards_greyed_out_without_key(tmp_path):
+    """免費 LLM 卡（BYOK）無 key 也灰化——沒 key 不能翻譯，提示去設定頁填。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+            card = next(iter(_engine_card(user, eid).elements))
+            assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡無 key 應灰化"
+
+
+@pytest.mark.asyncio
+async def test_paid_card_unlocks_after_key_set(tmp_path):
+    """設定 key 後（重開頁）付費卡解禁——灰化以「是否有 key」為準，不是永久灰。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("deepseek", "sk-ds-key")
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        card = next(iter(_engine_card(user, "deepseek").elements))
+        assert "pk-engine-card--disabled" not in card.classes, "填 key 後付費卡應解禁"
+        # 其餘無 key 付費卡仍灰（latex 例外——沿用 deepseek 槽位語意，同 _resolve）
+        for eid in ("siliconflow", "babeldoc"):
+            c = next(iter(_engine_card(user, eid).elements))
+            assert "pk-engine-card--disabled" in c.classes, f"{eid} 未填 key 仍應灰化"
+
+
+@pytest.mark.asyncio
+async def test_free_key_card_unlocks_after_key_set(tmp_path):
+    """免費 LLM 卡填 key 後解禁（BYOK 流程完整）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("nvidia", "nvapi-test")
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        card = next(iter(_engine_card(user, "nvidia").elements))
+        assert "pk-engine-card--disabled" not in card.classes, "免費 LLM 填 key 後應解禁"

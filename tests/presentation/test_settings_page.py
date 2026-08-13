@@ -16,6 +16,7 @@ from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.infrastructure.glossary_repo import GlossaryRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
+import paper_kit.presentation.app as app_module  # 分裂免疫（同 test_index_page）
 from paper_kit.presentation.app import _settings_page
 
 
@@ -242,6 +243,123 @@ def _cache_toggle(user) -> ui.switch:
     return next(
         iter(s for s in user.find(ui.switch).elements if "啟用翻譯快取" in (s.text or ""))
     )
+
+
+# ── 測試 API 按鈕（2026-08-13 使用者要求：填入 key 後確認是否成功啟用）──
+
+
+def test_probe_api_returns_status():
+    """_probe_api 純函式：GET {base_url}/models 驗證 key（零成本、不生成 token）。
+    （實際網路呼叫太重——用假 server 或直接測狀態判定邏輯；此處測組裝與解析。）"""
+
+    probe = app_module._probe_api
+    # 用本地假 server：200 與 401 兩種回應
+    import http.server
+    import threading
+    import urllib.parse
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            auth = self.headers.get("Authorization", "")
+            if auth == "Bearer good-key":
+                body = b'{"object":"list","data":[]}'
+                self.send_response(200)
+            else:
+                body = b'{"error":"invalid key"}'
+                self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}/v1"
+        code, body = probe(base, "good-key")
+        assert code == 200, f"好 key 應 200，實際 {code} {body}"
+        code, body = probe(base, "bad-key")
+        assert code == 401, f"壞 key 應 401，實際 {code} {body}"
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_test_api_button_shows_success(tmp_path, monkeypatch):
+    """設定頁每張 key 引擎卡有「測試 API」按鈕；點擊（_probe_api 回 200）
+    → 成功通知。"""
+
+    calls = []
+
+    def fake_probe(base_url, api_key):
+        calls.append((base_url, api_key))
+        return 200, '{"ok":true}'
+
+    monkeypatch.setattr(app_module, "_probe_api", fake_probe)
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("deepseek", "sk-ds-test")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        test_btn = user.find(kind=ui.button, marker="engine-key-test-deepseek")
+        assert next(iter(test_btn.elements)), "測試 API 按鈕應存在"
+        test_btn.click()
+        await user.should_see("連線成功", retries=20)
+        assert calls == [("https://api.deepseek.com/v1", "sk-ds-test")], (
+            f"應以該引擎 base_url＋key 探測，實際 {calls}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_test_api_button_rejects_bad_key(tmp_path, monkeypatch):
+    """key 無效（401）→ 警告通知（提示 key 有問題，不報連線失敗）。"""
+
+    monkeypatch.setattr(app_module, "_probe_api", lambda base, key: (401, '{"error":"bad"}'))
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    settings.set_api_key("siliconflow", "sf-bad-key")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        user.find(kind=ui.button, marker="engine-key-test-siliconflow").click()
+        await user.should_see("key 無效", retries=20)
+
+
+@pytest.mark.asyncio
+async def test_test_api_button_without_key_warns(tmp_path, monkeypatch):
+    """未填 key 按測試 → 直接警告（不發任何網路請求）。"""
+
+    called = []
+
+    def fake_probe(base, key):
+        called.append(True)
+        return 200, ""
+
+    monkeypatch.setattr(app_module, "_probe_api", fake_probe)
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        user.find(kind=ui.button, marker="engine-key-test-babeldoc").click()
+        await user.should_see("尚未設定", retries=20)
+        assert called == [], "未填 key 不應發任何網路請求"
 
 
 def _build_settings(tmp_path):

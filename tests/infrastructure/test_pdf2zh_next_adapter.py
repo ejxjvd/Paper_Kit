@@ -157,6 +157,23 @@ def test_build_command_deepseek_uses_deepseek_flags():
     assert "--siliconflow" not in cmd
 
 
+def test_build_command_openai_provider_uses_openai_flags():
+    """免費 LLM 接入（2026-08-13）：OpenAI 相容免費端點（Free-LLM-Collection）
+    走 --openai 三旗標——base-url/model/api-key 全由 spec 提供。"""
+    cfg = EngineConfig(
+        provider="openai",
+        api_key="FREEKEY",
+        model="openai/gpt-oss-20b:free",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    cmd = build_command(make_job(), cfg)
+    assert "--openai" in cmd
+    assert cmd[cmd.index("--openai-base-url") + 1] == "https://openrouter.ai/api/v1"
+    assert cmd[cmd.index("--openai-model") + 1] == "openai/gpt-oss-20b:free"
+    assert cmd[cmd.index("--openai-api-key") + 1] == "FREEKEY"
+    assert "--siliconflow" not in cmd and "--deepseek" not in cmd
+
+
 def test_build_command_no_pages_omits_flag():
     cmd = build_command(make_job(pages=None), EngineConfig(api_key="KEY"))
     assert "--pages" not in cmd

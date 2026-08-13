@@ -6,10 +6,13 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 啟動：`uv run paper-kit` → http://localhost:8080（設定頁 /settings）
 """
 
+import asyncio
 import logging
 import re
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +44,8 @@ from paper_kit.domain.glossary import GlossaryFormatError
 from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也收斂至 registry
     ENGINE_SPECS,
     UI_ENGINE_IDS,
+    UI_FREE_ENGINE_IDS,  # 免費翻譯入口（2026-08-13）：免 key 引擎卡集合
+    UI_FREE_KEY_ENGINE_IDS,  # 免費 LLM（2026-08-13）：BYOK 免費 key 引擎卡集合
     build_engine,
 )
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
@@ -607,6 +612,28 @@ def _key_handlers(
     return save, clear
 
 
+def _probe_api(base_url: str, api_key: str, timeout: int = 10) -> tuple[int, str]:
+    """測試 API 按鈕（2026-08-13 使用者要求）：GET {base_url}/models 驗證 key。
+
+    零成本——只列模型、不生成 token。200＝key 有效；401/403＝key 無效；
+    0＝連線失敗（urlopen 例外）。純函式（module 層）——測試 monkeypatch 或
+    假 server 直接測。
+    """
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/models", method="GET"
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read(200).decode("utf-8", "replace")
+            return resp.status, body[:80]
+    except urllib.error.HTTPError as e:
+        body = e.read(200).decode("utf-8", "replace")
+        return e.code, body[:80]
+    except Exception as e:  # 連線失敗／逾時（urlopen 拋 URLError 等）
+        return 0, str(e)[:80]
+
+
 def _cache_stats_label(cache: TranslationCache) -> str:
     """「快取 N 筆 · X MB」；stats() 排除索引 DB，只算實際產物。"""
     count, total = cache.stats()
@@ -656,7 +683,9 @@ def _settings_page(
                 ui.label(
                     "各自用自己的 key（存本機 SQLite，不入 repo/log）；已存 key 僅顯示遮罩。"
                 ).classes("text-xs text-grey-6")
-                for eid in UI_ENGINE_IDS:  # P3：與主頁引擎卡同一集合（registry 單點）
+                # P3：與主頁引擎卡同一集合（registry 單點）。免費 LLM（BYOK）也在此
+                # 填 key——免費申請、各自獨立（票 20 每引擎獨立 key 模式）。
+                for eid in (*UI_ENGINE_IDS, *UI_FREE_KEY_ENGINE_IDS):
                     spec = ENGINE_SPECS[eid]
                     # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
                     # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
@@ -688,6 +717,37 @@ def _settings_page(
                                 "清除",
                                 on_click=clear_key,
                             ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
+                            # 2026-08-13（使用者要求）：測試 API 按鈕——填入 key 後確認
+                            # 是否成功啟用。GET /models（零成本、不生成 token）驗證。
+                            async def _test_api(eid=eid, spec=spec, settings=settings) -> None:
+                                key = settings.api_key(eid)
+                                if not key:
+                                    ui.notify(f"{spec.label}：尚未設定 key", type="warning")
+                                    return
+                                code, body = await asyncio.to_thread(
+                                    _probe_api, spec.base_url, key
+                                )
+                                if code == 200:
+                                    ui.notify(
+                                        f"✅ {spec.label} 連線成功（HTTP 200）",
+                                        type="positive",
+                                    )
+                                elif code in (401, 403):
+                                    ui.notify(
+                                        f"⚠️ {spec.label}：key 無效（HTTP {code}）——"
+                                        "請檢查是否複製完整",
+                                        type="warning",
+                                    )
+                                else:
+                                    ui.notify(
+                                        f"❌ {spec.label}：連線失敗（HTTP {code} {body[:40]}）",
+                                        type="negative",
+                                    )
+
+                            ui.button(
+                                "測試 API",
+                                on_click=_test_api,
+                            ).props("outline").mark(f"engine-key-test-{eid}")
                         if eid == "siliconflow":
                             # #84：術語提取 key 獨立化——term 引擎＝SiliconFlow 專屬
                             # （term 旗標僅 siliconflow provider 發送，#83）；獨立 key
@@ -1464,16 +1524,27 @@ def _index_page(
             # ——任務一多不再把引擎卡往下推（cards 容器最後建立，見頁尾）
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
 
-            def _pick_engine(eid: str) -> None:
+            def _pick_engine(eid: str, force: bool = False) -> None:
                 """點選引擎卡：更新本任務引擎＋卡片高亮（同一 render 的 closure）。
 
                 2026-08-13（使用者回報）：勾機密後點視覺卡 → 前置阻擋（不讓
                 使用者選了視覺引擎按「開始翻譯」才被 _start_job 拒絕——UX 前置化）。
+                2026-08-13（使用者要求）：無 API key 的付費卡灰化不可點——點擊
+                前置阻擋＋警告（與機密阻擋同 UX 模式）。
+                force＝程式自動切換（機密紅線優先於 key 檢查——機密模式自動切
+                DeepSeek 即使未填 key 也要切，讓翻譯時報缺 key 而非 UI 卡住）。
                 """
                 nonlocal selected_engine
                 if sensitive_input.value and not ENGINE_SPECS[eid].sensitive_ok:
                     ui.notify(
                         "機密文件僅 DeepSeek 純文字引擎（先取消 🔒 或選 DeepSeek）",
+                        type="warning",
+                    )
+                    return
+                spec = ENGINE_SPECS[eid]
+                if not force and spec.needs_key and not _has_key(eid):
+                    ui.notify(
+                        f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）",
                         type="warning",
                     )
                     return
@@ -1488,8 +1559,57 @@ def _index_page(
                 ui.notify(f"本任務將使用 {ENGINE_SPECS[eid].label}", type="info")
 
             engine_cards: dict[str, ui.card] = {}
+
+            def _has_key(eid: str) -> bool:
+                """key 存在判定——與 _resolve_task_engine 同語意（票 27：latex
+                未獨立填時沿用 deepseek 槽位）；灰化/點擊阻擋與翻譯時檢查一致。"""
+                if eid == "latex":
+                    return bool(settings.api_key("latex") or settings.api_key("deepseek"))
+                return bool(settings.api_key(eid))
+
+            def _card_disabled(eid: str) -> bool:
+                """2026-08-13（使用者要求）：無 API key 的付費卡灰化不可點。
+
+                統一判定（機密＋key 兩層紅線合併）：機密模式且引擎不支援機密
+                （票 10），或 needs_key 引擎未填 key。_on_sensitive_change 與
+                初始渲染共用同一判定——取消機密不會誤解灰化。
+                """
+                spec = ENGINE_SPECS[eid]
+                if sensitive_input.value and not spec.sensitive_ok:
+                    return True
+                return spec.needs_key and not _has_key(eid)
+
             with ui.row().classes("gap-2 w-full"):
                 for eid in UI_ENGINE_IDS:  # P3：卡集合/順序/文字全來自 registry
+                    spec = ENGINE_SPECS[eid]
+                    card = ui.card().mark(f"engine-card-{eid}").classes(
+                        "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                        + (" ring-2 ring-primary" if eid == selected_engine else "")
+                        + (" pk-engine-card--disabled" if _card_disabled(eid) else "")
+                    )
+                    with card:
+                        with ui.row().classes("items-center justify-between w-full"):
+                            ui.label(spec.label).classes("font-semibold text-sm")
+                            # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示引擎差異
+                            ui.icon("help_outline").props("size=16px").classes(
+                                "text-grey-5"
+                            ).mark(f"info-engine-{eid}").tooltip(spec.info)
+                        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+                    engine_cards[eid] = card
+                    card.on("click", _engine_picker(_pick_engine, eid))
+
+            # 免費翻譯入口（2026-08-13，使用者要求「拿到工具的人不填 key 就能
+            # 免費翻譯、絕不動個人 API」）：免 key 引擎卡區。與付費卡共用同一
+            # engine_cards dict → ring 清除／_on_sensitive_change 禁用迴圈／
+            # _pick_engine 機密阻擋全部自動涵蓋，無需特例分支。
+            ui.label("免費翻譯（不需 API key）").classes(
+                "text-sm font-semibold text-grey-7 mt-2"
+            ).mark("free-engine-section")
+            ui.label("零成本翻譯（上游代理轉發）——品質低於付費引擎；機密文件請選 DeepSeek").classes(
+                "text-xs text-grey-6"
+            ).mark("free-engine-hint")
+            with ui.row().classes("gap-2 w-full"):
+                for eid in UI_FREE_ENGINE_IDS:
                     spec = ENGINE_SPECS[eid]
                     card = ui.card().mark(f"engine-card-{eid}").classes(
                         "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
@@ -1498,7 +1618,35 @@ def _index_page(
                     with card:
                         with ui.row().classes("items-center justify-between w-full"):
                             ui.label(spec.label).classes("font-semibold text-sm")
-                            # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示引擎差異
+                            ui.icon("help_outline").props("size=16px").classes(
+                                "text-grey-5"
+                            ).mark(f"info-engine-{eid}").tooltip(spec.info)
+                        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+                    engine_cards[eid] = card
+                    card.on("click", _engine_picker(_pick_engine, eid))
+
+            # 免費 LLM 入口（2026-08-13，Free-LLM-Collection 查證後加入）：BYOK 免費 key
+            # 引擎第二層——品質優於上方零 key 區（NVIDIA/ModelScope 等旗艦免費），
+            # 但需各自申請免費 key。卡一樣進 engine_cards dict（ring 清除／機密禁用
+            # 迴圈／_pick_engine 阻擋自動涵蓋）；順序＝品質優先序（registry 單點）。
+            ui.label("免費 LLM（自備免費 key）").classes(
+                "text-sm font-semibold text-grey-7 mt-2"
+            ).mark("free-key-engine-section")
+            ui.label(
+                "免費大模型（NVIDIA/ModelScope 等，品質接近付費）——在設定頁填入各自的"
+                "免費 API key；機密文件請選 DeepSeek"
+            ).classes("text-xs text-grey-6").mark("free-key-engine-hint")
+            with ui.row().classes("gap-2 w-full"):
+                for eid in UI_FREE_KEY_ENGINE_IDS:
+                    spec = ENGINE_SPECS[eid]
+                    card = ui.card().mark(f"engine-card-{eid}").classes(
+                        "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                        + (" ring-2 ring-primary" if eid == selected_engine else "")
+                        + (" pk-engine-card--disabled" if _card_disabled(eid) else "")
+                    )
+                    with card:
+                        with ui.row().classes("items-center justify-between w-full"):
+                            ui.label(spec.label).classes("font-semibold text-sm")
                             ui.icon("help_outline").props("size=16px").classes(
                                 "text-grey-5"
                             ).mark(f"info-engine-{eid}").tooltip(spec.info)
@@ -1515,9 +1663,14 @@ def _index_page(
                 # 直接 `def f(value: bool)` 會把 True/False 都當 truthy（#85 同款陷阱）
                 value = bool(e.value)
                 if value:
-                    _pick_engine("deepseek")
+                    _pick_engine("deepseek", force=True)
                 for cid, card in engine_cards.items():
-                    disabled = value and not ENGINE_SPECS[cid].sensitive_ok
+                    # 2026-08-13（使用者要求）：統一判定（機密＋key）——取消機密
+                    # 只解除機密層；無 key 的付費卡仍灰（_card_disabled 同源）
+                    disabled = (
+                        (value and not ENGINE_SPECS[cid].sensitive_ok)
+                        or (ENGINE_SPECS[cid].needs_key and not _has_key(cid))
+                    )
                     card.classes(
                         remove=("pk-engine-card--disabled" if not disabled else ""),
                         add=("pk-engine-card--disabled" if disabled else ""),

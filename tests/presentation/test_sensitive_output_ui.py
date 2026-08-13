@@ -124,8 +124,11 @@ async def test_sensitive_checked_blocks_visual_engine_selection(tmp_path):
 
 @pytest.mark.asyncio
 async def test_unchecking_sensitive_restores_engine_cards(tmp_path):
-    """取消勾機密 → 視覺卡解除禁用、可再選。"""
+    """取消勾機密 → 視覺卡解除禁用、可再選。
+    （2026-08-13 灰化：付費卡另受「需 key」層管制——填 key 讓測試語意
+    純粹落在「機密層解除」。）"""
     service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("siliconflow", "sf-test-key")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)

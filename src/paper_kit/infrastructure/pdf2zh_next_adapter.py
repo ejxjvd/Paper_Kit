@@ -66,6 +66,15 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
             "--siliconflow-api-key", cfg.api_key,
             "--siliconflow-base-url", cfg.base_url,
         ]
+    elif cfg.provider == "openai":
+        # 免費 LLM 接入（2026-08-13）：OpenAI 相容免費端點（Free-LLM-Collection）
+        # 共用 pdf2zh 的 --openai 引擎——base-url/model/key 全由 spec 提供
+        cmd += [
+            "--openai",
+            "--openai-model", cfg.model,
+            "--openai-api-key", cfg.api_key,
+            "--openai-base-url", cfg.base_url,
+        ]
     else:
         # 免費引擎：旗標名＝provider（--google／--bing／--siliconflowfree），不需 key
         cmd += [f"--{cfg.provider}"]

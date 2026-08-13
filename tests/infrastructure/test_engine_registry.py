@@ -181,3 +181,97 @@ def test_build_engine_latex_missing_key_fails_at_translate():
     adapter = build_engine(ENGINE_SPECS["latex"], api_key="")
     with pytest.raises(EngineError, match="API key"):
         adapter.translate(TranslationJob(job_id="j", source_path="/in/a.tex"))
+
+
+# ── 免費翻譯入口（2026-08-13 使用者要求：交付他人免費翻譯、不動個人 API）──
+
+
+def test_ui_free_engine_ids_defined():
+    """主頁免費卡集合：免 key 三支，順序＝品質/活躍度（siliconflowfree 上游預設排首）。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
+
+    assert UI_FREE_ENGINE_IDS == ("siliconflowfree", "google", "bing")
+
+
+def test_free_specs_have_card_desc_and_info():
+    """免費卡顯示知識收斂 registry（P3 模式）：三支 free spec 的卡副標題與 ⓘ tooltip 齊備。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
+
+    for eid in UI_FREE_ENGINE_IDS:
+        spec = ENGINE_SPECS[eid]
+        assert spec.card_desc, f"{eid} 缺 card_desc"
+        assert spec.info, f"{eid} 缺 info"
+        assert spec.needs_key is False, f"{eid} 應為免 key 引擎"
+
+
+def test_all_keyless_specs_in_ui_free_ids():
+    """不變式：所有 needs_key=False 的引擎必須在 UI_FREE_ENGINE_IDS——未來加
+    keyless 引擎不上免費卡即紅（P3 單點模式的自動守衛）。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
+
+    keyless = {eid for eid, spec in ENGINE_SPECS.items() if not spec.needs_key}
+    assert keyless <= set(UI_FREE_ENGINE_IDS), f"未上免費卡：{keyless - set(UI_FREE_ENGINE_IDS)}"
+
+
+# ── 免費 LLM key 引擎（2026-08-13，Free-LLM-Collection 查證後加入）──
+# 語意分層：UI_FREE_ENGINE_IDS＝零 key 引擎（免填 key）；UI_FREE_KEY_ENGINE_IDS＝
+# 免費 LLM 提供者（BYOK——自申請免費 key 填入，品質依優先序排列）。
+# 查證依據：docs/research/2026-08-13-Free-LLM-Collection-查證與品質優先序.md
+# （端點活性探測 25 提供者全測；優先序＝品質×額度×門檻綜合評分）
+
+
+def test_ui_free_key_engine_ids_priority_order():
+    """免費 LLM 卡集合與順序＝研究報告優先序：NVIDIA NIM（T1/T2、40RPM、無日總量）
+    ＞ ModelScope（T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron
+    翻譯數據免費群最佳）＞ 智譜（無 token 上限）＞ Gemini（T2 但免費層資料訓練）。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
+    assert UI_FREE_KEY_ENGINE_IDS == (
+        "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini",
+    )
+
+
+def test_free_key_specs_openai_provider():
+    """不變式：免費 LLM 全走 provider=openai（pdf2zh --openai 三旗標，不需新 adapter）。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
+    for eid in UI_FREE_KEY_ENGINE_IDS:
+        spec = ENGINE_SPECS[eid]
+        assert spec.provider == "openai", f"{eid} 應為 openai provider"
+        assert spec.needs_key is True, f"{eid} 為 BYOK 免費 key 引擎（需填入 key）"
+        assert spec.sensitive_ok is False, (
+            f"{eid} 免費層無 SLA／第三方雲端——機密文件不可用（票 10 紅線）"
+        )
+        assert spec.base_url.startswith("https://"), f"{eid} base_url 異常：{spec.base_url}"
+        assert spec.model, f"{eid} 缺預設模型"
+        assert spec.card_desc, f"{eid} 缺 card_desc"
+        assert spec.info, f"{eid} 缺 info（含隱私警語）"
+
+
+def test_all_openai_provider_specs_in_free_key_ids():
+    """不變式：所有 provider=openai 的引擎必須在 UI_FREE_KEY_ENGINE_IDS——
+    未來加 OpenAI 相容免費端點不上免費 LLM 卡即紅。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
+    openai_prov = {eid for eid, spec in ENGINE_SPECS.items() if spec.provider == "openai"}
+    assert openai_prov <= set(UI_FREE_KEY_ENGINE_IDS), (
+        f"未上免費 LLM 卡：{openai_prov - set(UI_FREE_KEY_ENGINE_IDS)}"
+    )
+
+
+def test_free_key_specs_distinct_from_keyless_free():
+    """不變式：兩免費區不得重疊（零 key 區與 BYOK 免費 LLM 區語意不同）。"""
+    from paper_kit.infrastructure.engine_registry import (
+        UI_FREE_ENGINE_IDS,
+        UI_FREE_KEY_ENGINE_IDS,
+    )
+
+    assert not set(UI_FREE_ENGINE_IDS) & set(UI_FREE_KEY_ENGINE_IDS)
+
+
+def test_gemini_spec_carries_data_training_warning():
+    """Gemini 免費層資料訓練條款＝未發表論文紅線（#28）——info 必須含警語。"""
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
+
+    info = ENGINE_SPECS["gemini"].info
+    assert "資料訓練" in info or "訓練" in info, "Gemini info 缺資料訓練警語"
