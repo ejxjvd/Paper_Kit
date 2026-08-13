@@ -47,6 +47,10 @@ from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也�
     UI_FREE_ENGINE_IDS,  # 免費翻譯入口（2026-08-13）：免 key 引擎卡集合
     UI_FREE_KEY_ENGINE_IDS,  # 免費 LLM（2026-08-13）：BYOK 免費 key 引擎卡集合
     build_engine,
+    can_select,  # 架構健檢 #1+2+8：引擎挑選規則收斂 registry（灰化合併判定）
+    resolve_key,  # 有效 key 值（latex 槽位沿用單點）
+    sensitive_blocked,  # 機密紅線（票 10）
+    spec_has_key,  # key 存在判定（latex 特例內含）
 )
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
@@ -184,8 +188,10 @@ def _resolve_task_engine(
         raise EngineError(f"未知引擎：{engine_id}")
     if spec.id == "latex":
         # 票 27：latex 後端＝deepseek-chat（README 唯一推薦後端）——key 未獨立
-        # 填時沿用 deepseek 槽位（同後端同 key；設定頁 latex 卡可覆寫）
-        key = settings.api_key("latex") or settings.api_key("deepseek")
+        # 填時沿用 deepseek 槽位（同後端同 key；設定頁 latex 卡可覆寫）。
+        # 槽位沿用規則單點在 engine_registry.resolve_key（架構健檢 #1+2+8）——
+        # 此處只取 key＋給錯誤（訊息是 UI 呼叫方責任）。
+        key = resolve_key("latex", settings.api_key)
         if not key:
             raise EngineError("尚未設定 LaTeX／DeepSeek 的 API key（設定頁填入後再翻譯）")
         return spec.id, build_engine(spec, api_key=key)
@@ -202,6 +208,45 @@ def _engine_picker(pick, eid: str):
     def pick_engine() -> None:
         pick(eid)
     return pick_engine
+
+
+def _render_single_engine_card(body: ui.column, eid: str) -> None:
+    """單卡內容重建（付費／免費 LLM 兩區共用）——label／ⓘ／desc 對應目前引擎。
+
+    架構健檢 #1：消除 _render_paid_key_card／_render_free_key_card 逐行複製
+    雙胞胎（原本 28 行重複；改動後 _index_page 內只剩呼叫）。
+    """
+    spec = ENGINE_SPECS[eid]
+    body.clear()
+    with body:
+        with ui.row().classes("items-center justify-between w-full"):
+            ui.label(spec.label).classes("font-semibold text-sm")
+            ui.icon("help_outline").props("size=16px").classes(
+                "text-grey-5"
+            ).mark(f"info-engine-{eid}").tooltip(spec.info)
+        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+
+
+def _swap_single_engine_card(
+    engine_cards: dict, card: ui.card, body: ui.column,
+    old_eid: str, new_eid: str, disabled: bool,
+) -> None:
+    """單卡切換顯示引擎：dict key 替換＋內容重建＋灰化重算（付費／免費 LLM 兩區共用）。
+
+    呼叫方（_index_page closure）已通過 _pick_engine 守衛並負責下拉顯示同步
+    （set_value 不觸發 handler 無遞迴）；disabled＝新引擎的灰化判定
+    （can_select）——換引擎後卡不該停留舊引擎的灰態（舊無 key、新有 key 時）。
+    架構健檢 #1：_set_paid_card／_on_free_key_select 後半段逐行複製收斂於此。
+    """
+    engine_cards.pop(old_eid, None)
+    engine_cards[new_eid] = card
+    _render_single_engine_card(body, new_eid)
+    card.classes(
+        remove="ring-2 ring-primary"
+        + ("" if disabled else " pk-engine-card--disabled"),
+        add="ring-2 ring-primary"
+        + (" pk-engine-card--disabled" if disabled else ""),
+    )
 
 
 def _start_job(
@@ -1555,7 +1600,9 @@ def _index_page(
                 回傳 True＝已切換；False＝被守衛擋下（下拉選單復原用）。
                 """
                 nonlocal selected_engine
-                if sensitive_input.value and not ENGINE_SPECS[eid].sensitive_ok:
+                # 規則收斂 registry（架構健檢 #1+2+8）：sensitive_blocked／spec_has_key
+                # 純函式單點——與 _card_disabled（can_select 組合）同源；訊息留此呼叫方
+                if sensitive_blocked(eid, sensitive_input.value):
                     ui.notify(
                         "機密文件僅 DeepSeek／OpenAI／Gemini 付費等不訓練引擎可用"
                         "（先取消 🔒 或選其一）",
@@ -1563,7 +1610,7 @@ def _index_page(
                     )
                     return False
                 spec = ENGINE_SPECS[eid]
-                if not force and spec.needs_key and not _has_key(eid):
+                if not force and not spec_has_key(eid, settings.api_key):
                     ui.notify(
                         f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）",
                         type="warning",
@@ -1582,24 +1629,15 @@ def _index_page(
 
             engine_cards: dict[str, ui.card] = {}
 
-            def _has_key(eid: str) -> bool:
-                """key 存在判定——與 _resolve_task_engine 同語意（票 27：latex
-                未獨立填時沿用 deepseek 槽位）；灰化/點擊阻擋與翻譯時檢查一致。"""
-                if eid == "latex":
-                    return bool(settings.api_key("latex") or settings.api_key("deepseek"))
-                return bool(settings.api_key(eid))
-
             def _card_disabled(eid: str) -> bool:
                 """2026-08-13（使用者要求）：無 API key 的付費卡灰化不可點。
 
-                統一判定（機密＋key 兩層紅線合併）：機密模式且引擎不支援機密
-                （票 10），或 needs_key 引擎未填 key。_on_sensitive_change 與
-                初始渲染共用同一判定——取消機密不會誤解灰化。
+                統一判定（機密＋key 兩層紅線合併）——規則收斂 registry
+                （架構健檢 #1+2+8）：can_select＝sensitive_blocked（票 10 紅線）
+                ＋spec_has_key（needs_key／latex 槽位沿用）。_on_sensitive_change
+                與初始渲染共用同一判定——取消機密不會誤解灰化。
                 """
-                spec = ENGINE_SPECS[eid]
-                if sensitive_input.value and not spec.sensitive_ok:
-                    return True
-                return spec.needs_key and not _has_key(eid)
+                return not can_select(eid, sensitive_input.value, settings.api_key)
 
             # 付費引擎區（2026-08-13 使用者要求「卡片欄位太多」）：6 卡收斂為
             # 單卡顯示目前所選引擎＋下拉選單挑選——與免費 LLM 區同款機制（單卡
@@ -1630,47 +1668,32 @@ def _index_page(
                 ) as paid_key_card:
                     paid_key_body = ui.column().classes("gap-1 w-full")
 
-                def _render_paid_key_card() -> None:
-                    """重建單卡內容（下拉換引擎時）——label／ⓘ／desc 對應目前引擎。"""
-                    spec = ENGINE_SPECS[paid_key_eid]
-                    paid_key_body.clear()
-                    with paid_key_body:
-                        with ui.row().classes("items-center justify-between w-full"):
-                            ui.label(spec.label).classes("font-semibold text-sm")
-                            ui.icon("help_outline").props("size=16px").classes(
-                                "text-grey-5"
-                            ).mark(f"info-engine-{paid_key_eid}").tooltip(spec.info)
-                        ui.label(spec.card_desc).classes(
-                            "text-xs text-grey-7 pk-engine-desc"
-                        )
-
-                _render_paid_key_card()
+                _render_single_engine_card(paid_key_body, paid_key_eid)
                 engine_cards[paid_key_eid] = paid_key_card
                 paid_key_card.on("click", lambda: _pick_engine(paid_key_eid))
 
                 def _set_paid_card(eid: str) -> None:
-                    """付費單卡切換顯示引擎：dict key＋下拉顯示＋內容重建＋灰化重算。
+                    """付費單卡切換顯示引擎（薄 closure）：同 eid 早退＋下拉同步＋
+                    共用 _swap_single_engine_card（dict key／內容重建／灰化重算——
+                    架構健檢 #1 收斂與免費 LLM 區的重複）。
 
                     呼叫方已通過 _pick_engine 守衛（下拉 handler／.tex 自動鎖定／
                     機密自動切 DeepSeek）。_pick_engine 的 ring 迴圈跑在換 key 前
-                    （eid 不在 dict 不會加 ring）——單卡高亮在此手動補；灰化同步
-                    重算（舊引擎無 key、新引擎有 key 時卡不該停留灰色）。
-                    set_value 不觸發 on_value_change handler（NiceGUI 實證）——
-                    同步下拉顯示不會造成遞迴。"""
+                    （eid 不在 dict 不會加 ring）——單卡高亮在此手動補（_swap）。
+                    順序關鍵（2026-08-13 實證）：paid_key_eid 必須先更新再 set_value
+                    ——set_value 會觸發 on_value_change handler（重入），handler
+                    見同 eid 早退才無害；反之 handler 走完整守衛（無 key 的
+                    deepseek 被 key 守衛擋）→ 復原下拉值覆寫同步（真實 bug：
+                    機密勾選後下拉與卡片不一致）。"""
                     nonlocal paid_key_eid
                     if eid == paid_key_eid:
                         return
-                    engine_cards.pop(paid_key_eid, None)
-                    paid_key_eid = eid
-                    engine_cards[eid] = paid_key_card
+                    old_eid = paid_key_eid
+                    paid_key_eid = eid  # 先更新：set_value 重入的 handler 見同 eid 早退
                     paid_key_select.set_value(eid)  # 同步下拉顯示（機密/.tex 自動切換）
-                    _render_paid_key_card()
-                    disabled = _card_disabled(eid)
-                    paid_key_card.classes(
-                        remove="ring-2 ring-primary"
-                        + ("" if disabled else " pk-engine-card--disabled"),
-                        add="ring-2 ring-primary"
-                        + (" pk-engine-card--disabled" if disabled else ""),
+                    _swap_single_engine_card(
+                        engine_cards, paid_key_card, paid_key_body,
+                        old_eid, eid, disabled=_card_disabled(eid),
                     )
 
                 def _on_paid_key_select(e) -> None:
@@ -1744,27 +1767,14 @@ def _index_page(
                 ) as free_key_card:
                     free_key_body = ui.column().classes("gap-1 w-full")
 
-                def _render_free_key_card() -> None:
-                    """重建單卡內容（下拉換引擎時）——label／ⓘ／desc 對應目前引擎。"""
-                    spec = ENGINE_SPECS[free_key_eid]
-                    free_key_body.clear()
-                    with free_key_body:
-                        with ui.row().classes("items-center justify-between w-full"):
-                            ui.label(spec.label).classes("font-semibold text-sm")
-                            ui.icon("help_outline").props("size=16px").classes(
-                                "text-grey-5"
-                            ).mark(f"info-engine-{free_key_eid}").tooltip(spec.info)
-                        ui.label(spec.card_desc).classes(
-                            "text-xs text-grey-7 pk-engine-desc"
-                        )
-
-                _render_free_key_card()
+                _render_single_engine_card(free_key_body, free_key_eid)
                 engine_cards[free_key_eid] = free_key_card
                 free_key_card.on("click", lambda: _pick_engine(free_key_eid))
 
                 def _on_free_key_select(e) -> None:
                     """下拉換引擎＝挑選引擎（同點卡語意）。被機密／key 守衛擋下時
-                    復原下拉值（widget 不回滾，手動復原）。"""
+                    復原下拉值（widget 不回滾，手動復原）。切換共用
+                    _swap_single_engine_card（付費區同款——架構健檢 #1 收斂）。"""
                     nonlocal free_key_eid
                     eid = e.value
                     if eid == free_key_eid:
@@ -1772,19 +1782,11 @@ def _index_page(
                     if not _pick_engine(eid):  # 守衛擋下（機密/key）→ 復原
                         free_key_select.set_value(free_key_eid)
                         return
-                    engine_cards.pop(free_key_eid, None)  # 換 key：ring/禁用迴圈照新 id
-                    free_key_eid = eid
-                    engine_cards[eid] = free_key_card
-                    _render_free_key_card()
-                    # _pick_engine 的 ring 迴圈跑在換 key 前，單卡高亮手動補；
-                    # 灰化同步重算（舊引擎無 key、新引擎有 key 時卡不該停留灰色）
-                    disabled = _card_disabled(eid)
-                    free_key_card.classes(
-                        remove="ring-2 ring-primary"
-                        + ("" if disabled else " pk-engine-card--disabled"),
-                        add="ring-2 ring-primary"
-                        + (" pk-engine-card--disabled" if disabled else ""),
+                    _swap_single_engine_card(
+                        engine_cards, free_key_card, free_key_body,
+                        free_key_eid, eid, disabled=_card_disabled(eid),
                     )
+                    free_key_eid = eid
 
                 free_key_select.on_value_change(_on_free_key_select)
 
@@ -1801,11 +1803,10 @@ def _index_page(
                     _set_paid_card("deepseek")  # 單卡化後：付費單卡同步顯示可用引擎
                 for cid, card in engine_cards.items():
                     # 2026-08-13（使用者要求）：統一判定（機密＋key）——取消機密
-                    # 只解除機密層；無 key 的付費卡仍灰（_card_disabled 同源）
-                    disabled = (
-                        (value and not ENGINE_SPECS[cid].sensitive_ok)
-                        or (ENGINE_SPECS[cid].needs_key and not _has_key(cid))
-                    )
+                    # 只解除機密層；無 key 的付費卡仍灰。規則收斂 registry
+                    # （架構健檢 #1+2+8）：can_select＝sensitive_blocked＋spec_has_key
+                    # ——與 _card_disabled／_pick_engine 同源（取消機密不解錯灰化）。
+                    disabled = not can_select(cid, value, settings.api_key)
                     card.classes(
                         remove=("pk-engine-card--disabled" if not disabled else ""),
                         add=("pk-engine-card--disabled" if disabled else ""),
@@ -1985,7 +1986,7 @@ def _index_page(
                         label="頁面範圍（上傳後可選）",
                     ).classes("flex-1")
                     range_counter = ui.label("已選 0 of 0 頁").classes("text-xs text-grey-7")
-                only_selected_input = ui.checkbox("☑ 僅翻譯選中頁面（未選頁原樣保留）", value=True)
+                only_selected_input = ui.checkbox("僅翻譯選中頁面（未選頁原樣保留）", value=True)
                 # #85 切片C：babeldoc 進階選項——僅 babeldoc 引擎消費（點卡才顯示；
                 # 設定頁 global 引擎＝babeldoc 時初始即顯示）
                 advanced_box = ui.column().mark("babeldoc-advanced").classes("gap-1 w-full")

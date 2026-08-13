@@ -9,6 +9,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Callable
 
 from paper_kit.infrastructure.babeldoc_adapter import (
     BabelDocAdapter,
@@ -358,3 +359,46 @@ def build_engine(
         requires_key=spec.needs_key,  # 2026-08-13：免費引擎（needs_key=False）translate 守衛放行
     )
     return Pdf2zhNextAdapter(cfg)
+
+
+# ── 架構健檢 #1+2+8（2026-08-13）：引擎挑選規則收斂 registry ──
+# 動機：機密紅線（sensitive_ok×5）與 key 存在判定（needs_key×4＋latex 槽位沿用）
+# 散落 presentation——app.py 五處各自重算（_pick_engine／_card_disabled／
+# _has_key／_on_sensitive_change／_resolve_task_engine），新增引擎要同步改五處。
+# 收斂後：加引擎＝改此檔單點（規格＋規則同處），UI 只呼叫、訊息留在 UI 呼叫方。
+# api_key 以 Callable[[str], str] 注入（settings.api_key 直接符合）——registry
+# 不 import application（infrastructure 層立場不顛倒）。
+
+
+def sensitive_blocked(eid: str, sensitive: bool) -> bool:
+    """機密模式紅線（票 10）：sensitive 且引擎不支援機密 → 不可選。
+
+    未知引擎 KeyError（fail-fast——UI 只從 registry 選，未知 eid＝程式 bug）。"""
+    spec = ENGINE_SPECS[eid]
+    return sensitive and not spec.sensitive_ok
+
+
+def resolve_key(eid: str, api_key: Callable[[str], str]) -> str:
+    """有效 key 值（單點）：latex 未獨立填時沿用 deepseek 槽位（票 27——
+    同後端同 key）。spec_has_key 與 presentation 的 build_engine 取 key 都從此派生，
+    槽位沿用字串只在此一次。未知引擎 KeyError（fail-fast）。"""
+    if eid not in ENGINE_SPECS:
+        raise KeyError(eid)
+    if eid == "latex":
+        return api_key("latex") or api_key("deepseek") or ""  # None 正規化（回 str）
+    return api_key(eid) or ""
+
+
+def spec_has_key(eid: str, api_key: Callable[[str], str]) -> bool:
+    """key 存在判定（單點）：keyless 引擎免查（永遠可選）；needs_key 引擎查
+    有效 key（resolve_key——含 latex 槽位沿用）。未知引擎 KeyError（fail-fast）。"""
+    spec = ENGINE_SPECS[eid]
+    if not spec.needs_key:
+        return True
+    return bool(resolve_key(eid, api_key))
+
+
+def can_select(eid: str, sensitive: bool, api_key: Callable[[str], str]) -> bool:
+    """引擎可選判定（灰化用）：機密紅線先、key 後——與 _pick_engine 守衛同源
+    （守衛分開報訊息所以自己重算；灰化只需合併答案）。"""
+    return not sensitive_blocked(eid, sensitive) and spec_has_key(eid, api_key)

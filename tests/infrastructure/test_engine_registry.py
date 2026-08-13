@@ -352,3 +352,96 @@ def test_paid_engines_carry_official_pricing():
     assert ENGINE_SPECS["gemini-pro"].pricing == (
         Decimal("0.002"), Decimal("0.012"), 5000,
     ), "Gemini 3 Pro：$2.00/M in、$12.00/M out"
+
+
+# ── 架構健檢 #1+2+8（2026-08-13）：引擎挑選規則收斂 registry ──
+# 動機：機密紅線（sensitive_ok×5）與 key 存在判定（needs_key×4＋latex 槽位沿用）
+# 散落 presentation——app.py 五處各自重算，新增引擎要同步改五處；規則單點化後
+# 加引擎＝改 registry（規格＋規則同處），UI 只呼叫。
+# 四純函式：sensitive_blocked（機密紅線）、resolve_key（有效 key 值——latex
+# 槽位沿用單點）、spec_has_key（判存在）、can_select（灰化組合）。
+
+
+def test_sensitive_blocked_redline():
+    """機密紅線（票 10）：sensitive 且引擎不支援機密 → 不可選。"""
+    from paper_kit.infrastructure.engine_registry import sensitive_blocked
+
+    assert sensitive_blocked("siliconflow", True) is True    # 視覺引擎：機密不可用
+    assert sensitive_blocked("deepseek", True) is False      # 純文字：機密可用
+    assert sensitive_blocked("openai", True) is False        # 付費不訓練：機密可用
+    assert sensitive_blocked("siliconflow", False) is False  # 非機密：不擋
+
+
+def test_sensitive_blocked_unknown_engine_raises():
+    """未知引擎 fail-fast（與 presentation 舊行為一致——UI 只從 registry 選）。"""
+    from paper_kit.infrastructure.engine_registry import sensitive_blocked
+
+    with pytest.raises(KeyError):
+        sensitive_blocked("nope", True)
+
+
+def test_resolve_key_latex_prefers_own_slot():
+    """票 27：latex 獨立填 key 時優先自己的槽位。"""
+    from paper_kit.infrastructure.engine_registry import resolve_key
+
+    keys = {"latex": "L-KEY", "deepseek": "DS-KEY"}
+    assert resolve_key("latex", keys.get) == "L-KEY"
+
+
+def test_resolve_key_latex_falls_back_to_deepseek_slot():
+    """票 27：latex 未獨立填時沿用 deepseek 槽位（同後端同 key）。"""
+    from paper_kit.infrastructure.engine_registry import resolve_key
+
+    keys = {"deepseek": "DS-KEY"}
+    assert resolve_key("latex", keys.get) == "DS-KEY"
+    assert resolve_key("latex", {}.get) == ""  # 兩槽皆空
+
+
+def test_resolve_key_unknown_engine_raises():
+    from paper_kit.infrastructure.engine_registry import resolve_key
+
+    with pytest.raises(KeyError):
+        resolve_key("nope", {}.get)
+
+
+def test_spec_has_key_keyless_engines_always_true():
+    """免 key 引擎（google/bing/siliconflowfree）：不查 key 永遠有 key。"""
+    from paper_kit.infrastructure.engine_registry import spec_has_key
+
+    for eid in ("google", "bing", "siliconflowfree"):
+        assert spec_has_key(eid, {}.get) is True, f"{eid} 免 key 引擎不該擋"
+
+
+def test_spec_has_key_needs_key_engine_checks_own_slot():
+    from paper_kit.infrastructure.engine_registry import spec_has_key
+
+    assert spec_has_key("siliconflow", {"siliconflow": "SF-KEY"}.get) is True
+    assert spec_has_key("siliconflow", {}.get) is False
+
+
+def test_spec_has_key_latex_uses_resolve_key():
+    """latex 判存在＝resolve_key（槽位沿用單點）——特例字串不在 UI 重複。"""
+    from paper_kit.infrastructure.engine_registry import spec_has_key
+
+    assert spec_has_key("latex", {"deepseek": "DS-KEY"}.get) is True
+    assert spec_has_key("latex", {}.get) is False
+
+
+def test_spec_has_key_unknown_engine_raises():
+    from paper_kit.infrastructure.engine_registry import spec_has_key
+
+    with pytest.raises(KeyError):
+        spec_has_key("nope", {}.get)
+
+
+def test_can_select_combines_sensitive_and_key():
+    """灰化判定＝機密紅線先、key 後（與 _pick_engine 守衛同源，象限全驗）。"""
+    from paper_kit.infrastructure.engine_registry import can_select
+
+    keys = {"siliconflow": "SF-KEY", "deepseek": "DS-KEY"}
+    # 機密檔：視覺引擎有 key 也擋；deepseek 有 key 可選
+    assert can_select("siliconflow", True, keys.get) is False
+    assert can_select("deepseek", True, keys.get) is True
+    # 一般檔：siliconflow 有 key 可選、無 key 不可選
+    assert can_select("siliconflow", False, keys.get) is True
+    assert can_select("siliconflow", False, {}.get) is False
