@@ -85,7 +85,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # -R 明確指定 repo：本 job 無 checkout（只有 download-artifact），
+          # gh 靠 git 解析 repo 會報 "not a git repository"（CI 實測 2026-08-14）
           gh release create "${TAG}" artifacts/*.zip \
             --title "Paper_Kit ${TAG#v}" \
             --notes "見 zip 內 README-使用手冊.md；詳細更新說明另以 Release 描述補全。" \
-          || gh release upload "${TAG}" artifacts/*.zip --clobber
+            -R "${GITHUB_REPOSITORY}" \
+          || gh release upload "${TAG}" artifacts/*.zip --clobber -R "${GITHUB_REPOSITORY}"
