@@ -164,3 +164,102 @@ async def test_clear_key_button_empties_key(tmp_path):
         # 時任何值都過防遮罩判斷），key 損毀且不可復原
         assert babeldoc_input.value == "", "清除後 input 顯示值應為空"
 
+
+
+# ── 票 25：設定頁翻譯快取區（開關＋統計＋清除） ───────────────
+
+
+def _cache_toggle(user) -> ui.switch:
+    """「啟用翻譯快取」開關（label 過濾——設定頁有多個 switch）。"""
+    return next(
+        iter(s for s in user.find(ui.switch).elements if "啟用翻譯快取" in (s.text or ""))
+    )
+
+
+def _build_settings(tmp_path):
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+    return settings, cost, glossaries
+
+
+@pytest.mark.asyncio
+async def test_settings_page_cache_section_renders(tmp_path):
+    """票 25：設定頁有「翻譯快取」卡（啟用開關＋統計＋清除按鈕）。"""
+    from paper_kit.application.translation_cache import TranslationCache
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+    cache = TranslationCache(tmp_path / "cache")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries, cache)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        await user.should_see("翻譯快取")
+        await user.should_see("啟用翻譯快取")
+        await user.should_see("清除快取")
+
+
+@pytest.mark.asyncio
+async def test_cache_toggle_updates_setting_and_runtime(tmp_path):
+    """票 25：切「啟用翻譯快取」開關 → settings.cache_enabled 更新＋cache.enabled 即時生效。"""
+    from paper_kit.application.translation_cache import TranslationCache
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+    cache = TranslationCache(tmp_path / "cache")
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries, cache)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        _cache_toggle(user).set_value(False)
+        assert settings.cache_enabled() is False, "開關應寫回設定（持久化）"
+        assert cache.enabled is False, "開關應即時同步 runtime cache（不需重啟）"
+        _cache_toggle(user).set_value(True)
+        assert settings.cache_enabled() is True
+        assert cache.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_cache_stats_shown(tmp_path):
+    """票 25：統計顯示「快取 N 筆 · X MB」（檔案掃描實算）。"""
+    from paper_kit.application.translation_cache import TranslationCache
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+    cache = TranslationCache(tmp_path / "cache")
+    # 兩筆快取：mono 檔各 10KB（放得進 stats 的檔案掃描）
+    for i in range(2):
+        f = tmp_path / f"m{i}.pdf"
+        f.write_bytes(b"x" * 10240)
+        cache.put(f"fp{i}", str(f), None)
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries, cache)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        await user.should_see("快取 2 筆", retries=20)
+
+
+@pytest.mark.asyncio
+async def test_clear_cache_button_clears(tmp_path):
+    """票 25：「清除快取」→ 快取檔刪除、統計歸零。"""
+    from paper_kit.application.translation_cache import TranslationCache
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+    cache = TranslationCache(tmp_path / "cache")
+    f = tmp_path / "m.pdf"
+    f.write_bytes(b"x" * 1024)
+    cache.put("fp", str(f), None)
+    assert cache.stats()[0] == 1
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries, cache)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        user.find("清除快取").click()
+        await user.should_see("快取已清除", retries=20)
+        assert cache.stats() == (0, 0), "清除後快取應歸零"

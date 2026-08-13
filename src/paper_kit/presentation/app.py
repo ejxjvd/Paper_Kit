@@ -31,6 +31,7 @@ from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
 from paper_kit.application.pages import parse_pages
 from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.application.settings_service import SettingsService
+from paper_kit.application.translation_cache import TranslationCache  # 票 25：設定頁快取區
 from paper_kit.domain.translation_job import InvalidTransition, JobStatus, TranslationJob
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
@@ -547,8 +548,17 @@ def _clear_engine_key(settings: SettingsService, eid: str, key_input) -> None:
     return clear
 
 
+def _cache_stats_label(cache: TranslationCache) -> str:
+    """「快取 N 筆 · X MB」；stats() 排除索引 DB，只算實際產物。"""
+    count, total = cache.stats()
+    return f"快取 {count} 筆 · {total / (1024 * 1024):.1f} MB"
+
+
 def _settings_page(
-    settings: SettingsService, cost: CostService, glossaries: GlossaryService
+    settings: SettingsService,
+    cost: CostService,
+    glossaries: GlossaryService,
+    cache: TranslationCache | None = None,  # 票 25：快取區（None＝無頭模式不渲染）
 ) -> None:
     @ui.page("/settings")
     def settings_page():
@@ -714,6 +724,38 @@ def _settings_page(
                         "新增術語列",
                         on_click=lambda: _add_entry(
                             glossaries, edit_select.value, src_input, tgt_input, entries_box
+                        ),
+                    ).props("outline")
+            # 票 25：翻譯快取區（開關＋統計＋清除）——cache 未注入（無頭）就不渲染
+            if cache is not None:
+                with ui.card().classes("w-full"):
+                    ui.label("翻譯快取").classes("font-bold")
+                    ui.label(
+                        "票 24：同一檔案＋引擎＋設定再次翻譯＝直接回傳快取結果（省錢不花錢）"
+                    ).classes("text-xs text-grey-6")
+                    cache_stats_label = ui.label(_cache_stats_label(cache)).classes(
+                        "text-sm text-grey-7"
+                    )
+
+                    def _refresh_cache_stats() -> None:
+                        cache_stats_label.set_text(_cache_stats_label(cache))
+
+                    def _toggle_cache(e) -> None:
+                        # 開關即時生效：runtime cache.enabled＋持久化（JobService
+                        # 每任務查 fingerprint 前檢查 enabled——不需重啟）
+                        cache.enabled = bool(e.value)
+                        settings.set_cache_enabled(bool(e.value))
+
+                    ui.switch(
+                        "啟用翻譯快取",
+                        value=cache.enabled,
+                    ).on_value_change(_toggle_cache)
+                    ui.button(
+                        "清除快取",
+                        on_click=lambda: (
+                            cache.clear(),
+                            _refresh_cache_stats(),
+                            ui.notify("快取已清除", type="positive"),
                         ),
                     ).props("outline")
 
@@ -1203,17 +1245,20 @@ def main() -> None:
     repo = SqliteSettingsRepository(DB_PATH)
     # 票 08：SQLite 任務歷史——重啟 app 後任務仍在（InMemory 只留給無頭執行）
     # 票 12：注入 OcrService（RapidOCR 本機引擎）——掃描件預處理用
+    settings = SettingsService(repo)
+    # 票 24/25：翻譯快取——main() 組裝並注入 JobService 與設定頁（enabled 依設定頁開關即時同步）
+    cache = TranslationCache(APP_DIR / "cache", enabled=settings.cache_enabled())
     service = JobService(
         jobs=SqliteJobRepository(DB_PATH),
         outputs_dir=OUTPUTS_DIR,
         ocr=OcrService(RapidOcrAdapter()),
+        cache=cache,
     )
-    settings = SettingsService(repo)
     cost = CostService(repo)
     glossaries = GlossaryService(GlossaryRepository(GLOSSARIES_DIR))
 
     _index_page(service, settings, cost, glossaries)
-    _settings_page(settings, cost, glossaries)
+    _settings_page(settings, cost, glossaries, cache)
     _history_page(service, settings)
     register_batch_download_route(service)  # 票 18：批量下載 zip 路由
     _debug_page(LOG_PATH, settings)

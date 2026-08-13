@@ -88,3 +88,12 @@ class SettingsService:
 
     def set_dark_mode(self, on: bool) -> None:
         self._repo.set("dark_mode", "1" if on else "0")
+
+    # ── 票 25：翻譯快取開關 ────────────────────────────────────
+
+    def cache_enabled(self) -> bool:
+        """快取開關（JobService._fingerprint 檢查 cache.enabled；預設開——優化不預設關）。"""
+        return (self._repo.get("cache_enabled", "1") or "1") == "1"
+
+    def set_cache_enabled(self, on: bool) -> None:
+        self._repo.set("cache_enabled", "1" if on else "0")

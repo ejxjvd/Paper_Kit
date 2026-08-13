@@ -141,3 +141,21 @@ def test_dark_mode_roundtrip_and_survives_restart(tmp_path):
 
     restarted = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))  # 重啟
     assert restarted.dark_mode() is False
+
+
+# ── 票 25：翻譯快取開關 ────────────────────────────────────
+
+
+def test_cache_enabled_defaults_true(tmp_path):
+    """票 25：快取開關預設開（優化不預設關閉）。"""
+    svc = make_service(tmp_path)
+    assert svc.cache_enabled() is True
+
+
+def test_cache_enabled_toggle_roundtrip(tmp_path):
+    svc = make_service(tmp_path)
+    svc.set_cache_enabled(False)
+    assert svc.cache_enabled() is False
+
+    restarted = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))  # 重啟
+    assert restarted.cache_enabled() is False
