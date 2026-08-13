@@ -29,8 +29,8 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 
 | 平台 | 檔案 | 說明 |
 |---|---|---|
-| Windows x64 | `paper-kit-v0.1.2-win-x64.zip` | 解壓 → 雙擊 `paper-kit-v0.1.2.exe` |
-| macOS（Apple 晶片） | `paper-kit-v0.1.2-macos-arm64.zip` | 解壓 → 右鍵 exe →「開啟」（繞過 Gatekeeper） |
+| Windows x64 | `paper-kit-v0.1.4-win-x64.zip` | 解壓 → 雙擊 `paper-kit-v0.1.4.exe` |
+| macOS（Apple 晶片） | `paper-kit-v0.1.4-macos-arm64.zip` | 解壓 → 右鍵 exe →「開啟」（繞過 Gatekeeper） |
 
 瀏覽器自動開啟 http://localhost:8080/。自包含免安裝（內建 Python runtime＋全部依賴），操作說明見資料夾內 `README-使用手冊.md`。
 **首次使用需連網**：第一次選用需要外部引擎的翻譯路線時自動下載所需工具（uv）與引擎；之後離線可重複使用。
@@ -79,8 +79,8 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 
 ## 📊 狀態
 
-票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #3／#1+2+8＋v0.1.3（NVIDIA EOL 修復＋引擎模型挑選＋NIM 節流）——**675 tests passed**
-（2026-08-14）；冒煙全綠。**v0.1.3 已發布**（免安裝 exe 版：portable 資料跟程式走＋`--uninstall` 乾淨卸載＋AES 加密 PDF 修復＋NVIDIA 模型下拉挑選＋40 RPM 節流，見 [Releases](https://github.com/ejxjvd/Paper_Kit/releases)）。後續工作以 GitHub issues 追蹤。
+票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #3／#1+2+8＋v0.1.3（NVIDIA EOL 修復＋引擎模型挑選＋NIM 節流）＋v0.1.4（NIM 節流 `--qps` 型別修復）——**675 tests passed**
+（2026-08-14）；冒煙全綠。**v0.1.4 已發布**（免安裝 exe 版：portable 資料跟程式走＋`--uninstall` 乾淨卸載＋AES 加密 PDF 修復＋NVIDIA 模型下拉挑選＋40 RPM 節流，見 [Releases](https://github.com/ejxjvd/Paper_Kit/releases)）。後續工作以 GitHub issues 追蹤。
 
 ## 🙏 致謝
 

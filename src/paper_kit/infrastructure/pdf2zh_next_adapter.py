@@ -44,8 +44,10 @@ class EngineConfig:
     requires_key: bool = True
     base_url: str = DEFAULT_BASE_URL        # SiliconFlow 國際站
     # v0.1.3（NIM 限制情報 2026-08-14）：免費層速率防火牆 40 RPM／並發 2-5 → 503。
-    # spec.qps/spec.max_workers 帶入（nvidia 0.6/1）；None＝不帶旗標（引擎預設）
-    qps: float | None = None
+    # spec.qps/spec.max_workers 帶入（nvidia 1/1）；None＝不帶旗標（引擎預設）。
+    # ⚠️ CLI 契約（v0.1.4 實測教訓）：pdf2zh_next --qps 為 int（argparse type=int）——
+    # float 直接 "invalid int value" 退出；qps 必須 int（節流靠 pool 1 串行）。
+    qps: int | None = None
     max_workers: int | None = None
     retries: int = 2                        # 暫時性錯誤重試次數
     # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
@@ -86,8 +88,9 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
         # 免費引擎：旗標名＝provider（--google／--bing／--siliconflowfree），不需 key
         cmd += [f"--{cfg.provider}"]
     # v0.1.3（NIM 40 RPM／並發 2-5 限制，2026-08-14 使用者情報）：spec 內建節流——
-    # --qps 0.6＝每 1.67 秒一發＝36 RPM 留餘裕；--pool-max-workers 1＝不併發
-    # （pdf2zh 預設併發會瞬間踩爆 40 RPM 拿 429）。其他引擎 None＝不帶、用引擎預設。
+    # --qps 1（每秒 1 請求上限）＋--pool-max-workers 1＝不併發（pdf2zh 預設併發
+    # 會瞬間踩爆 40 RPM 拿 429）；實際速率由每個 LLM 請求生成時間（數秒～數十秒）
+    # 自然限制，遠低於 40 RPM。其他引擎 None＝不帶、用引擎預設。
     if cfg.qps:
         cmd += ["--qps", str(cfg.qps)]
     if cfg.max_workers:

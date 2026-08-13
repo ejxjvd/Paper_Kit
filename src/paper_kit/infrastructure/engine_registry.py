@@ -55,7 +55,9 @@ class EngineSpec:
     info: str = ""        # P3：主頁卡 ⓘ tooltip 長敘述（hover 顯示引擎差異）
     # v0.1.3（2026-08-14 NIM 限制情報）：免費層速率防火牆（40 RPM／並發 2-5 → 503）。
     # nvidia 內建節流（--qps/--pool-max-workers）；其他引擎 None＝不帶旗標。
-    qps: float | None = None
+    # ⚠️ CLI 契約（v0.1.4 實測教訓）：pdf2zh_next --qps 為 int（argparse type=int），
+    # float 直接報 "invalid int value"——節流以 int qps（上限）＋ pool 1（串行）組合。
+    qps: int | None = None
     max_workers: int | None = None
 
 
@@ -215,9 +217,11 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://integrate.api.nvidia.com/v1",
         # v0.1.3（2026-08-14 使用者提供限制情報）：免費層 40 RPM／並發 2-5 →
-        # 503 排隊。qps 0.6＝每 1.67 秒一發＝36 RPM 留餘裕；worker 1＝不併發
-        # （pdf2zh 預設併發瞬間踩爆 40 RPM 拿 429）。
-        qps=0.6,
+        # 503 排隊。v0.1.4（2026-08-14 使用者實測抓 bug）：pdf2zh_next --qps 是
+        # int（argparse type=int），0.6 直接報 "invalid int value"——qps 改 int 1
+        # （每秒 1 請求＝60 RPM 上限）；真正節流＝pool 1 串行——每個 LLM 請求間隔
+        # = 生成時間（數秒～數十秒）≫ 1.5 秒，實際遠低於 40 RPM 不會踩 429。
+        qps=1,
         max_workers=1,
         card_desc="Nemotron-3-Super-120B 免費（MT 榜首；40 RPM、無日總量）",
         info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：Nemotron-3-Super-120B"

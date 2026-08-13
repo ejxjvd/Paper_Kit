@@ -612,12 +612,19 @@ def test_timeout_log_error_chain_redacts_api_key(tmp_path):
 
 def test_build_command_nim_throttling_flags_when_spec_configured():
     """v0.1.3（NIM 40 RPM／並發 2-5 限制，2026-08-14 使用者情報）：spec 內建
-    節流——--qps 0.6（每 1.67 秒一發＝36 RPM 留餘裕）＋--pool-max-workers 1
-    （pdf2zh 預設併發會瞬間踩爆 40 RPM 拿 429）。"""
-    cfg = EngineConfig(provider="openai", api_key="nvapi-x", qps=0.6, max_workers=1)
+    節流——--qps 1（每秒 1 請求上限）＋--pool-max-workers 1（不併發）。
+    v0.1.4（2026-08-14 使用者實測抓 bug）：pdf2zh_next --qps 是 int（argparse
+    type=int）——float 0.6 直接 "invalid int value" 退出；本測試模擬 argparse
+    int 契約：旗標值必須能 int()（float 字串會 AssertionError 而非靜默通過）。"""
+    cfg = EngineConfig(provider="openai", api_key="nvapi-x", qps=1, max_workers=1)
     cmd = build_command(make_job(), cfg)
-    assert cmd[cmd.index("--qps") + 1] == "0.6"
-    assert cmd[cmd.index("--pool-max-workers") + 1] == "1"
+    qps_val = cmd[cmd.index("--qps") + 1]
+    workers_val = cmd[cmd.index("--pool-max-workers") + 1]
+    # argparse type=int 契約：int() 失敗 = 真實 CLI 會以 "invalid int value" 退出
+    int(qps_val)
+    int(workers_val)
+    assert qps_val == "1"
+    assert workers_val == "1"
 
 
 def test_build_command_no_throttling_flags_by_default():
