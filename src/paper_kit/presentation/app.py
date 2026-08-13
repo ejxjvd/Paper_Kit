@@ -1199,6 +1199,7 @@ def _debug_page(log_path: Path, settings: SettingsService) -> None:
 def _history_page(
     service: JobService,
     settings: SettingsService,
+    cost: CostService | None = None,  # #26：金額欄（實際成本）；None → 顯示 "—"
     engine_labels: dict[str, str] | None = None,
 ) -> None:
     """票 17：任務歷史表格頁——表格化＋分頁（每頁 10）＋引擎欄＋空狀態。
@@ -1217,7 +1218,9 @@ def _history_page(
         # 票 16：統一頁框——側欄（歷史 active）
         nav = [(l, p, _nav_active(p, "/history")) for l, p in SIDEBAR_NAV]
         app_frame("📚 翻譯歷史", settings, nav)
-        with ui.column().classes("w-full max-w-5xl mx-auto p-6 gap-4"):
+        # #24：歷史頁寬度填滿左右（使用者明定「歷史頁的文件才應該填滿左右，
+        # 而不是用左右橫向條」）——max-w-5xl 造成 1920 螢幕左右大留白、表格被擠
+        with ui.column().classes("w-full p-6 gap-4"):
             jobs = service.list_jobs()
             if not jobs:
                 # 票 17 AC：空歷史提示＋「翻譯新文件」快捷入口（→ 主頁）
@@ -1230,11 +1233,15 @@ def _history_page(
                 {"name": "created", "label": "創建時間", "field": "created_label", "align": "left"},
                 {"name": "pages", "label": "頁數", "field": "pages_label", "align": "left"},
                 {"name": "engine", "label": "引擎", "field": "engine_label", "align": "left"},
+                # #26：tokens 用量（in/out 兩種）＋金額花費欄（使用者要求；
+                # 多引擎如 BabelDOC 顯示 in/out 兩種用量）
+                {"name": "tokens", "label": "tokens 用量", "field": "tokens_label", "align": "left"},
+                {"name": "cost", "label": "金額", "field": "cost_label", "align": "left"},
                 {"name": "cache", "label": "來源", "field": "cache_label", "align": "left"},
                 {"name": "status", "label": "狀態", "field": "status_label", "align": "left"},
                 {"name": "actions", "label": "操作", "field": "actions", "align": "left"},
             ]
-            rows = _history_rows(service, engine_map)
+            rows = _history_rows(service, engine_map, cost)
             # 票 18：selection='multiple' → Quasar 內建勾選欄＋全選；
             # row_key 指向 job_id（row dict 由 _history_row 提供）
             table = ui.table(
@@ -1269,8 +1276,9 @@ def _history_page(
             # ── 票 18：批量操作工具列（勾選後操作；刪除二次確認） ──
 
             def _refresh_rows() -> None:
-                """批量操作後重繪表格（選取清空）。"""
-                table.rows = _history_rows(service, engine_map)
+                """批量操作後重繪表格（選取清空）。#26：重繪必須帶 cost——否則
+                操作後金額欄回退 "—"，與初次渲染不一致。"""
+                table.rows = _history_rows(service, engine_map, cost)
                 table.selected = []
 
             def _require_selection() -> list[str] | None:
@@ -1368,17 +1376,50 @@ def register_batch_download_route(service: JobService) -> None:
         )
 
 
-def _history_rows(service: JobService, engine_map: dict[str, str]) -> list[dict]:
+def _history_rows(
+    service: JobService, engine_map: dict[str, str], cost: CostService | None = None
+) -> list[dict]:
     """票 18：歷史表格列資料一處建構（initial 與 _refresh_rows 共用，免重複）。"""
     return [
         _history_row(
-            build_job_card(job, files_base=FILES_BASE, engine_labels=engine_map)
+            build_job_card(job, files_base=FILES_BASE, engine_labels=engine_map),
+            job,
+            cost,
         )
         for job in service.list_jobs()
     ]
 
 
-def _history_row(view: JobCardView) -> dict:
+def _tokens_label(job: TranslationJob) -> str:
+    """#26：歷史表 tokens 用量欄——「in 5,682 / out 1,751」（千分位）。
+
+    使用者要求「額度 tokens 用量（若是多個模型如 BabelDOC 則要顯示 2 種）」——
+    輸入/輸出兩種用量。未完成／無用量 → "—"。
+    """
+    result = job.result
+    if not result or not (result.input_tokens or result.output_tokens):
+        return "—"
+    return f"in {result.input_tokens:,} / out {result.output_tokens:,}"
+
+
+def _cost_label(job: TranslationJob, cost: CostService | None) -> str:
+    """#26：歷史表金額欄——實際成本 NT$（actual 為準，與卡片 usage_label 同源）。
+
+    不可算（無 cost service／無用量／引擎未知／估算例外）→ "—"，不誤導為免費。
+    """
+    result = job.result
+    if cost is None or not result or not (result.input_tokens or result.output_tokens):
+        return "—"
+    if not job.engine_id:
+        return "—"
+    try:
+        actual = cost.actual(job, job.engine_id)
+    except Exception:
+        return "—"
+    return f"NT${cost.twd(actual.cost):.2f}"
+
+
+def _history_row(view: JobCardView, job: TranslationJob, cost: CostService | None = None) -> dict:
     """歷史表格列資料——只挑 JSON-safe 欄位（票 17；enum 不序列化）。"""
     return {
         "job_id": view.job_id,  # 票 18：row_key（勾選回傳可對映回任務）
@@ -1387,6 +1428,8 @@ def _history_row(view: JobCardView) -> dict:
         "pages_label": view.pages_label,
         "pages_raw": view.pages_raw,  # #27：原始選取頁碼（hover title）
         "engine_label": view.engine_label or "",
+        "tokens_label": _tokens_label(job),  # #26：in/out 用量
+        "cost_label": _cost_label(job, cost),  # #26：實際金額
         "cache_label": "⚡ 快取" if view.from_cache else "—",  # 票 26：來源欄
         "status_label": view.status_label,
         "status_color": BADGE_COLORS[view.status],
@@ -1417,7 +1460,7 @@ def main() -> None:
 
     _index_page(service, settings, cost, glossaries)
     _settings_page(settings, cost, glossaries, cache)
-    _history_page(service, settings)
+    _history_page(service, settings, cost)  # #26：歷史表金額欄需要 CostService
     register_batch_download_route(service)  # 票 18：批量下載 zip 路由
     _debug_page(LOG_PATH, settings)
     ui.run(title="Paper_Kit 論文翻譯器", reload=False)

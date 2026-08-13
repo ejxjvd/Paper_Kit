@@ -272,3 +272,93 @@ def test_batch_download_zip_tempfile_removed_after_send(tmp_path):
 
     leftovers = list(Path(tempfile.gettempdir()).glob("paper-kit-mono-*.zip"))
     assert leftovers == [], f"送完應刪暫存 zip，殘留 {leftovers}"
+
+
+# ── #24/#26：寬度填滿＋tokens 用量／金額欄 ──────────────────────────
+
+
+def _seed_with_usage(service: JobService, tmp_path) -> str:
+    """建 1 筆完成任務（siliconflow 引擎、有 token 用量），回傳 job_id。"""
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    job = service.create_job(
+        pdf, target_lang="zh-TW", pages="29,30", output_dir=tmp_path / "outputs"
+    )
+    job.engine_id = "siliconflow"
+    job.total_pages = 2
+    job.pdf_pages = 58
+    job.status = JobStatus.COMPLETED
+    job.result = JobResult(
+        mono_path="/x/mono.pdf",
+        dual_path="/x/dual.pdf",
+        input_tokens=5682,
+        output_tokens=1751,
+    )
+    return job.job_id
+
+
+@pytest.mark.asyncio
+async def test_history_columns_include_tokens_and_cost(tmp_path):
+    """#26：歷史表格有「tokens 用量」＋「金額」兩欄（使用者要求新增）。"""
+    service, settings = _build(tmp_path)
+    _seed_completed(service, tmp_path, 1)
+
+    async with user_simulation(
+        root=lambda: _history_page(service, settings, CostService(SqliteSettingsRepository(tmp_path / "pk.db")))
+    ) as user:
+        table = await _open_history(user, service, settings)
+        names = [c["name"] for c in table.columns]
+        assert "tokens" in names and "cost" in names
+        assert any(c["name"] == "tokens" and c["label"] == "tokens 用量" for c in table.columns)
+        assert any(c["name"] == "cost" and c["label"] == "金額" for c in table.columns)
+
+
+@pytest.mark.asyncio
+async def test_history_row_shows_tokens_and_cost(tmp_path):
+    """#26：完成任務列顯示 in/out 用量＋實際金額（siliconflow 單價 ×32 匯率）。
+
+    siliconflow in/out 皆 $0.0012/1K：5682×0.0012 + 1751×0.0012 = US$0.00892
+    × 32 = NT$0.285 → 顯示 NT$0.29（2 位小數）。
+    """
+    service, settings = _build(tmp_path)
+    _seed_with_usage(service, tmp_path)
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+
+    async with user_simulation(
+        root=lambda: _history_page(service, settings, cost)
+    ) as user:
+        table = await _open_history(user, service, settings)
+        row = table.rows[0]
+        assert row["tokens_label"] == "in 5,682 / out 1,751"
+        assert row["cost_label"] == "NT$0.29"
+
+
+@pytest.mark.asyncio
+async def test_history_tokens_empty_when_no_usage(tmp_path):
+    """#26：無用量（未完成／0 token）→ 兩欄顯示 "—"，不誤導為免費。"""
+    service, settings = _build(tmp_path)
+    _seed_completed(service, tmp_path, 1)  # _seed_completed 的 result tokens 都是 0
+
+    async with user_simulation(
+        root=lambda: _history_page(service, settings, CostService(SqliteSettingsRepository(tmp_path / "pk.db")))
+    ) as user:
+        table = await _open_history(user, service, settings)
+        assert table.rows[0]["tokens_label"] == "—"
+        assert table.rows[0]["cost_label"] == "—"
+
+
+@pytest.mark.asyncio
+async def test_history_container_spans_full_width(tmp_path):
+    """#24：歷史頁容器不再被 max-w-5xl 限寬（使用者明定「填滿左右」）。"""
+    service, settings = _build(tmp_path)
+    _seed_completed(service, tmp_path, 1)
+
+    async with user_simulation(
+        root=lambda: _history_page(service, settings)
+    ) as user:
+        await _open_history(user, service, settings)
+        columns = [el for el in user.find(ui.column).elements]
+        assert any(
+            "w-full" in el._classes and not any(c.startswith("max-w") for c in el._classes)
+            for el in columns
+        ), "歷史頁應有無 max-w 限制的 w-full 容器"
