@@ -85,8 +85,22 @@ def test_build_engine_model_override_replaces_spec_model():
     spec = ENGINE_SPECS["nvidia"]
     adapter = build_engine(spec, api_key="nvapi-x", model_override="z-ai/glm-5.2")
     assert adapter._config.model == "z-ai/glm-5.2"
-    plain = build_engine(spec, api_key="nvapi-x")
-    assert plain._config.model == spec.model
+
+
+def test_nvidia_spec_inactivity_900_seconds():
+    """#76：NIM 120B 免費端點慢（單頁實測 402s、LLM 單呼叫 ~240s）——
+    inactivity 300s 預設會誤殺（使用者實測「翻譯超時」）；nvidia 設 900s
+    兜底且 build_engine 傳入 EngineConfig。"""
+    spec = ENGINE_SPECS["nvidia"]
+    assert spec.inactivity_seconds == 900
+    adapter = build_engine(spec, api_key="nvapi-x")
+    assert adapter._config.inactivity_seconds == 900
+
+
+def test_build_engine_inactivity_falls_back_to_default():
+    """#76：未設 inactivity 的引擎（siliconflow 等）維持 adapter 預設 300 不變。"""
+    adapter = build_engine(ENGINE_SPECS["siliconflow"], api_key="SF-KEY")
+    assert adapter._config.inactivity_seconds == 300
 
 
 def test_engine_spec_construction_defaults_base_url():

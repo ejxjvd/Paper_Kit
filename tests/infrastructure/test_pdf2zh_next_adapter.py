@@ -79,6 +79,10 @@ def test_uv_falls_back_to_home_local_bin(monkeypatch, tmp_path):
     result = adapter.translate(make_job())
     # 用的絕對路徑 uv，不是裸 "uv"（PATH 找不到時裸名直接 Errno）
     assert captured["cmd"][0] == str(tmp_path / ".local" / "bin" / uv_executable_name())
+    # #76：PYTHONUNBUFFERED=1（pdf2zh tqdm 非 TTY 不 flush → 活性信號斷 → 誤殺
+    # 的修復契約）；#23：COLUMNS=1000（rich 寬 console token 行不折）
+    assert captured["kwargs"]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert captured["kwargs"]["env"]["COLUMNS"] == "1000"
     assert isinstance(result, JobResult)
 
 

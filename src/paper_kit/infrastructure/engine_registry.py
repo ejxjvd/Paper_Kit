@@ -59,6 +59,10 @@ class EngineSpec:
     # float 直接報 "invalid int value"——節流以 int qps（上限）＋ pool 1（串行）組合。
     qps: int | None = None
     max_workers: int | None = None
+    # #76（2026-08-14 實測教訓）：inactivity 兜底秒數（引擎判 hang 的最後一行
+    # 寬限）。None＝adapter 預設（300s）。NIM 120B 實測單頁 402s（Term 提取＋
+    # 翻譯，LLM 單呼叫可達 ~240s）——300s 會誤殺（使用者實測「翻譯超時」）。
+    inactivity_seconds: int | None = None
 
 
 ENGINE_SPECS: dict[str, EngineSpec] = {
@@ -221,8 +225,12 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         # int（argparse type=int），0.6 直接報 "invalid int value"——qps 改 int 1
         # （每秒 1 請求＝60 RPM 上限）；真正節流＝pool 1 串行——每個 LLM 請求間隔
         # = 生成時間（數秒～數十秒）≫ 1.5 秒，實際遠低於 40 RPM 不會踩 429。
+        # #76（2026-08-14 實測）：120B 免費端點慢——單頁（Term 提取＋翻譯）實測
+        # 402s、LLM 單呼叫可達 ~240s——inactivity 300s 預設會誤殺（使用者實測
+        # 「翻譯超時 (超過 300 秒無輸出)」）→ 900s 兜底（配 PYTHONUNBUFFERED）。
         qps=1,
         max_workers=1,
+        inactivity_seconds=900,
         card_desc="Nemotron-3-Super-120B 免費（MT 榜首；40 RPM、無日總量）",
         info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：Nemotron-3-Super-120B"
         "（WMT24++ 55 語種翻譯 #1）／GLM-5.2／Kimi-K2.6 等旗艦模型免費、無日總量、免綁卡。"
@@ -382,6 +390,8 @@ def build_engine(
         requires_key=spec.needs_key,  # 2026-08-13：免費引擎（needs_key=False）translate 守衛放行
         qps=spec.qps,            # v0.1.3：速率防火牆（NVIDIA 40 RPM）
         max_workers=spec.max_workers,  # v0.1.3：並發上限（NVIDIA 2-5 → 503）
+        # #76：inactivity 兜底（None＝adapter 預設 300；NVIDIA 120B 900s）
+        inactivity_seconds=spec.inactivity_seconds or EngineConfig().inactivity_seconds,
     )
     return Pdf2zhNextAdapter(cfg)
 

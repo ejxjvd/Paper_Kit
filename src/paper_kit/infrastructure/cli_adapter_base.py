@@ -154,7 +154,12 @@ class CliAdapterBase:
             # token 統計行數字被拆到次行 → parse 誤記 out=0。COLUMNS 放大 → rich 寬
             # console → token 行單行完整（實測 COLUMNS=1000 三行皆單行）。共用骨架
             # 統一設——pdf2zh_next 同為 rich 輸出，一併受益；對非 rich 引擎無害。
-            kwargs["env"] = {**os.environ, "COLUMNS": "1000"}
+            # #76（2026-08-14 實測教訓）：PYTHONUNBUFFERED=1——pdf2zh 的 tqdm 進度
+            # 在非 TTY 下**不 flush**（tqdm flush=False 預設），輸出卡在子程序 8KB
+            # block 緩衝，NIM 120B 慢模型翻譯期間緩衝不滿 → reader 讀不到任何行 →
+            # 300s inactivity 誤殺（使用者實測「翻譯超時」）。unbuffered 後每步
+            # 即時輸出，活性信號連續（所有引擎受益）。
+            kwargs["env"] = {**os.environ, "COLUMNS": "1000", "PYTHONUNBUFFERED": "1"}
             if sys.platform != "win32":
                 kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
             proc = subprocess.Popen(
