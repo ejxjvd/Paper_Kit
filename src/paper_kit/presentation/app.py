@@ -6,6 +6,7 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 啟動：`uv run paper-kit` → http://localhost:8080（設定頁 /settings）
 """
 
+import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -41,7 +42,12 @@ from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
-from paper_kit.presentation.handlers import JobCardView, build_batch_zip, build_job_card
+from paper_kit.presentation.handlers import (
+    JobCardView,
+    build_batch_zip,
+    build_job_card,
+    progress_label,  # #15：進度框文字（「完成 100% · 10/10 頁」）
+)
 from paper_kit.presentation.theme import apply_theme
 
 APP_DIR = Path.home() / ".paper_kit"
@@ -64,6 +70,31 @@ ENGINE_CARDS = (
     ("deepseek", "純文字模型（機密文件唯一可用）"),
     ("babeldoc", "OpenAI 相容雲端（DeepSeek 後端）"),
 )
+
+# 2026-08-13（使用者要求）：引擎卡 ⓘ 說明文字（hover 顯示差異——「開啟 babeldoc
+# 後多了一堆選項，差別在哪裡」的答案直接在卡上）
+ENGINE_INFO = {
+    "siliconflow": "gemma 視覺模型：圖表／公式版面精準，預設引擎。需 SiliconFlow API key。",
+    "deepseek": "純文字模型：機密文件唯一可用（不上視覺模型）；成本最省。",
+    "babeldoc": "OpenAI 相容雲端（DeepSeek 後端）：版面重排能力強；"
+    "下方的「BabelDOC 進階選項」（僅翻譯選中頁面／相容模式等）僅此引擎顯示。",
+}
+
+
+def _open_folder(path: Path) -> None:
+    """2026-08-13（使用者要求）：開啟系統檔案管理員到指定資料夾。
+
+    WSL 環境：wslpath 轉 Windows UNC 路徑 → explorer.exe（interop 在 PATH）。
+    目錄不存在先建立；wslpath 不可用時直接傳原始路徑。
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        win = subprocess.run(
+            ["wslpath", "-w", str(path)], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        win = str(path)
+    subprocess.Popen(["explorer.exe", win])
 
 
 def _real_path(view_url: str) -> Path:
@@ -154,6 +185,7 @@ def _start_job(
     file_path: Path,
     file_name: str,
     pages_text: str = "",
+    total_pages: int | None = None,  # #15：PDF 總頁數（進度框「N/M 頁」的 M）
     sensitive: bool = False,
     ocr: bool = False,
     engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
@@ -195,6 +227,7 @@ def _start_job(
         file_path,
         target_lang=target_lang or settings.target_lang(),  # 票 19：下拉就地選覆寫
         pages=pages,
+        total_pages=total_pages,  # #15：進度框「N/M 頁」的 M（暫存時已讀頁數）
         output_dir=settings.output_dir(),
         sensitive=sensitive,
         ocr=ocr,
@@ -396,16 +429,22 @@ def _render_card(
         # #72：排隊中＝還沒開始（不顯示進度條，與翻譯中明確區分——使用者要求
         # 「排隊中跟翻譯中完全不同」）；翻譯中＝有引擎進度顯示確定值、無則
         # indeterminate（動畫＝正在跑）；完成＝100%。
+        # #15：一律 show_value=False（默認 True 會在 bar 中央顯示內嵌「1」——
+        # 完成只看到「1」的根因）＋progress_label 組字（「完成 100% · 10/10 頁」）。
         if view.status is JobStatus.QUEUED:
             pass
         elif view.status is JobStatus.TRANSLATING:
             if view.progress is not None:
                 # 票 11：進度條納入主題變數（深色下保持對比）
-                ui.linear_progress(value=view.progress).classes("w-full pk-progress")
+                ui.linear_progress(value=view.progress, show_value=False).classes("w-full pk-progress")
             else:
-                ui.linear_progress(value=0.5).props("indeterminate").classes("w-full pk-progress")
+                ui.linear_progress(
+                    value=0.5, show_value=False
+                ).props("indeterminate").classes("w-full pk-progress")
+            ui.label(progress_label(view)).classes("text-xs pk-meta")
         elif view.status is JobStatus.COMPLETED:
-            ui.linear_progress(value=1.0).classes("w-full pk-progress")
+            ui.linear_progress(value=1.0, show_value=False).classes("w-full pk-progress")
+            ui.label(progress_label(view)).classes("text-xs pk-meta")
         if view.error:
             ui.label(f"錯誤：{view.error}").classes("pk-error")  # 票 11：錯誤語意色走主題變數
         # 票 08 review：完成任務顯示「估算 vs 實際」，未完成顯示上傳時估價
@@ -1339,33 +1378,29 @@ def _index_page(
                 "⚠️ 上傳即代表同意：檔案內容將送雲端 API 翻譯。"
                 "機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理"
             ).classes("text-xs text-amber-7")
-            sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
+            with ui.row().classes("items-center gap-2"):
+                sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
+                # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示機密紅線細節
+                ui.icon("help_outline").props("size=18px").classes(
+                    "text-grey-6 cursor-pointer"
+                ).mark("info-sensitive").tooltip(
+                    "機密文件（R18／隱私）只能走 DeepSeek 純文字引擎，視覺模型不上雲。"
+                    "勾選後引擎自動切 DeepSeek，視覺卡灰化禁用"
+                )
             # 票 12：掃描件 OCR（本機 onnxruntime，不上雲——機密文件相容）
-            ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
-            memo: dict[str, str | None] = {}
-            cards = ui.column().classes("w-full gap-4")
-            # #82 修復：刪除／預覽 dialog 建為**頁面級單例**（重複使用、canary 掛
-            # 永存容器）——舊版在 handler 內 `with ui.dialog()` 重建，canary 掛卡片
-            # slot，1s 輪詢 cards.clear() 連坐 dialog.delete()（「不到 2 秒消失」）。
-            # state 承接「哪一筆任務」：按確認才刪（非開啟當下快照，防競態）。
-            delete_state: dict = {"job_id": None}
-            with ui.dialog() as delete_dialog, ui.card().classes("p-4 gap-2"):
-                ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
-                ui.label("此操作無法復原").classes("text-xs text-grey-6")
-                with ui.row().classes("gap-2"):
-                    ui.button("取消", on_click=delete_dialog.close).props("outline")
-                    ui.button(
-                        "確認刪除",
-                        on_click=lambda: (
-                            _do_delete_one(service, delete_state["job_id"]),
-                            delete_dialog.close(),
-                        ),
-                    ).props("color=negative")
-            with ui.dialog() as preview_dialog, ui.card().classes(
-                "w-[90vw] h-[90vh] p-0"
-            ):
-                preview_box = ui.html("")
-            # 票 19：引擎三選卡——點選即設定「本任務」引擎（不寫進設定頁 global）
+            with ui.row().classes("items-center gap-2"):
+                ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
+                ui.icon("help_outline").props("size=18px").classes(
+                    "text-grey-6 cursor-pointer"
+                ).mark("info-ocr").tooltip(
+                    "無文字層的掃描 PDF：先本機 OCR（RapidOCR，不上雲）抽出文字層再翻譯，"
+                    "機密相容"
+                )
+            # 2026-08-13（使用者認為「都不勾也能翻譯」是 bug）：勾選項是「特殊處理」
+            # 開關——都不是＝一般 PDF 直接翻譯（勾了掃描件反而多跑 OCR 預處理）
+            ui.label("（都不勾選＝一般 PDF，直接翻譯）").classes("text-xs text-grey-6")
+            # 2026-08-13（使用者回報）：引擎三卡移到機密／掃描件勾選之下、任務清單之上
+            # ——任務一多不再把引擎卡往下推（cards 容器最後建立，見頁尾）
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
 
             def _pick_engine(eid: str) -> None:
@@ -1400,7 +1435,12 @@ def _index_page(
                         + (" ring-2 ring-primary" if eid == selected_engine else "")
                     )
                     with card:
-                        ui.label(spec.label).classes("font-semibold text-sm")
+                        with ui.row().classes("items-center justify-between w-full"):
+                            ui.label(spec.label).classes("font-semibold text-sm")
+                            # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示引擎差異
+                            ui.icon("help_outline").props("size=16px").classes(
+                                "text-grey-5"
+                            ).mark(f"info-engine-{eid}").tooltip(ENGINE_INFO[eid])
                         ui.label(desc).classes("text-xs text-grey-7 pk-engine-desc")
                     engine_cards[eid] = card
                     card.on("click", _engine_picker(_pick_engine, eid))
@@ -1423,7 +1463,27 @@ def _index_page(
                     )
 
             sensitive_input.on_value_change(_on_sensitive_change)
-
+            # #82 修復：刪除／預覽 dialog 建為**頁面級單例**（重複使用、canary 掛
+            # 永存容器）——舊版在 handler 內 `with ui.dialog()` 重建，canary 掛卡片
+            # slot，1s 輪詢 cards.clear() 連坐 dialog.delete()（「不到 2 秒消失」）。
+            # state 承接「哪一筆任務」：按確認才刪（非開啟當下快照，防競態）。
+            delete_state: dict = {"job_id": None}
+            with ui.dialog() as delete_dialog, ui.card().classes("p-4 gap-2"):
+                ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
+                ui.label("此操作無法復原").classes("text-xs text-grey-6")
+                with ui.row().classes("gap-2"):
+                    ui.button("取消", on_click=delete_dialog.close).props("outline")
+                    ui.button(
+                        "確認刪除",
+                        on_click=lambda: (
+                            _do_delete_one(service, delete_state["job_id"]),
+                            delete_dialog.close(),
+                        ),
+                    ).props("color=negative")
+            with ui.dialog() as preview_dialog, ui.card().classes(
+                "w-[90vw] h-[90vh] p-0"
+            ):
+                preview_box = ui.html("")
             # 票 19：目標語言就地下拉（預設＝設定頁值；不跳設定頁就能改本任務語言）
             # spec review：設定頁語言是自由文字——值不在內建列表時併入選項
             #（NiceGUI choice_element 對不在 options 的初始值直接 raise ValueError → 主頁 500）
@@ -1493,6 +1553,7 @@ def _index_page(
                     ok = _start_job(
                         service, settings, cost, glossaries, path, name,
                         pages_text=_pages_for_file(selected, file_pages) or "",
+                        total_pages=file_pages or None,  # #15：進度框「N/M 頁」的 M
                         sensitive=sensitive_input.value,
                         ocr=ocr_input.value,
                         # 票 19：只在使用者實際點選（≠設定頁 global）才 override——
@@ -1539,16 +1600,46 @@ def _index_page(
                 advanced_box.set_visibility(selected_engine == "babeldoc")
                 with advanced_box:
                     ui.label("BabelDOC 進階選項").classes("text-sm font-semibold text-grey-8")
-                    enhance_compat_input = ui.checkbox("☑ 相容模式（版式較保守、錯位較少）", value=False)
-                    merge_lines_input = ui.checkbox("☑ 行號增強（合併交錯行號）", value=True)
-                    remove_lines_input = ui.checkbox(
-                        "☑ 移除段落中的非公式線條", value=False
-                    )
-                    font_select = ui.select(
-                        ["serif", "sans-serif", "script"],
-                        value="serif",
-                        label="字體",
-                    ).classes("w-48")
+                    # 2026-08-13（使用者要求「開啟 babeldoc 多了一堆選項，差別在哪」）：
+                    # 每個選項旁 ⓘ 說明——hover 即看用途，不用猜
+                    with ui.row().classes("items-center gap-1"):
+                        enhance_compat_input = ui.checkbox("☑ 相容模式（版式較保守、錯位較少）", value=False)
+                        ui.icon("help_outline").props("size=16px").classes(
+                            "text-grey-5 cursor-pointer"
+                        ).mark("info-compat").tooltip(
+                            "版面重排較保守：保留更多原始版式、減少文字錯位，"
+                            "但段落重排效果較弱。適合數學／表格密集的 PDF。"
+                        )
+                    with ui.row().classes("items-center gap-1"):
+                        merge_lines_input = ui.checkbox("☑ 行號增強（合併交錯行號）", value=True)
+                        ui.icon("help_outline").props("size=16px").classes(
+                            "text-grey-5 cursor-pointer"
+                        ).mark("info-merge-lines").tooltip(
+                            "把因欄位排版被拆成多行的「行號」合併回原行——"
+                            "期刊／論文雙欄版面的行號不再散落成孤兒行。"
+                        )
+                    with ui.row().classes("items-center gap-1"):
+                        remove_lines_input = ui.checkbox(
+                            "☑ 移除段落中的非公式線條", value=False
+                        )
+                        ui.icon("help_outline").props("size=16px").classes(
+                            "text-grey-5 cursor-pointer"
+                        ).mark("info-remove-lines").tooltip(
+                            "刪除圖表框線、分隔線等不屬於公式的直線物件——"
+                            "版面雜訊較多的掃描文件建議開啟。"
+                        )
+                    with ui.row().classes("items-center gap-1"):
+                        font_select = ui.select(
+                            ["serif", "sans-serif", "script"],
+                            value="serif",
+                            label="字體",
+                        ).classes("w-48")
+                        ui.icon("help_outline").props("size=16px").classes(
+                            "text-grey-5 cursor-pointer"
+                        ).mark("info-font").tooltip(
+                            "輸出的字型風格：serif（襯線，正式文件）／"
+                            "sans-serif（無襯線，簡潔現代）／script（手寫風，裝飾用）。"
+                        )
                 # 2026-08-13（使用者回報）：輸出目錄主頁就地設定——與設定頁共用
                 # SettingsService.set_output_dir 後端（空白=預設 ~/.paper_kit/outputs）
                 out_dir_input = ui.input(
@@ -1560,8 +1651,20 @@ def _index_page(
                     settings.set_output_dir(out_dir_input.value.strip())
                     ui.notify("輸出目錄已更新", type="positive")
 
+                # 2026-08-13（使用者回報）：輸出目錄旁「瀏覽資料夾」——填完路徑
+                # 直接開 Explorer 看產出（_open_folder 見檔頭，wslpath 轉 Windows 路徑）。
+                # 注意：settings.output_dir() 未設定時回傳 ""——Path("")＝當前目錄，
+                # 會開錯資料夾；fallback 到 OUTPUTS_DIR（真實預設，main() 傳給 JobService）
+                def _browse_output_dir() -> None:
+                    target = out_dir_input.value.strip()
+                    _open_folder(Path(target) if target else OUTPUTS_DIR)
+
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button("套用輸出目錄", on_click=_apply_output_dir).props("outline")
+                    ui.button(
+                        "📂 瀏覽資料夾",
+                        on_click=_browse_output_dir,
+                    ).props("outline").mark("browse-output-dir")
                     ui.label("輸出目錄為產出 mono/dual PDF 的位置（設定頁同步）").classes("text-xs text-grey-7")
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
@@ -1569,6 +1672,10 @@ def _index_page(
                         on_click=_start_staged,
                     ).props("color=primary unelevated").classes("text-lg")
                     ui.label("選擇檔案後按「開始翻譯」送出；拖放＝暫存不自動翻譯").classes("text-xs text-grey-7")
+        # 2026-08-13（使用者回報「3 個引擎按鈕在任務歷史下方」）：任務清單容器
+        # 最後建立——引擎卡固定在上方（勾選下方），任務一多不再把引擎卡往下推
+        memo: dict[str, str | None] = {}
+        cards = ui.column().classes("w-full gap-4")
         ui.timer(
             1.0,
             lambda: _refresh(

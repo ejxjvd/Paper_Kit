@@ -282,3 +282,21 @@ def test_advanced_options_default_in_db(tmp_path: Path):
     assert job.merge_alternating_line_numbers is True
     assert job.remove_non_formula_lines is False
     assert job.font_family == "serif"
+
+
+# ── #15：total_pages 持久化（進度框「N/M 頁」的 M） ─────────────
+
+
+def test_total_pages_survives_roundtrip_and_restart(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    job = sample_job()
+    job.total_pages = 12
+    repo.add(job)
+    repo2 = make_repo(tmp_path)  # 重啟：新連線（auto-migrate 補欄）
+    assert repo2.get("abc123").total_pages == 12
+
+
+def test_total_pages_none_stays_none(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    repo.add(sample_job())
+    assert repo.get("abc123").total_pages is None

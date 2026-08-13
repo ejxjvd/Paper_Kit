@@ -18,6 +18,7 @@ from paper_kit.domain.translation_job import JobStatus, TranslationJob
 _COLUMNS = (
     "job_id", "created_at", "status", "source_path", "target_lang", "pages",
     "output_dir", "glossary_files", "auto_extract", "engine_id",
+    "total_pages",  # #15：PDF 總頁數（進度框「N/M 頁」的 M）
     "estimated_cost", "sensitive", "ocr", "result", "error",
     "progress",  # #72：翻譯進度（0.0–1.0；None＝無確定進度）
     "estimated_tokens",  # 2026-08-13：上傳時估算的總 tokens（UI 預估顯示用）
@@ -108,6 +109,7 @@ class SqliteJobRepository:
             json.dumps(job.glossary_files),
             int(job.auto_extract),
             job.engine_id,
+            str(job.total_pages) if job.total_pages is not None else None,
             str(job.estimated_cost) if job.estimated_cost is not None else None,
             int(job.sensitive),
             int(job.ocr),
@@ -138,6 +140,8 @@ class SqliteJobRepository:
             glossary_files=json.loads(data["glossary_files"] or "[]"),
             auto_extract=bool(data["auto_extract"]),
             engine_id=data["engine_id"],
+            # .get：舊 DB 無 total_pages 欄位（auto-migrate 補欄）→ 預設 None（舊任務不造假頁數）
+            total_pages=int(data["total_pages"]) if data.get("total_pages") else None,
             estimated_cost=Decimal(data["estimated_cost"]) if data["estimated_cost"] else None,
             # .get：舊 DB 無 estimated_tokens 欄位（auto-migrate 補欄）→ 預設 None（舊任務不造假 token）
             estimated_tokens=int(data["estimated_tokens"]) if data.get("estimated_tokens") else None,

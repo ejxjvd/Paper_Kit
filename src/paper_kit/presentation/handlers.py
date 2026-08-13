@@ -45,6 +45,7 @@ class JobCardView:
     ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
     from_cache: bool = False         # 票 26：快取命中（引擎未呼叫——卡片顯示 ⚡）
     pages_label: str = "全文"        # 票 17：歷史表格「頁數」欄（None→「全文」對映在 build_job_card）
+    total_pages: int | None = None   # #15：PDF 總頁數（進度框「N/M 頁」的 M）
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -106,7 +107,28 @@ def build_job_card(
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
         from_cache=bool(job.result and job.result.from_cache),  # 票 26：快取命中（⚡）
         pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）
+        total_pages=job.total_pages,  # #15：進度框「N/M 頁」的 M
     )
+
+
+def progress_label(view: JobCardView) -> str | None:
+    """#15：進度框文字——完成「完成 100% · N/N 頁」；翻譯中「翻譯中 X% · n/N 頁」；
+    不確定進度「翻譯中… · 共 N 頁」；無 total_pages（舊任務）頁數部分省略；
+    QUEUED 無進度框（#72 明確區分）→ None。
+
+    純函式：UI 只呼叫渲染，組字邏輯在此單一測試點（避免 inline 字串散落）。
+    """
+    m = view.total_pages
+    if view.status is JobStatus.COMPLETED:
+        return f"完成 100% · {m}/{m} 頁" if m else "完成 100%"
+    if view.status is JobStatus.TRANSLATING:
+        if view.progress is not None:
+            pct = round(view.progress * 100)
+            if m:
+                return f"翻譯中 {pct}% · {round(view.progress * m)}/{m} 頁"
+            return f"翻譯中 {pct}%"
+        return f"翻譯中… · 共 {m} 頁" if m else "翻譯中…"
+    return None
 
 
 def build_batch_zip(

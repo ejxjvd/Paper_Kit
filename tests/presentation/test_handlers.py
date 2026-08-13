@@ -10,7 +10,12 @@ import pytest
 
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
-from paper_kit.presentation.handlers import STATUS_LABELS, JobCardView, build_job_card
+from paper_kit.presentation.handlers import (
+    STATUS_LABELS,
+    JobCardView,
+    build_job_card,
+    progress_label,  # #15：進度框文字（「完成 100% · 10/10 頁」）
+)
 
 
 def completed_job(job_id: str = "abc123") -> TranslationJob:
@@ -236,3 +241,52 @@ def test_batch_zip_skips_jobs_without_result(tmp_path):
         assert zf.namelist() == ["a1b2c3d4-paper.zh.mono.pdf"]
 
     assert build_batch_zip([queued], "mono", dest) is None
+
+
+# ── #15：進度框顯示 N/M 頁＋百分比（total_pages 透傳＋純函式組字） ────
+
+
+def test_total_pages_flows_to_view():
+    job = TranslationJob(job_id="tp1", source_path="/out/tp1/a.pdf", total_pages=10)
+    assert build_job_card(job).total_pages == 10
+
+
+def test_total_pages_defaults_none_in_view():
+    view = build_job_card(TranslationJob(job_id="tp2", source_path="/out/tp2/a.pdf"))
+    assert view.total_pages is None
+
+
+def test_progress_label_completed_with_pages():
+    job = completed_job()
+    job.total_pages = 10  # JobCardView 是 frozen dataclass——由 job 端透傳
+    assert progress_label(build_job_card(job)) == "完成 100% · 10/10 頁"
+
+
+def test_progress_label_completed_without_pages():
+    assert progress_label(build_job_card(completed_job())) == "完成 100%"
+
+
+def test_progress_label_translating_determinate():
+    job = TranslationJob(job_id="tp3", source_path="/out/tp3/a.pdf", total_pages=10)
+    job.transition(JobStatus.TRANSLATING)
+    job.progress = 0.4
+    assert progress_label(build_job_card(job)) == "翻譯中 40% · 4/10 頁"
+
+
+def test_progress_label_translating_indeterminate():
+    job = TranslationJob(job_id="tp4", source_path="/out/tp4/a.pdf", total_pages=10)
+    job.transition(JobStatus.TRANSLATING)
+    assert progress_label(build_job_card(job)) == "翻譯中… · 共 10 頁"
+
+
+def test_progress_label_translating_no_pages_fallback():
+    """舊任務（無 total_pages）→ 百分比照顯示、頁數省略。"""
+    job = TranslationJob(job_id="tp5", source_path="/out/tp5/a.pdf")
+    job.transition(JobStatus.TRANSLATING)
+    job.progress = 0.25
+    assert progress_label(build_job_card(job)) == "翻譯中 25%"
+
+
+def test_progress_label_queued_none():
+    job = TranslationJob(job_id="tp6", source_path="/out/tp6/a.pdf", total_pages=10)
+    assert progress_label(build_job_card(job)) is None

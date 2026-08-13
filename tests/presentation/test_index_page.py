@@ -25,6 +25,7 @@ from paper_kit.application.settings_service import SettingsService
 from paper_kit.infrastructure.glossary_repo import GlossaryRepository
 from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
+import paper_kit.presentation.app as app_module  # 同 module 物件（見下註）
 from paper_kit.presentation.app import _index_page
 
 from test_ui_flow import FileWritingFakeEngine  # noqa: E402
@@ -666,9 +667,12 @@ async def test_babeldoc_advanced_panel_hidden_by_default(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        # find 只回傳可見元素（only_visible=True）→ 預設隱藏＝find 不到進階區標題
+        # find 只回傳可見元素（only_visible=True）→ 預設隱藏＝find 不到 advanced_box。
+        # 不能用 content="BabelDOC 進階選項" 子字串——#17 ⓘ 說明 tooltip
+        # （ENGINE_INFO["babeldoc"]，在引擎卡上、預設可見）文案含同字樣會誤撈；
+        # 改以 marker 精確定位（ancestors 檢查含 advanced_box 自身→隱藏時整樹不可見）。
         with pytest.raises(AssertionError):
-            user.find(content="BabelDOC 進階選項")
+            user.find(kind=ui.column, marker="babeldoc-advanced")
 
 
 @pytest.mark.asyncio
@@ -726,3 +730,154 @@ async def test_babeldoc_advanced_options_flow_into_job(
         assert job.merge_alternating_line_numbers is False
         assert job.remove_non_formula_lines is True
         assert job.font_family == "script"
+
+
+# ── 2026-08-13 批次 A：引擎卡移位／ⓘ 說明／一般文件說明／瀏覽資料夾 ──
+
+
+def _dom_markers(root) -> list[tuple[str, str]]:
+    """DFS 收集 (type, marker) 的 DOM 插入序。
+
+    user.find 回傳 set（無序）——DOM 順序測試需自行走
+    default_slot.children（插入序；2026-08-12 實證）。
+    """
+    out = []
+    if getattr(root, "_markers", None):
+        out.extend((type(root).__name__, m) for m in root._markers)
+    for child in getattr(root, "default_slot", None) and root.default_slot.children or []:
+        out.extend(_dom_markers(child))
+    return out
+
+
+@pytest.mark.asyncio
+async def test_engine_cards_after_checks_before_output_area(tmp_path):
+    """#16：引擎三卡在機密/掃描勾選**下方**、輸出區**上方**（DOM 插入序）——
+    任務一多引擎卡不再被往下推（cards 容器最後建立）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        order = [m for _, m in _dom_markers(user.client.content)]
+        assert order.index("info-sensitive") < order.index("engine-card-siliconflow"), (
+            "引擎卡必須在「機密文件」勾選下方"
+        )
+        assert order.index("engine-card-siliconflow") < order.index("engine-card-deepseek")
+        assert order.index("engine-card-deepseek") < order.index("engine-card-babeldoc")
+        assert order.index("engine-card-babeldoc") < order.index("browse-output-dir"), (
+            "引擎卡必須在輸出目錄/任務區上方"
+        )
+
+
+@pytest.mark.asyncio
+async def test_engine_card_info_icons_exist(tmp_path):
+    """#17：三張引擎卡各帶 ⓘ（hover 說明引擎差異）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        for eid in ("siliconflow", "deepseek", "babeldoc"):
+            icons = user.find(kind=ui.icon, marker=f"info-engine-{eid}").elements
+            assert len(icons) == 1, f"引擎卡 {eid} 應有且僅有一個 ⓘ"
+            assert icons.pop().tooltip is not None, f"引擎卡 {eid} ⓘ 應有 tooltip"
+
+
+@pytest.mark.asyncio
+async def test_babeldoc_advanced_option_info_icons_exist(tmp_path):
+    """#17：babeldoc 進階選項 4 個 ⓘ（相容模式/行號增強/非公式線條/字體）——
+    先點 babeldoc 卡顯示進階區（find 預設 only_visible=True）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        _engine_card(user, "babeldoc").click()
+        for marker in ("info-compat", "info-merge-lines", "info-remove-lines", "info-font"):
+            icons = user.find(kind=ui.icon, marker=marker).elements
+            assert len(icons) == 1, f"{marker} ⓘ 應存在"
+            assert icons.pop().tooltip is not None, f"{marker} ⓘ 應有 tooltip"
+
+
+@pytest.mark.asyncio
+async def test_normal_pdf_hint_label(tmp_path):
+    """#18：機密/掃描都不勾的說明（一般 PDF 直接翻譯）——消除
+    「為何不勾選也能開始翻譯」的誤解。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("（都不勾選＝一般 PDF，直接翻譯）")
+
+
+@pytest.mark.asyncio
+async def test_browse_output_dir_button_calls_open_folder(tmp_path, monkeypatch):
+    """#14：輸出目錄旁「📂 瀏覽資料夾」→ _open_folder（帶目前輸入路徑）。
+
+    注意：app_module 必須在**檔案頂部** import（collection 時載入）——nicegui
+    reset_globals 的 finally 會把非 tests. 前綴的 page-route module（app.py）
+    從 sys.modules pop 掉；若在此函式內才 `from ... import app`，前一個測試
+    跑完後會**重新載入**一份新 module——monkeypatch 打到新 module，但
+    _index_page closure 查的是舊 module 的 _open_folder（未 patch）→ 靜默失效。
+    """
+    called: list = []
+    monkeypatch.setattr(app_module, "_open_folder", lambda p: called.append(p))
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        user.find(kind=ui.button, marker="browse-output-dir").click()
+        assert len(called) == 1, "按「瀏覽資料夾」應呼叫 _open_folder"
+        assert "outputs" in str(called[0]), "應帶輸出目錄路徑（預設 ~/.paper_kit/outputs）"
+
+
+@pytest.mark.asyncio
+async def test_dialogs_closed_on_load(tmp_path):
+    """#13 防護：頁面載入後所有 dialog 初始關閉——使用者回報「中央深灰色
+    遮罩」經查證為 NiceGUI 斷線重連 overlay（非 dialog 自動開啟），
+    此測試鎖定 dialog 不得初始開啟，防未來回歸。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        dialogs = user.find(ui.dialog).elements
+        assert dialogs, "主頁應有刪除/預覽 dialog（頁面級單例，#82）"
+        for d in dialogs:
+            assert d.value is False, f"dialog 初始不得開啟（{d}）"
+
+
+@pytest.mark.asyncio
+async def test_completed_card_shows_pages_and_percent(tmp_path, monkeypatch, make_blank_pdf):
+    """#15：完成卡進度框＝「完成 100% · N/N 頁」——不再只顯示「1」
+    （NiceGUI LinearProgress show_value 默認 True 的內嵌 label）；
+    bar show_value=False（size=4px，無內嵌值 label）。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+    monkeypatch.setattr(settings, "resolve_engine", lambda: FileWritingFakeEngine())
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        pdf = make_blank_pdf(tmp_path / "pages3.pdf", pages=3)
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(name="pages3.pdf", content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("已暫存：pages3.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        await user.should_see("完成", retries=50)
+        card = next(iter(user.find(kind=ui.card, marker="job-card").elements))
+        texts = _collect_label_texts(card)
+        assert "完成 100% · 3/3 頁" in texts, f"完成卡應顯示「完成 100% · 3/3 頁」（got {texts}）"
+        bar = next(iter(user.find(ui.linear_progress).elements))
+        assert bar._props.get("size") == "4px", "show_value=False（無內嵌「1」label）"

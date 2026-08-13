@@ -87,3 +87,16 @@ def test_illegal_transition_message_mentions_both_states():
 
 def test_sensitive_defaults_false():
     assert TranslationJob(job_id="j").sensitive is False
+
+
+# ── #15：總頁數（進度框「N/M 頁」的 M） ──────────────────────
+
+
+def test_total_pages_defaults_none():
+    job = TranslationJob(job_id="tp1")
+    assert job.total_pages is None
+
+
+def test_total_pages_can_be_set():
+    job = TranslationJob(job_id="tp2", total_pages=10)
+    assert job.total_pages == 10

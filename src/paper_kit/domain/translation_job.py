@@ -44,6 +44,7 @@ class TranslationJob:
     source_path: str | None = None
     target_lang: str = "zh-TW"
     pages: str | None = None          # "1-2" 形式；None = 全文
+    total_pages: int | None = None    # #15：PDF 總頁數（進度框「N/M 頁」的 M；None=未知/舊任務）
     output_dir: str = ""              # 票 07：完成後產出複製到的目錄；空白 = 預設 outputs/<job_id>/
     glossary_files: list[str] = field(default_factory=list)
     auto_extract: bool = False        # 票 05：--term-siliconflow 自動術語提取
