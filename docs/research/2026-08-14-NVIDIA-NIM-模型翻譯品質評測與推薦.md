@@ -128,6 +128,7 @@ status: active
 - AA 智力指數 v4.1 = 51，**開源第一**（勝 MiniMax-M3 44、DeepSeek V4 Pro 44、Kimi K2.6 43；與 Gemini 3.5 Flash 50 同級）。LMArena 文本 1483（全榜 #58，勝過多數閉源）。
 - 智譜原生中文模型，中文語感、術語繁中化預期最佳（5.2-max 中文分榜 1521）。1M context、MIT 授權無商用風險。
 - **注意：無直接 MT 基準成績**——「英語→繁中」需自行小樣本驗證（pdf2zh「測試 API」＋試譯一段）；另一風險是免費層新模型偶發供裝問題。
+- **⚠️ 2026-08-14 實測降級**：真 runner 測試 57 分鐘「rc=0 但無產出 PDF」（假成功）＋測試後 API 直測持續 429——免費層不可用（見 §9）。
 
 ### 3.3 nemotron-3-ultra-550b-a55b —— 中文偏好最高、但缺翻譯實證
 - 中文分榜 1463＝NVIDIA org 內第一，且是 2026-06 新旗艦；RULER@1M 94.7 長文最強；183–218 tok/s 極快。
@@ -140,6 +141,7 @@ status: active
 ### 3.5 kimi-k2.6（使用者漏掉）—— 高 Elo、開源前段
 - 文本 Elo 1466（全榜 #46）、中文/多語能力佳、256K context、1T MoE 32B active、成本低。**已掛 Free Endpoint**（ayautomate 追蹤站＋論壇佐證）。
 - **注意：免費端點有 404「Function not found for account」供裝問題**（與 minimax-m3 同批回報，部分帳號可用、部分不可；gemma-4-31b-it 曾被修復、kimi 當時未修）——加入引擎後必須實測端點活性。
+- **❌ 2026-08-14 本機實測 404 證實**：`chat/completions` 直測 `Function '…': Not found for account`——帳戶無權限，推薦清單暫除（見 §9）。
 
 ### 3.6 step-3.7-flash —— 最快、但幻覺指標警訊
 - XSCT 98.0、AA 智力 42.6、**400 tok/s 速度第一**、中文原生、Apache 2.0、256K。
@@ -179,12 +181,12 @@ status: active
 | 優先序 | 模型 id | 品質依據 | 適合翻譯的理由 | 注意事項 | 推薦等級 |
 |---|---|---|---|---|---|
 | 1 | nvidia/nemotron-3-super-120b-a12b | WMT24++ 0.867 **#1**（55 語種）；中文 LMArena 1402；RULER@1M 91.75 | NIM 免費層唯一 MT 榜首實證；長文 1M 全論文直進；MoE 12B active 高吞吐 | Elo 快照波動（volatile）；WMT 成績為 NVIDIA 自評+論文複現 | ★★★★★ |
-| 2 | z-ai/glm-5.2 | AA 智力 51 **開源第一**；LMArena 文本 1483；5.2-max 中文 1521 | 中文原生、語感最佳；1M ctx；MIT 商用無風險 | 無直接 MT 基準；需小樣本實測繁中輸出；新模型供裝偶發 | ★★★★★ |
+| 2 | ~~z-ai/glm-5.2~~ ⚠️ | AA 智力 51 **開源第一**；LMArena 文本 1483；5.2-max 中文 1521 | 中文原生、語感最佳；1M ctx；MIT 商用無風險 | **2026-08-14 實測降級：57 分鐘假成功（rc=0 無產出）＋持續 429（模型級限流）——免費層不可用，除非 BYOK/付費**（見 §9） | ⚠️✩✩✩✩ |
 | 3 | nvidia/nemotron-3-ultra-550b-a55b | 中文 LMArena **1463**（NVIDIA org #1）；RULER@1M 94.7 | 中文人類偏好最高；長文最強；速度 183–218 tok/s | 550B 免費端點並行未知；無翻譯基準；AA 實測 ctx 260K | ★★★★☆ |
 | 4 | minimaxai/minimax-m3 | LMArena 文本 1445、中文類目 1475；XSCT 97.2 | 中文原生；1M ctx（131K 輸出） | **免費端點 404 供裝問題**（與 kimi 同批回報）；翻譯基準弱 | ★★★★☆ |
 | 5 | openai/gpt-oss-120b | XSCT 99.5（257 模型 #4）；Apache 2.0 | 翻譯實測頂標；授權乾淨 | 128K ctx（RULER @1M 崩）——靠 pdf2zh 分塊；Elo 中段語感普通 | ★★★★☆ |
 | 6 | google/gemma-4-31b-it | Elo **1452**（開源 #3）；XSCT 95.2 | 小體積高品質；256K；稠密 31B 免費端點穩定（論壇證實可用） | 無翻譯基準；繁中語感非原生 | ★★★★☆ |
-| 7 | moonshotai/kimi-k2.6 | Elo **1466**（全榜 #46）；256K | 開源前段品質；多語強 | **404 供裝問題**需實測；無翻譯基準；免費層條款未明 | ★★★★☆ |
+| 7 | ~~moonshotai/kimi-k2.6~~ ❌ | Elo **1466**（全榜 #46）；256K | 開源前段品質；多語強 | **2026-08-14 實測 404 `Function not found for account` 證實**——帳戶無權限，待 NVIDIA 修復後復測（見 §9） | ❌✩✩✩✩ |
 | 8 | nvidia/nemotron-3-nano-30b-a3b | WMT24++ 0.862 **#2**；中文分榜 1355 | MT 榜眼＋**成本極低**＋262K ctx——批次翻譯量大時最佳性價比 | 12B active 之下的極限：複雜長術語文本信心低於 Super；Elo 中段 | ★★★★☆ |
 
 **候補（供替換/多引擎並存）**：llama-3.3-70b-instruct（XSCT 99.0 成熟主力）、step-3.7-flash（XSCT 98.0、400 tok/s、幻覺警訊）、gpt-oss-20b（快速省錢）、llama-3.3-nemotron-super-49b-v1.5（推理型、翻譯證據薄）。
@@ -215,6 +217,25 @@ status: active
 3. **Free Endpoint 資格**：kimi-k2.6 與 lightning 的免費資格為追蹤站/論壇間接證據（build.nvidia.com 前端無法程式化抓取），落地前以「測試 API」實測為準。
 4. **繁中（zh-TW）專屬證據不存在於任何公開排行榜**（皆為中文簡繁混合語料）——繁中慣用語、術語翻譯品質只能靠 pdf2zh 真測（本報告以「中文分榜 Elo＋中文原生模型」作為替代代理指標）。
 5. LMArena Elo 快照日期不一（2026-06～08-12）、多數標 volatile；分數差 <25 視為雜訊。
+
+## 9. 實際 PDF 翻譯實測（2026-08-14，同 PDF 真 runner）
+
+> 使用者要求「測試實際 PDF 翻譯穩定度及速度」。真 runner（`Pdf2zhNextAdapter`＋pdf2zh 引擎）對同一份 PDF（`paper_p34.pdf` 第 1 頁）依序實測 4 個候選模型，量測耗時/tokens/穩定度：
+
+| 模型 | 結果 | 耗時 | tokens in/out | 判定 |
+|---|---|---|---|---|
+| nvidia/nemotron-3-super-120b-a12b | ✅ OK | 24s | 160/298 | 穩定可用 |
+| google/gemma-4-31b-it | ✅ OK | 41s | 2801/847 | 穩定可用 |
+| z-ai/glm-5.2 | ❌ FAIL | **3418s（57 分鐘）** | — | **假成功：rc=0 但未產出任何 PDF**；測試後 API 直測持續 429（模型級限流） |
+| moonshotai/kimi-k2.6 | ❌ FAIL | 5s | — | **404 `Function not found for account`**——帳戶無權限（證實 §3.5 供裝問題） |
+
+**實測結論（2026-08-14）**：
+
+1. **glm-5.2 從推薦 #2 降級**：57 分鐘「成功但無產出」＝最糟的失敗模式（使用者等一小時拿不到檔、任務顯示成功）。API 直測 `chat/completions` 對 gemma 200 OK 而 glm 持續 429——**免費層對 glm-5.2 限流或配額已滿**（智力指數 51 的紙面優勢在免費層不可兌現）。**除非付費/BYOK，不建議預設使用**。
+2. **kimi-k2.6 證實 404**：本機帳號直測 404 `Function '…': Not found for account`——與 minimax-m3 同批供裝問題，推薦清單移除（待 NVIDIA 修復後復測）。
+3. **nemotron-3-super-120b-a12b 雙重驗證**：`paper_p34` 第 1 頁 24s OK＋`OS_Chapter03.pdf` 前 2 頁 **142s OK**（in=2953/out=5748，mono 2.2MB＋dual 132KB 產出有效）——**預設模型地位穩固**。
+4. **gemma-4-31b-it 證實可用**：41s OK（頁面 2801 tokens 較多仍快）——良好替代選項。
+5. 另兩模型實測前的 API 直測（`curl chat/completions` "Say hi"）為附帶對照：gemma 200 OK——帳戶層級正常，429/404 均為**模型層級**問題。
 
 ## 8. 參考來源
 
