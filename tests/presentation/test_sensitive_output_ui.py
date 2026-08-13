@@ -47,6 +47,16 @@ def _engine_card(user, eid: str):
     return user.find(kind=ui.card, marker=f"engine-card-{eid}")
 
 
+def _paid_key_select(user):
+    """付費引擎下拉（marker 定位——2026-08-13 付費區單卡化後的主選單）。"""
+    return next(iter(user.find(kind=ui.select, marker="paid-key-engine-select").elements))
+
+
+def _paid_key_card(user) -> ui.card:
+    """付費引擎單卡元素（marker 定位）。"""
+    return next(iter(user.find(kind=ui.card, marker="paid-key-engine-card").elements))
+
+
 def _sensitive_checkbox(user) -> ui.checkbox:
     return next(
         iter(
@@ -70,7 +80,7 @@ def _output_dir_input(user) -> ui.input:
 
 @pytest.mark.asyncio
 async def test_checking_sensitive_switches_engine_to_deepseek(tmp_path):
-    """勾「🔒 機密文件」→ 引擎卡自動切到 DeepSeek（DeepSeek 卡有選中態）。"""
+    """勾「🔒 機密文件」→ 付費單卡自動切到 DeepSeek（單卡顯示＋選中態）。"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_engine("siliconflow")  # 預設視覺引擎
 
@@ -78,16 +88,17 @@ async def test_checking_sensitive_switches_engine_to_deepseek(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        assert "ring-primary" in next(iter(_engine_card(user, "siliconflow").elements)).classes
+        assert "ring-primary" in _paid_key_card(user).classes, "初始付費單卡應顯示預設引擎且被選中"
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
-        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
-        assert "ring-primary" in classes, "勾機密後 DeepSeek 卡應有選中態"
+        user.find(kind=ui.icon, marker="info-engine-deepseek")  # 單卡內容同步切到 DeepSeek
+        assert "ring-primary" in _paid_key_card(user).classes, "勾機密後付費單卡應有選中態（DeepSeek）"
 
 
 @pytest.mark.asyncio
 async def test_sensitive_disables_visual_engine_cards(tmp_path):
-    """勾機密 → siliconflow/babeldoc 卡加禁用 class（灰化）；點擊不切換引擎。"""
+    """勾機密 → 付費單卡切到 DeepSeek（不灰）；付費下拉試選視覺引擎被擋復原；
+    點免費卡不切換（仍 DeepSeek）。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -96,18 +107,21 @@ async def test_sensitive_disables_visual_engine_cards(tmp_path):
         await _open_twice(user)
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
-        for eid in ("siliconflow", "babeldoc"):
-            card = next(iter(_engine_card(user, eid).elements))
-            assert "pk-engine-card--disabled" in card.classes, f"{eid} 卡應禁用"
-        # 點擊視覺卡不切換（仍 DeepSeek）
-        _engine_card(user, "siliconflow").click()
-        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
-        assert "ring-primary" in classes, "點視覺卡不得切換引擎"
+        user.find(kind=ui.icon, marker="info-engine-deepseek")  # 付費單卡自動切到 DeepSeek
+        # 付費下拉試選視覺引擎 → 守衛擋下復原（機密紅線）
+        select = _paid_key_select(user)
+        before = select.value
+        select.value = "siliconflow"
+        assert select.value == before, "機密下付費下拉選視覺引擎應被擋並復原"
+        await user.should_see("機密文件僅", retries=20)  # 拒絕提示
+        # 點免費卡不切換（仍 DeepSeek）
+        _engine_card(user, "siliconflowfree").click()
+        assert "ring-primary" in _paid_key_card(user).classes, "機密下點免費卡不得切換引擎"
 
 
 @pytest.mark.asyncio
 async def test_sensitive_checked_blocks_visual_engine_selection(tmp_path):
-    """已勾機密時點視覺卡 → 被拒（notify warning）＋引擎保持 DeepSeek。"""
+    """已勾機密時付費下拉選視覺引擎 → 被拒（notify warning）＋引擎保持 DeepSeek。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -116,16 +130,18 @@ async def test_sensitive_checked_blocks_visual_engine_selection(tmp_path):
         await _open_twice(user)
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
-        _engine_card(user, "babeldoc").click()
+        select = _paid_key_select(user)
+        before = select.value
+        select.value = "babeldoc"
+        assert select.value == before, "機密下選 babeldoc 應被擋並復原"
         await user.should_see("機密文件僅", retries=20)  # 拒絕提示
-        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
-        assert "ring-primary" in classes, "機密下點視覺卡引擎仍 DeepSeek"
+        assert "ring-primary" in _paid_key_card(user).classes, "機密下換引擎被擋，任務引擎仍 DeepSeek"
 
 
 @pytest.mark.asyncio
 async def test_unchecking_sensitive_restores_engine_cards(tmp_path):
-    """取消勾機密 → 視覺卡解除禁用、可再選。
-    （2026-08-13 灰化：付費卡另受「需 key」層管制——填 key 讓測試語意
+    """取消勾機密 → 付費下拉可再選視覺引擎（機密層解除）。
+    （2026-08-13 灰化：付費引擎另受「需 key」層管制——填 key 讓測試語意
     純粹落在「機密層解除」。）"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("siliconflow", "sf-test-key")
@@ -137,8 +153,10 @@ async def test_unchecking_sensitive_restores_engine_cards(tmp_path):
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
         _sensitive_checkbox(user).set_value(False)
-        card = next(iter(_engine_card(user, "siliconflow").elements))
-        assert "pk-engine-card--disabled" not in card.classes, "取消機密後視覺卡應解禁"
+        select = _paid_key_select(user)
+        select.value = "siliconflow"  # 取消機密後可再選視覺引擎（有 key）
+        card_el = _paid_key_card(user)
+        assert "pk-engine-card--disabled" not in card_el.classes, "取消機密後視覺引擎應解禁"
 
 
 # ── 問題③：主頁輸出目錄就地設定 ───────────────────────────────

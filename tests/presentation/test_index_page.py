@@ -171,6 +171,16 @@ def _engine_card(user, eid: str):
     return user.find(kind=ui.card, marker=f"engine-card-{eid}")
 
 
+def _paid_key_select(user):
+    """付費引擎下拉（marker 定位——2026-08-13 付費區單卡化後的主選單）。"""
+    return next(iter(user.find(kind=ui.select, marker="paid-key-engine-select").elements))
+
+
+def _paid_key_card(user) -> ui.card:
+    """付費引擎單卡元素（marker 定位）。"""
+    return next(iter(user.find(kind=ui.card, marker="paid-key-engine-card").elements))
+
+
 def _collect_label_texts(el) -> list[str]:
     """遞迴收集元素內所有 TextElement 的 text（任務卡 marker 定位後斷言 meta 用）。
 
@@ -187,8 +197,8 @@ def _collect_label_texts(el) -> list[str]:
 
 
 async def _pick_and_upload(user, service, pdf: Path) -> None:
-    """點選 DeepSeek 引擎卡 → 上傳（暫存）→ 點「開始翻譯」→ 等任務出現。"""
-    _engine_card(user, "deepseek").click()
+    """付費下拉選 DeepSeek → 上傳（暫存）→ 點「開始翻譯」→ 等任務出現。"""
+    _paid_key_select(user).value = "deepseek"
     upload_el = next(iter(user.find(ui.upload).elements))
     await upload_el.handle_uploads([
         SmallFileUpload(name=pdf.name, content_type="application/pdf", _data=pdf.read_bytes()),
@@ -200,7 +210,7 @@ async def _pick_and_upload(user, service, pdf: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_engine_cards_select_task_engine(tmp_path, monkeypatch, make_blank_pdf):
-    """AC1：主頁三張引擎卡（SiliconFlow／DeepSeek／BabelDOC），點選後本任務用該引擎
+    """AC1：主頁付費下拉選引擎（SiliconFlow／DeepSeek／BabelDOC…），選後本任務用該引擎
     （側信道：job.engine_id + build_engine 注入 fake，不打真 API）。"""
     from test_ui_flow import FileWritingFakeEngine
 
@@ -215,18 +225,19 @@ async def test_engine_cards_select_task_engine(tmp_path, monkeypatch, make_blank
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        # 三張卡齊備
-        for label in ("SiliconFlow", "DeepSeek", "BabelDOC"):
-            await user.should_see(label)
+        # 付費下拉六引擎選項齊備（registry 單點）
+        select = _paid_key_select(user)
+        for eid in ("siliconflow", "deepseek", "babeldoc", "latex", "openai", "gemini-pro"):
+            assert eid in select.options, f"付費下拉應含 {eid}"
         await _pick_and_upload(user, service, make_blank_pdf(tmp_path / "E1.pdf"))
         job = service.list_jobs()[-1]
-        assert job.engine_id == "deepseek", f"點選引擎卡後任務應記 deepseek，實際 {job.engine_id}"
+        assert job.engine_id == "deepseek", f"下拉選引擎後任務應記 deepseek，實際 {job.engine_id}"
 
 
 @pytest.mark.asyncio
 async def test_engine_card_selection_highlights_card(tmp_path, monkeypatch):
-    """點選引擎卡後該卡有選中視覺（ring-primary），提示本任務引擎。
-    （2026-08-13 灰化：付費卡需 key 才能點——先填 key 模擬正常使用。）"""
+    """付費下拉選引擎後單卡有選中視覺（ring-primary），提示本任務引擎。
+    （2026-08-13 灰化：付費引擎需 key 才能選——先填 key 模擬正常使用。）"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-ds-test")
 
@@ -234,11 +245,11 @@ async def test_engine_card_selection_highlights_card(tmp_path, monkeypatch):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        deepseek_card = _engine_card(user, "deepseek")
-        card_el = next(iter(deepseek_card.elements))
-        assert "ring-primary" not in card_el.classes, "初始 DeepSeek 卡不應被選中（預設是 siliconflow）"
-        deepseek_card.click()
-        assert "ring-primary" in card_el.classes, "點選後卡片應有選中高亮"
+        card_el = _paid_key_card(user)
+        assert "ring-primary" in card_el.classes, "初始付費單卡應顯示預設引擎（siliconflow）且被選中"
+        _paid_key_select(user).value = "deepseek"
+        assert "ring-primary" in card_el.classes, "下拉選引擎後單卡應有選中高亮"
+        user.find(kind=ui.icon, marker="info-engine-deepseek")  # ⓘ 隨引擎切換
 
 
 @pytest.mark.asyncio
@@ -290,7 +301,7 @@ async def test_lang_select_accepts_custom_setting_value(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_blank_pdf):
-    """AC5（票 20）：點選無 key 的引擎上傳 → 就地錯誤提示且引擎未被呼叫。
+    """AC5（票 20）：挑選無 key 的引擎 → 就地錯誤提示且引擎未被呼叫。
 
     側信道：monkeypatch build_engine 計數——被呼叫即失敗；任務也不該建立。
     （override 路徑 `_resolve_task_engine` 建引擎前查 key——票 19 設計。）
@@ -312,7 +323,11 @@ async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_bl
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        _engine_card(user, "deepseek").click()  # 未設 deepseek key
+        select = _paid_key_select(user)
+        before = select.value
+        select.value = "deepseek"  # 未設 deepseek key → 守衛擋下復原
+        assert select.value == before, "無 key 引擎下拉應被擋並復原"
+        await user.should_see("尚未設定", retries=20)  # 警告通知出現
         upload_el = next(iter(user.find(ui.upload).elements))
         await upload_el.handle_uploads([
             SmallFileUpload(
@@ -734,8 +749,8 @@ async def test_babeldoc_advanced_panel_hidden_by_default(tmp_path):
 
 @pytest.mark.asyncio
 async def test_babeldoc_advanced_panel_shows_when_babeldoc_selected(tmp_path):
-    """#85 切片C：點選 BabelDOC 卡 → 進階選項區顯示（引擎＝babeldoc 才消費這些旗標）。
-    （2026-08-13 灰化：付費卡需 key 才能點——先填 key。）"""
+    """#85 切片C：付費下拉選 BabelDOC → 進階選項區顯示（引擎＝babeldoc 才消費旗標）。
+    （2026-08-13 灰化：付費引擎需 key 才能選——先填 key。）"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("babeldoc", "bk-test")
 
@@ -743,9 +758,9 @@ async def test_babeldoc_advanced_panel_shows_when_babeldoc_selected(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        _engine_card(user, "babeldoc").click()
+        _paid_key_select(user).value = "babeldoc"
         assert _babeldoc_advanced_box(user).visible is True, \
-            "點選 babeldoc 卡後進階選項區應顯示"
+            "選 babeldoc 後進階選項區應顯示"
 
 
 @pytest.mark.asyncio
@@ -761,7 +776,7 @@ async def test_babeldoc_advanced_options_flow_into_job(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        _engine_card(user, "babeldoc").click()
+        _paid_key_select(user).value = "babeldoc"
         # 勾選：相容模式 ON、行號增強 OFF（預設 ON）、移除非公式線條 ON
         for label, value in (
             ("相容模式", True),
@@ -810,8 +825,8 @@ def _dom_markers(root) -> list[tuple[str, str]]:
 
 @pytest.mark.asyncio
 async def test_engine_cards_after_checks_before_output_area(tmp_path):
-    """#16：引擎三卡在機密/掃描勾選**下方**、輸出區**上方**（DOM 插入序）——
-    任務一多引擎卡不再被往下推（cards 容器最後建立）。"""
+    """#16：付費引擎區（下拉＋單卡）在機密/掃描勾選**下方**、輸出區**上方**
+    （DOM 插入序）——任務一多引擎區不再被往下推（cards 容器最後建立）。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -819,13 +834,12 @@ async def test_engine_cards_after_checks_before_output_area(tmp_path):
     ) as user:
         await _open_twice(user)
         order = [m for _, m in _dom_markers(user.client.content)]
-        assert order.index("info-sensitive") < order.index("engine-card-siliconflow"), (
-            "引擎卡必須在「機密文件」勾選下方"
+        assert order.index("info-sensitive") < order.index("paid-key-engine-select"), (
+            "付費引擎區必須在「機密文件」勾選下方"
         )
-        assert order.index("engine-card-siliconflow") < order.index("engine-card-deepseek")
-        assert order.index("engine-card-deepseek") < order.index("engine-card-babeldoc")
-        assert order.index("engine-card-babeldoc") < order.index("browse-output-dir"), (
-            "引擎卡必須在輸出目錄/任務區上方"
+        assert order.index("paid-key-engine-select") < order.index("paid-key-engine-card")
+        assert order.index("paid-key-engine-card") < order.index("browse-output-dir"), (
+            "付費引擎區必須在輸出目錄/任務區上方"
         )
 
 
@@ -872,17 +886,17 @@ async def test_job_cards_container_inside_maxw_column(tmp_path):
 
 @pytest.mark.asyncio
 async def test_engine_card_info_icons_exist(tmp_path):
-    """#17：三張引擎卡各帶 ⓘ（hover 說明引擎差異）。"""
+    """#17：付費單卡帶 ⓘ（hover 說明引擎差異）——marker 隨目前顯示引擎。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        for eid in ("siliconflow", "deepseek", "babeldoc"):
-            icons = user.find(kind=ui.icon, marker=f"info-engine-{eid}").elements
-            assert len(icons) == 1, f"引擎卡 {eid} 應有且僅有一個 ⓘ"
-            assert icons.pop().tooltip is not None, f"引擎卡 {eid} ⓘ 應有 tooltip"
+        # 付費單卡：目前顯示引擎（預設 siliconflow）有且僅有一個 ⓘ
+        icons = user.find(kind=ui.icon, marker="info-engine-siliconflow").elements
+        assert len(icons) == 1, "付費單卡應有且僅有一個 ⓘ"
+        assert icons.pop().tooltip is not None, "付費單卡 ⓘ 應有 tooltip"
 
 
 @pytest.mark.asyncio
@@ -897,7 +911,7 @@ async def test_babeldoc_advanced_option_info_icons_exist(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        _engine_card(user, "babeldoc").click()
+        _paid_key_select(user).value = "babeldoc"
         for marker in ("info-compat", "info-merge-lines", "info-remove-lines", "info-font"):
             icons = user.find(kind=ui.icon, marker=marker).elements
             assert len(icons) == 1, f"{marker} ⓘ 應存在"
@@ -989,15 +1003,15 @@ async def test_completed_card_shows_pages_and_percent(tmp_path, monkeypatch, mak
 
 @pytest.mark.asyncio
 async def test_engine_cards_include_latex_card(tmp_path):
-    """票 27 切片B：主頁引擎卡含第 4 卡 LaTeX（engine-card-latex marker）。"""
+    """票 27 切片B：付費下拉含 LaTeX 引擎（選項＋單卡渲染）。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        card = _engine_card(user, "latex")
-        assert len(card.elements) == 1, "主頁應有 LaTeX 引擎卡（第 4 卡）"
+        assert "latex" in _paid_key_select(user).options, "付費下拉應含 LaTeX 引擎"
+        assert _paid_key_card(user), "付費單卡應渲染"
 
 
 @pytest.mark.asyncio
@@ -1030,11 +1044,11 @@ async def test_tex_upload_auto_selects_latex_engine(tmp_path, monkeypatch):
             ),
         ])
         await user.should_see("已暫存：paper.tex", retries=20)
-        # 自動鎖定：LaTeX 卡高亮（ring-primary class——與點選引擎卡同款視覺）
-        latex_card = _engine_card(user, "latex")
-        card_el = next(iter(latex_card.elements))
+        # 自動鎖定：付費單卡自動切到 LaTeX 且高亮（ring-primary——同選引擎視覺）
+        user.find(kind=ui.icon, marker="info-engine-latex")  # 單卡內容同步切到 LaTeX
+        card_el = _paid_key_card(user)
         assert "ring-primary" in card_el.classes, \
-            "上傳 .tex 後 LaTeX 卡應自動高亮（預設走 LaTeX）"
+            "上傳 .tex 後付費單卡應自動高亮（預設走 LaTeX）"
         user.find("📂 開始翻譯").click()
         await user.should_see("任務已建立", retries=20)
         jobs = service.list_jobs()
@@ -1044,7 +1058,7 @@ async def test_tex_upload_auto_selects_latex_engine(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_latex_engine_rejects_pdf_upload(tmp_path, monkeypatch, make_blank_pdf):
-    """票 27 切片B AC4：選 LaTeX 卡＋上傳 PDF → 前置擋下（notify）＋不建任務。"""
+    """票 27 切片B AC4：付費下拉選 LaTeX＋上傳 PDF → 前置擋下（notify）＋不建任務。"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-ds-test")
     monkeypatch.setattr(
@@ -1056,7 +1070,7 @@ async def test_latex_engine_rejects_pdf_upload(tmp_path, monkeypatch, make_blank
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        _engine_card(user, "latex").click()
+        _paid_key_select(user).value = "latex"  # 付費下拉選 LaTeX（deepseek key 沿用）
         pdf = make_blank_pdf(tmp_path / "P.pdf")
         upload_el = next(iter(user.find(ui.upload).elements))
         await upload_el.handle_uploads([
@@ -1234,9 +1248,9 @@ async def test_sensitive_blocks_free_engine_cards(tmp_path):
         for eid in ("siliconflowfree", "google", "bing"):
             card = next(iter(_engine_card(user, eid).elements))
             assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費卡應禁用（機密紅線）"
-        # 點免費卡不切換（仍 DeepSeek）
+        # 點免費卡不切換（仍 DeepSeek——付費單卡顯示 DeepSeek 且高亮）
         _engine_card(user, "siliconflowfree").click()
-        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
+        classes = _paid_key_card(user).classes
         assert "ring-primary" in classes, "機密下點免費卡不得切換引擎"
 
 
@@ -1267,8 +1281,8 @@ async def test_free_engine_section_dom_order(tmp_path):
     ) as user:
         await _open_twice(user)
         order = [m for _, m in _dom_markers(user.client.content)]
-        assert order.index("engine-card-babeldoc") < order.index("free-engine-section"), (
-            "免費區必須在付費卡（babeldoc 末卡）之後"
+        assert order.index("paid-key-engine-card") < order.index("free-engine-section"), (
+            "免費區必須在付費引擎區（單卡）之後"
         )
         assert order.index("free-engine-section") < order.index("free-engine-hint")
         assert order.index("free-engine-hint") < order.index("engine-card-siliconflowfree")
@@ -1401,7 +1415,9 @@ async def test_sensitive_blocks_free_key_engine_card(tmp_path):
         assert select.value == before, "被機密守衛擋下應復原下拉值"
         await user.should_see("機密文件僅 DeepSeek", retries=20)  # 警告通知出現
 
-        classes = next(iter(_engine_card(user, "deepseek").elements)).classes
+        # 付費單卡自動切到 DeepSeek（機密下唯一可顯示的不訓練引擎）＋高亮
+        user.find(kind=ui.icon, marker="info-engine-deepseek")
+        classes = _paid_key_card(user).classes
         assert "ring-primary" in classes, "機密下換引擎被擋，任務引擎仍 DeepSeek"
 
 
@@ -1427,28 +1443,117 @@ async def test_free_key_engine_section_dom_order(tmp_path):
         )
 
 
-# ── 付費卡灰化（2026-08-13 使用者要求：無 API key 時 4 付費卡灰色不可點）──
+# ── 付費引擎區單卡＋下拉（2026-08-13 使用者要求「卡片欄位太多」──6 卡收斂）──
+
+
+@pytest.mark.asyncio
+async def test_paid_key_engine_section_renders(tmp_path):
+    """付費引擎區渲染（2026-08-13 使用者要求「卡片欄位太多」改下拉）：header＋品質
+    提示＋下拉選單（6 引擎選項＝registry 單點）＋單卡顯示所選引擎（ⓘ tooltip 隨引擎）。"""
+    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
+
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("付費引擎（自備 key）")
+        user.find(marker="paid-key-engine-hint")  # 品質提示存在
+        select = _paid_key_select(user)
+        assert set(select.options) == set(UI_ENGINE_IDS), "下拉選項＝registry 單點（6 引擎）"
+        assert select.value in UI_ENGINE_IDS, "下拉預設應為某支付費引擎"
+        user.find(kind=ui.icon, marker=f"info-engine-{select.value}")  # ⓘ tooltip 存在
+        card_el = _paid_key_card(user)
+        assert "pk-engine-card" in card_el.classes, "付費單卡應套引擎卡主題樣式"
+
+
+@pytest.mark.asyncio
+async def test_paid_key_engine_selection_passes_key(tmp_path, monkeypatch, make_blank_pdf):
+    """付費下拉挑選→翻譯：填 key 後下拉換引擎（OpenAI 為例），build_engine 收到該 key
+    （BYOK 付費語意——與免費 LLM 下拉同款機制）。"""
+    from test_ui_flow import FileWritingFakeEngine
+
+    calls = []
+
+    def spy_build_engine(spec, api_key="", **kw):
+        calls.append((spec.id, api_key))
+        return FileWritingFakeEngine()
+
+    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    service, settings, cost, glossaries = _build(tmp_path)
+    settings.set_api_key("openai", "sk-proj-test")
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        select = _paid_key_select(user)
+        select.value = "openai"  # 下拉挑選（公開 property，同 lang_select 模式）
+        card_el = _paid_key_card(user)
+        assert "ring-primary" in card_el.classes, "下拉挑選後單卡應有選中高亮"
+        assert "pk-engine-card--disabled" not in card_el.classes, "有 key 引擎卡不應灰化"
+        user.find(kind=ui.icon, marker="info-engine-openai")  # ⓘ tooltip 隨引擎切換
+        pdf = make_blank_pdf(tmp_path / "OA1.pdf")
+        upload_el = next(iter(user.find(ui.upload).elements))
+        await upload_el.handle_uploads([
+            SmallFileUpload(name=pdf.name, content_type="application/pdf", _data=pdf.read_bytes()),
+        ])
+        await user.should_see("OA1.pdf", retries=20)
+        user.find("📂 開始翻譯").click()
+        await user.should_see("任務已建立", retries=20)
+        from paper_kit.domain.translation_job import JobStatus
+
+        for _ in range(50):
+            if service.list_jobs()[-1].status is JobStatus.COMPLETED:
+                break
+            await asyncio.sleep(0.1)
+        job = service.list_jobs()[-1]
+        assert job.status is JobStatus.COMPLETED, f"翻譯未在時限內完成：{job.error}"
+        assert job.engine_id == "openai", f"任務應記 openai，實際 {job.engine_id}"
+        assert calls == [("openai", "sk-proj-test")], (
+            f"OpenAI 引擎應收到使用者自備的付費 key，實際 {calls}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_paid_key_engine_section_dom_order(tmp_path):
+    """付費引擎區 DOM 位置：機密勾選之後；區內 header → hint → 下拉 → 單卡；
+    零 key 免費區之前。"""
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        order = [m for _, m in _dom_markers(user.client.content)]
+        assert order.index("paid-key-engine-section") < order.index("paid-key-engine-hint")
+        assert order.index("paid-key-engine-hint") < order.index("paid-key-engine-select")
+        assert order.index("paid-key-engine-select") < order.index("paid-key-engine-card")
+        assert order.index("paid-key-engine-card") < order.index("free-engine-section"), (
+            "付費引擎區必須在零 key 免費區之前"
+        )
+
+
+# ── 付費卡灰化（2026-08-13 使用者要求：無 API key 時付費引擎灰色不可選）──
 
 
 @pytest.mark.asyncio
 async def test_paid_cards_greyed_out_without_key(tmp_path):
-    """無任何 API key：4 張付費卡（siliconflow/deepseek/babeldoc/latex）灰化
-    （pk-engine-card--disabled）且點擊不切換（notify 阻擋）。"""
+    """無任何 API key：付費單卡（目前顯示引擎）灰化（pk-engine-card--disabled）且
+    下拉換引擎被擋（值復原＋notify 阻擋）。"""
     service, settings, cost, glossaries = _build(tmp_path)  # 不設任何 key
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        for eid in ("siliconflow", "deepseek", "babeldoc", "latex"):
-            card = next(iter(_engine_card(user, eid).elements))
-            assert "pk-engine-card--disabled" in card.classes, (
-                f"{eid} 付費卡無 key 應灰化"
-            )
-        # 點擊付費卡（deepseek，非預設）→ 阻擋：不切換＋警告通知
-        deepseek = next(iter(_engine_card(user, "deepseek").elements))
-        _engine_card(user, "deepseek").click()
-        assert "ring-primary" not in deepseek.classes, "無 key 時點付費卡不得切換"
+        card_el = _paid_key_card(user)
+        assert "pk-engine-card--disabled" in card_el.classes, "付費單卡無 key 應灰化"
+        select = _paid_key_select(user)
+        before = select.value
+        select.value = "deepseek"  # 未填 key 的引擎
+        assert select.value == before, "無 key 引擎下拉應被擋並復原"
         await user.should_see("尚未設定", retries=20)  # 警告通知出現
 
 
@@ -1473,7 +1578,8 @@ async def test_free_key_card_greyed_out_without_key(tmp_path):
 
 @pytest.mark.asyncio
 async def test_paid_card_unlocks_after_key_set(tmp_path):
-    """設定 key 後（重開頁）付費卡解禁——灰化以「是否有 key」為準，不是永久灰。"""
+    """設定 key 後（重開頁）付費卡解禁——灰化以「是否有 key」為準，不是永久灰。
+    latex 例外：沿用 deepseek 槽位語意（同 _has_key/_resolve）。"""
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-ds-key")
 
@@ -1481,12 +1587,19 @@ async def test_paid_card_unlocks_after_key_set(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        card = next(iter(_engine_card(user, "deepseek").elements))
-        assert "pk-engine-card--disabled" not in card.classes, "填 key 後付費卡應解禁"
-        # 其餘無 key 付費卡仍灰（latex 例外——沿用 deepseek 槽位語意，同 _resolve）
-        for eid in ("siliconflow", "babeldoc"):
-            c = next(iter(_engine_card(user, eid).elements))
-            assert "pk-engine-card--disabled" in c.classes, f"{eid} 未填 key 仍應灰化"
+        select = _paid_key_select(user)
+        # deepseek 有 key → 下拉可選且單卡不灰化
+        select.value = "deepseek"
+        card_el = _paid_key_card(user)
+        assert "pk-engine-card--disabled" not in card_el.classes, "填 key 後付費卡應解禁"
+        # latex 沿用 deepseek 槽位 → 也可選（不灰）
+        select.value = "latex"
+        card_el = _paid_key_card(user)
+        assert "pk-engine-card--disabled" not in card_el.classes, "latex 沿用 deepseek key 應解禁"
+        # 其餘無 key 付費引擎仍被擋（siliconflow 未填 key）
+        before = select.value
+        select.value = "siliconflow"
+        assert select.value == before, "未填 key 引擎下拉應被擋並復原"
 
 
 @pytest.mark.asyncio

@@ -145,6 +145,35 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         info="LaTeX 源碼：公式指令原封保留、xelatex 編譯重排，token 最省"
         "（整本 NT$0.3 級，票 15 實測 NT$0.34）。僅適用 .tex 源碼上傳；PDF 請選上方三引擎。",
     ),
+    # ── 付費 OpenAI 相容引擎（2026-08-13 使用者要求：增加 OpenAI 與 Gemini 付費 API）──
+    # provider=openai（pdf2zh --openai 三旗標共用）；付費 API 層資料不用於訓練
+    # （與免費層不同）——sensitive_ok=True、機密文件可用。id 在 UI_ENGINE_IDS。
+    "openai": EngineSpec(
+        id="openai",
+        label="OpenAI（官方付費）",
+        provider="openai",
+        model="gpt-5-mini",
+        needs_key=True,
+        sensitive_ok=True,  # OpenAI API 資料不用於訓練（官方政策）——機密文件可用
+        base_url="https://api.openai.com/v1",
+        card_desc="OpenAI 官方（sk- key、用量付費）",
+        info="OpenAI 官方端點（api.openai.com，sk- key、pay-as-you-go）：gpt-5-mini 品質 T1、"
+        "成本親民（比 DeepSeek 貴但品質更高）；API 資料不用於訓練（官方政策）——"
+        "機密文件可用。無免費額度。",
+    ),
+    "gemini-pro": EngineSpec(
+        id="gemini-pro",
+        label="Google Gemini Pro（付費）",
+        provider="openai",
+        model="gemini-3-pro-latest",
+        needs_key=True,
+        sensitive_ok=True,  # 付費 API 層不訓練（免費層 gemini 引擎才資料訓練紅線）
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        card_desc="Gemini 3 Pro（付費層、不訓練）",
+        info="Google Gemini 付費 API（ai.google.dev 付費層 key）：Gemini 3 Pro 品質 T1"
+        "（翻譯/推理頂級）、長上下文；付費層資料不用於訓練——機密文件可用"
+        "（免費層 gemma 引擎仍會訓練——禁用）。用量付費。",
+    ),
     # ── 免費 LLM（2026-08-13，Free-LLM-Collection 查證後加入）──
     # 全 provider=openai（pdf2zh --openai 三旗標共用）、BYOK 免費 key（各自申請）、
     # sensitive_ok=False（免費層無 SLA／第三方雲端——機密文件不可用，票 10 紅線）。
@@ -247,8 +276,11 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
 }
 
 # P3：主頁引擎卡集合與顯示順序（票 19 明定三支 PDF 主引擎；latex 票 27 第 4 卡；
-# ppt-vision 走特化路線）。app.py 只迭代此 tuple——加引擎單點。
-UI_ENGINE_IDS: tuple[str, ...] = ("siliconflow", "deepseek", "babeldoc", "latex")
+# openai/gemini-pro 2026-08-13 使用者要求新增付費 API；ppt-vision 走特化路線）。
+# app.py 只迭代此 tuple——加引擎單點。
+UI_ENGINE_IDS: tuple[str, ...] = (
+    "siliconflow", "deepseek", "babeldoc", "latex", "openai", "gemini-pro",
+)
 
 # 免費翻譯入口（2026-08-13）：主頁「免費翻譯（不需 API key）」區的卡集合與順序——
 # 三支 needs_key=False 引擎（不變式測試把關：未來 keyless 引擎必須登記於此）。

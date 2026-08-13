@@ -249,14 +249,45 @@ def test_free_key_specs_openai_provider():
         assert spec.info, f"{eid} 缺 info（含隱私警語）"
 
 
-def test_all_openai_provider_specs_in_free_key_ids():
-    """不變式：所有 provider=openai 的引擎必須在 UI_FREE_KEY_ENGINE_IDS——
-    未來加 OpenAI 相容免費端點不上免費 LLM 卡即紅。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+def test_all_openai_provider_specs_covered_by_ui_tuples():
+    """不變式：所有 provider=openai 的引擎必須上卡（UI_FREE_KEY_ENGINE_IDS 免費 LLM
+    ∪ UI_ENGINE_IDS 付費 OpenAI 相容）——2026-08-13 加入付費 openai/gemini-pro 後，
+    免費區守衛改為全覆蓋守衛（漏登記任何 OpenAI 相容引擎即紅）。"""
+    from paper_kit.infrastructure.engine_registry import (
+        UI_ENGINE_IDS,
+        UI_FREE_KEY_ENGINE_IDS,
+    )
 
     openai_prov = {eid for eid, spec in ENGINE_SPECS.items() if spec.provider == "openai"}
-    assert openai_prov <= set(UI_FREE_KEY_ENGINE_IDS), (
-        f"未上免費 LLM 卡：{openai_prov - set(UI_FREE_KEY_ENGINE_IDS)}"
+    covered = set(UI_FREE_KEY_ENGINE_IDS) | set(UI_ENGINE_IDS)
+    assert openai_prov <= covered, f"未上任何卡：{openai_prov - covered}"
+
+
+# ── 付費 OpenAI 相容引擎（2026-08-13 使用者要求：OpenAI／Gemini 付費 API）──
+
+
+def test_registry_has_openai_and_gemini_pro_paid_specs():
+    """使用者要求（2026-08-13）：新增 OpenAI（Codex API 同 key）與 Gemini 付費引擎。"""
+    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
+
+    for eid in ("openai", "gemini-pro"):
+        spec = ENGINE_SPECS[eid]
+        assert spec.needs_key is True, f"{eid} 為付費引擎（需自備 key）"
+        assert spec.sensitive_ok is True, (
+            f"{eid} 付費 API 層不用資料訓練——機密文件可用（票 10 紅線合規）"
+        )
+        assert spec.provider == "openai", f"{eid} 走 pdf2zh --openai 三旗標"
+        assert spec.base_url.startswith("https://"), f"{eid} base_url 異常"
+        assert spec.model and spec.card_desc and spec.info, f"{eid} 缺 model/card_desc/info"
+        assert eid not in UI_FREE_KEY_ENGINE_IDS, f"{eid} 是付費引擎不該在免費 LLM 區"
+
+
+def test_ui_engine_ids_include_new_paid_engines():
+    """付費卡集合含新增兩引擎（順序＝既有四卡後尾加）。"""
+    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
+
+    assert UI_ENGINE_IDS == (
+        "siliconflow", "deepseek", "babeldoc", "latex", "openai", "gemini-pro",
     )
 
 

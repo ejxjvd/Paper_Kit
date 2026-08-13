@@ -392,9 +392,10 @@ async def test_settings_page_cache_section_renders(tmp_path):
 
 @pytest.mark.asyncio
 async def test_engine_key_sections_separate_paid_and_free(tmp_path):
-    """引擎 API keys 分兩區——付費四卡在前、免費 LLM 七卡在後，各有區標題
+    """引擎 API keys 分兩區——付費六卡在前、免費 LLM 七卡在後，各有區標題
     （paid-keys-section → free-keys-section），卡不混雜。"""
     from test_index_page import _dom_markers
+    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
 
     settings, cost, glossaries = _build_settings(tmp_path)
 
@@ -408,8 +409,8 @@ async def test_engine_key_sections_separate_paid_and_free(tmp_path):
         assert order.index("paid-keys-section") < order.index("free-keys-section"), (
             "付費區必須在免費區之前"
         )
-        # 付費四卡全部落在免費區之前（不混雜）
-        for eid in ("siliconflow", "deepseek", "babeldoc", "latex"):
+        # 付費六卡（含新增 OpenAI／Gemini Pro）全部落在免費區之前（不混雜）
+        for eid in UI_ENGINE_IDS:
             assert order.index(f"engine-key-{eid}") < order.index("free-keys-section"), (
                 f"付費卡 {eid} 應在免費區之前"
             )
