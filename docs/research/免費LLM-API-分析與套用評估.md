@@ -1,0 +1,93 @@
+# 免費 LLM API 分析與套用評估（#28）
+
+> 2026-08-13。使用者提供兩來源：soft4fun《25 個免費 LLM API 整理》＋
+> chatanywhere（gpt_api_free，免費 API 轉發服務）。評估目標：能否（值得否）套用到
+> Paper_Kit 的翻譯引擎插頭，降低「花費金額」——#23 已證實現行三引擎整本論文只要
+> NT$5–8，本報告在該基礎上回答「免費方案省得下這 5–8 塊嗎」。
+
+## 結論（TL;DR）
+
+1. **沒有可支撐整本論文批次翻譯的長期免費方案**。免費層的本質是「限流＋教育/實驗用途」，
+   而 Paper_Kit 是批次翻譯器：單次任務數百次 API 呼叫、還可能一天多本——與免費層的
+   設計用途（聊天、教學、低頻實驗）完全相反。
+2. **金額維度已無感**：現行付費成本 58 頁 NT$5–8（#23 實測）。免費方案省下的絕對金額
+   小於一杯飲料，卻換來限流排隊、不穩定性、隨時下架、條款風險（禁商用／資料訓練／
+   轉發中介）。**不成比例**。
+3. **機密紅線**：chatanywhere 類轉發服務把論文內容送進第三方中介（部分模型甚至是
+   「逆向渠道」）；Mistral 免費層把資料拿去訓練。未發表研究的論文絕不可走。
+4. **若要試免費**：唯一勉強合格的候選是 **OpenRouter（$10 終身升級 → 1000 req/day）**，
+   官方聚合商、OpenAI 相容、無資料訓練爭議——但仍要自備 key、限流偏緊、品質參差。
+   其餘（Google AI Studio 20 RPD、NVIDIA NIM 40 RPM、SambaNova 一次性試用金…）
+   全部不適合批次翻譯工作負載。
+
+## 一、本專案的真實工作負載（評估基準）
+
+| 指標 | 數值 | 來源 |
+|---|---|---|
+| 單頁翻譯 tokens | in 2.8k–5.3k、out 0.9k–1.5k（2 頁實測） | #23 生產數據 |
+| 整本 58 頁 | in ≈ 165k–310k、out ≈ 51k–87k | #23 外推 |
+| API 呼叫次數（58 頁） | 粗估 300–600 次（版面分析＋段落翻譯＋術語，每次 5–15k tokens 分塊） | babeldoc 實跑（2 頁 21 段落）推估 |
+| 每日多本作業 | 可達 1,200+ 次呼叫/天 | 使用者典型使用 |
+
+關鍵：**單次任務需要「單日數百次」級別**——所有限流是「每天 N 次」的免費方案都直接出局。
+
+## 二、25 個免費 API 逐項評估（soft4fun）
+
+| 方案 | 限流/額度 | 58 頁需求 vs 配額 | 判定 |
+|---|---|---|---|
+| **Google AI Studio** | Gemini 3 Flash **20 RPD**；Gemma 3 15K TPM／30 RPM／14,400 RPD | 差 15–30 倍 | ❌ Gemini 免費層幾乎不可用；Gemma 3（14,400 RPD）理論夠但 30 RPM 卡批次、且 TPM 15K 遠小於單次呼叫 5–15k 極限 |
+| **OpenRouter 免費** | 20 RPM／**50 req/day**；$10 終身 → 1,000/day | 差 12 倍 → 升級後剛好 | ⚠️ 升級後勉強夠；品質參差、隨時變動 |
+| **NVIDIA NIM** | ~40 RPM（無明確每日總量）、手機驗證 | 若無日總量則可 | ⚠️ 40 RPM × 連續跑 ≈ 600 次需 15 分鐘＋；無日總量說法未實證 |
+| **Mistral** | 1 req/s、**同意資料訓練** | 速率夠 | ❌ 論文內容進訓練集——一票否決 |
+| **HuggingFace** | ~$0.10/月 credit | 差 100 倍以上 | ❌ |
+| **Cohere** | 20 RPM／**1,000 req/月** | 一本書就吃掉 60% | ❌ |
+| **GitHub Models** | 依 Copilot 訂閱，免費 token 極少 | — | ❌ 開發測試用途 |
+| **Cerebras / Groq** | 每模型 RPM/RPD（大模型日上限低） | 大模型（翻譯品質需要）上限低 | ❌ |
+| **Cloudflare Workers AI** | 10,000 neurons/天 | 計算單位制、模型品質未知 | ❌ |
+| **Vercel AI Gateway** | $5/月後轉付費 | 只是路由層 | ❌ 不省錢 |
+| **Fireworks / Baseten / Nebius / Novita / AI21 / Upstage / NLP Cloud / Inference.net / Hyperbolic / Modal** | $0.5–30 一次性試用金 | 一次性，用完即止 | ❌ 不是長期免費 |
+| **Alibaba Model Studio** | 每模型 **1M tokens** | 一本書 in 165–310k → 約 1–2 本 | ⚠️ 一次性額度可頂 1–2 本；到期付費 |
+| **Scaleway** | **1M free tokens**（DeepSeek R1 Distill / Gemma 3 27B） | 同上 | ⚠️ 一次性；R1 Distill 品質打折 |
+| **SambaNova** | $5／3 個月（DeepSeek V3/R1、Qwen3） | $5 額度約 3–6 本 | ⚠️ 一次性試用金；到期即停 |
+
+## 三、chatanywhere（轉發服務）——三重紅線
+
+OpenAI 相容轉發：免費 10,000 點/天、deepseek 系 **30 次/天**、gpt-4o-mini 系 100 次/天、
+200 req/day/IP&Key。表面誘人（免費＋OpenAI 相容＝引擎插頭直接可插），但：
+
+1. **限流紅線**：30 次/天（deepseek）連 1 頁都不夠；gpt-4o-mini 100 次/天 ≈ 半本到一本
+   （且 4o-mini 翻譯品質低於 deepseek-chat）。
+2. **條款紅線**：「免費 API Key 嚴禁商用」「系統僅供內部評估測試使用」——本專案翻譯
+   論文屬商業/事業用途，直接違約，且有「不定期封禁濫用帳戶」。
+3. **機密紅線**：轉發中介（非官方供應商）＝論文內容經第三方轉手；部分模型明示為
+   「逆向渠道」。未發表研究文件絕不可走。另「OpenAI 官方依數據政策保留 30 天資料」。
+4. **穩定性**：自承「小概率響應慢或報錯」「模型可能已被官方下架」——批次任務跑一半
+   斷線的風險成本遠超省下的錢。
+
+## 四、套用影響（若仍要試免費引擎）
+
+工程面並非零成本——加免費引擎 = 新增插頭 + 限流對策 + 不穩定監控：
+
+| 面向 | 現況 | 免費引擎需新增 |
+|---|---|---|
+| 引擎插頭 | `TranslationEnginePort`＋`engine_registry`（OpenAI 相容後端直接插） | 註冊新引擎（base_url/key/模型名）；`siliconflowfree`（價格 0）已是先例 |
+| 限流 | `CliAdapterBase` 暫時性簽名重試（2s/4s 退避，共 2 次） | 免費層 429 是常態——需要**專用退避**（指數 + 上限 + 速率節流），否則任務必失敗 |
+| 敏感文件 | `engine_allows_sensitive` 機制已有 | 免費引擎必須宣告不可處理敏感文件（轉發/資料訓練供應商尤其） |
+| 成本顯示 | `pricing` 表 0 成本條目＋`CostService` | 已支持（siliconflowfree 先例），零改動 |
+
+## 五、建議
+
+1. **維持現行付費引擎為主力**（#23：整本 NT$5–8，成本已極低；品質/穩定性有保障）。
+2. **不採納**：chatanywhere（三重紅線）、Mistral 免費（資料訓練）、Google AI Studio
+   Gemini 免費層（20 RPD）、一次性試用金方案（非長期免費）。
+3. **可選試水**：OpenRouter 免費層（自備 key、$10 終身升級 1,000 req/day）——作為
+   開發測試或低頻用途的備援引擎；不做主力（限流偏緊、模型品質參差、供應商政策隨時變）。
+4. **未來若 SiliconFlow 官方免費額度恢復**：唯一「乾淨」的免費路徑（官方供應商＋OpenAI
+   相容＋既有插頭與 `siliconflowfree` 先例），屆時只需 pricing 表 0 成本＋registry 註冊。
+
+## 附：資料來源
+
+- soft4fun《25 個免費 LLM API 整理》https://www.soft4fun.net/tech/ai/25-free-llm-api.htm
+  （2026-08-13 抓取；限流數字以文表為準，供應商政策隨時變動）
+- chatanywhere/gpt_api_free https://github.com/chatanywhere/gpt_api_free（README 全文）
+- #23 生產實測數據（Paper_Kit jobs 表＋babeldoc 實跑復刻）
