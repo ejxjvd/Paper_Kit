@@ -270,6 +270,33 @@ def test_build_command_glossary_with_auto_extract_keeps_extraction_enabled():
 # ── translate：成功解析 ──────────────────────────────────
 
 
+def test_free_engine_translate_without_key_skips_key_guard():
+    """免費引擎（requires_key=False、無 key）translate 不 raise「尚未設定 key」。
+
+    2026-08-13 使用者實測回報：siliconflowfree/google/bing 三支免費引擎全被
+    CliAdapterBase.translate 的 key 守衛誤擋（「錯誤：尚未設定 API key」）——
+    免費引擎送 pdf2zh 的指令根本不含 key 旗標，守衛應只對需要 key 的引擎檢查。
+    """
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="siliconflowfree", requires_key=False, api_key=""),
+        runner=FakeRunner((0, LOG)),
+    )
+    result = adapter.translate(make_job())
+    assert result.mono_path == "/out/paper.zh.mono.pdf"
+    assert len(adapter._runner.calls) == 1, "免費引擎無 key 也應真正執行引擎"
+
+
+def test_key_required_engine_without_key_raises_missing_key():
+    """需要 key 的引擎無 key → 維持 raise（守衛不移除，只對免費引擎放行）。"""
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="siliconflow", requires_key=True, api_key=""),
+        runner=FakeRunner((0, LOG)),
+    )
+    with pytest.raises(EngineError, match="尚未設定.*key"):
+        adapter.translate(make_job())
+    assert len(adapter._runner.calls) == 0, "缺 key 時不得執行引擎"
+
+
 def test_translate_success_parses_outputs_and_tokens():
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=FakeRunner((0, LOG)))
     result = adapter.translate(make_job())

@@ -35,10 +35,13 @@ _RE_TOKENS = re.compile(
 
 @dataclass(frozen=True)
 class EngineConfig:
-    provider: str = "siliconflow"           # "siliconflow" | "deepseek"
+    provider: str = "siliconflow"           # "siliconflow" | "deepseek" | "siliconflowfree" | "google" | "bing" | openai 系
     model: str = DEFAULT_MODEL
     api_key: str = ""
     term_api_key: str = ""                  # #84：術語提取獨立 key（空＝沿用 api_key）
+    # 2026-08-13（免費引擎誤擋修復）：build_engine 帶入 spec.needs_key——
+    # 免費引擎（siliconflowfree/google/bing）false，translate 守衛放行（指令本就不含 key 旗標）
+    requires_key: bool = True
     base_url: str = DEFAULT_BASE_URL        # SiliconFlow 國際站
     retries: int = 2                        # 暫時性錯誤重試次數
     # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
@@ -149,6 +152,9 @@ class Pdf2zhNextAdapter(CliAdapterBase):
 
     def _api_key(self) -> str:
         return self._config.api_key
+
+    def _requires_key(self) -> bool:
+        return self._config.requires_key
 
     def _build_command(self, job: TranslationJob) -> list[str]:
         # module 層查詢：測試 monkeypatch build_command 仍生效

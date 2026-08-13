@@ -89,6 +89,11 @@ class CliAdapterBase:
     def _api_key(self) -> str:
         raise NotImplementedError
 
+    def _requires_key(self) -> bool:
+        """此引擎需要 API key 嗎？（2026-08-13：免費引擎覆寫為 False——否則
+        translate 守衛把 siliconflowfree/google/bing 全擋成「尚未設定 API key」。）"""
+        return True
+
     def _build_command(self, job: TranslationJob) -> list[str]:
         raise NotImplementedError
 
@@ -206,7 +211,7 @@ class CliAdapterBase:
             _kill_tree(proc)
 
     def translate(self, job: TranslationJob) -> JobResult:
-        if not self._api_key():
+        if self._requires_key() and not self._api_key():
             raise EngineError(MISSING_API_KEY_MESSAGE)
         if self._cancelled:
             raise EngineError("已取消")

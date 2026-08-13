@@ -286,5 +286,6 @@ def build_engine(
         api_key=api_key,
         term_api_key=term_api_key,  # #84：術語提取獨立 key（空＝build_command 沿用主 key）
         base_url=spec.base_url,
+        requires_key=spec.needs_key,  # 2026-08-13：免費引擎（needs_key=False）translate 守衛放行
     )
     return Pdf2zhNextAdapter(cfg)
