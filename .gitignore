@@ -11,7 +11,6 @@ build/
 .coverage
 htmlcov/
 *.pdf
-!docs/**/*.pdf
 
 # babeldoc 自動提取術語表等產出副產物
 *.glossary.csv

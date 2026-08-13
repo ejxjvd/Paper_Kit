@@ -16,7 +16,7 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 - 🔒 **機密模式**：R18／隱私文件只准 DeepSeek 純文字引擎（視覺模型不上雲）
 - 🔍 **掃描件 OCR**：本機 RapidOCR（onnxruntime）預處理，不上雲——機密相容
 - 💰 **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
-- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**590 tests passed**
+- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**641 tests passed**
 
 ## 🚀 快速開始
 
@@ -35,7 +35,7 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 - **BYOK（推薦）**：每個使用者在自己的設定頁填各自的 API key（每引擎獨立、遮罩回顯）——您的 key 不會外流、費用各自承擔
 - **免費引擎**：三支不需 key 的引擎已內建（`google`／`bing`／`siliconflowfree`）——限流／品質較低，適合試用入口
 - **自架選項**：本機 ollama 等 OpenAI 相容後端可直接插（引擎註冊表單點）——零 API 費用
-- 詳細評估見 `docs/research/免費LLM-API-分析與套用評估.md`
+- 免費引擎（Free-LLM-Collection）查證與品質優先序收錄於開發知識庫（Obsidian `_personal/Paper_Kit/`）
 
 ## 📖 使用教學
 
@@ -57,12 +57,8 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 
 ## 📁 文件
 
-- `docs/規格書.md` — 原始規格書（PRD，GitHub issue #1 同步）
-- `docs/UI補強-規格書.md` — UI 補強規格書（issue #17 同步）
-- `docs/tickets/` — 20 張開發票（GitHub issues #2–#16 與 #18–#22 同步）
-- `docs/research/` — 免費 API 分析／三引擎成本比較／架構研究
-- `docs/problems/` — 問題與修復紀錄（票 27 等）
-- 完整研究與計畫庫存於 Obsidian Vault（`_personal/Paper_Kit/`）
+規格書（PRD）、20 張開發票（GitHub issues #2–#22 同步）、研究與問題修復紀錄
+已全部移至 Obsidian 知識庫 `_personal/Paper_Kit/`（專案文件不入 repo）。
 
 ## 📊 狀態
 
