@@ -43,14 +43,17 @@ body { background: var(--pk-bg); color: var(--pk-text); }
 .pk-meta, .pk-cost { color: var(--pk-text-muted); }
 .pk-error { color: var(--pk-error); }
 .pk-progress { color: var(--pk-progress); }
-/* 2026-08-13 引擎三卡等高統一（使用者回報「格式大小不一、框框大小不一致」）：
-   min-height 等高三卡、flex column 垂直置中、邊框/圓角用主題 token；
-   desc 區固定兩行高（min-height 2.4em），短描述不再造成卡高參差。 */
+/* 2026-08-13 引擎三卡等高統一（使用者兩次回報「3 個按鍵大小不統一」）：
+   第 1 次修復（9edfe9f）用 min-height 保底——只設下界，desc 行數不同
+   （窄視窗/zoom 下 siliconflow 描述較長易換行）時內容把卡撐高，依然不等高。
+   第 2 次回報後改**固定 height**（min-height 只保底不鎖死）＋desc 兩行封頂
+   （max-height 2.4em＋overflow hidden）——卡高永不隨內容變化、三卡絕對等高。 */
 .pk-engine-card {
-  min-height: 96px;
+  height: 104px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  box-sizing: border-box;
   border: 1px solid var(--pk-border);
   border-radius: var(--pk-radius);
   background: var(--pk-card-bg);
@@ -61,7 +64,9 @@ body { background: var(--pk-bg); color: var(--pk-text); }
 }
 .pk-engine-card .pk-engine-desc {
   min-height: 2.4em;
+  max-height: 2.4em;
   line-height: 1.2em;
+  overflow: hidden;
 }
 """
 

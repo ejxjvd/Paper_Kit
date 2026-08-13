@@ -38,13 +38,26 @@ def test_theme_css_has_card_beautification_classes():
 
 
 def test_theme_css_defines_engine_card_rules():
-    """2026-08-13 使用者回報「3 個按鈕大小不一」：引擎三卡須等高統一
-    （min-height＋flex column 垂直置中＋卡片邊框/圓角 token）。"""
+    """2026-08-13 使用者兩次回報「3 個按鍵大小不統一」：引擎三卡須**絕對等高**。
+
+    第 1 次修復（commit 9edfe9f）用 min-height 保底——只設下界，desc 行數
+    不同（窄視窗/zoom 下 siliconflow 描述較長易換行）時內容把卡撐高，依然
+    不等高。第 2 次回報後改**固定 height**（min-height 只保底不鎖死）＋
+    desc 兩行封頂（max-height 截斷）——卡高永不隨內容變化。"""
     assert ".pk-engine-card" in THEME_CSS
     card_section = THEME_CSS.split(".pk-engine-card", 1)[1]
-    assert "min-height" in card_section, "三卡等高（min-height）"
+    assert "height: 104px" in card_section, "三卡固定高度（min-height 只保底、內容會撐高）"
     assert "var(--pk-border)" in card_section, "邊框用主題 token"
     assert "var(--pk-radius)" in card_section, "圓角用主題 token"
+
+
+def test_theme_css_engine_desc_capped_at_two_lines():
+    """desc 兩行封頂：max-height 2.4em（1.2em 行高 × 2）＋overflow hidden——
+    3 行以上截斷，卡高永不因 desc 行數而變。"""
+    assert ".pk-engine-desc" in THEME_CSS
+    desc_section = THEME_CSS.split(".pk-engine-desc", 1)[1]
+    assert "max-height: 2.4em" in desc_section
+    assert "overflow: hidden" in desc_section
 
 
 def test_theme_css_defines_disabled_engine_card():

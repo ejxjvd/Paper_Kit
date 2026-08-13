@@ -622,7 +622,10 @@ def _settings_page(
                 ).classes("text-xs text-grey-6")
                 for eid, desc in ENGINE_CARDS:
                     spec = ENGINE_SPECS[eid]
-                    with ui.card().mark(f"engine-key-{eid}").classes("w-full gap-2"):
+                    # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
+                    # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
+                    # Quasar 默認樣式造成跨頁視覺分歧
+                    with ui.card().mark(f"engine-key-{eid}").classes("pk-card w-full gap-2"):
                         with ui.row().classes("items-center justify-between w-full"):
                             ui.label(spec.label).classes("font-semibold")
                             ui.badge("已設定" if settings.api_key(eid) else "未設定 key")

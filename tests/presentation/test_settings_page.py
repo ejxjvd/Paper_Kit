@@ -104,6 +104,25 @@ async def test_settings_page_shows_three_engine_key_cards_with_masking(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_engine_key_cards_use_theme_card_tokens(tmp_path):
+    """2026-08-13 使用者二次回報「框框大小不一致」：設定頁三張引擎子卡
+    必須套主題卡樣式（.pk-card——border/radius/shadow 與主頁卡同一 token
+    來源），不留在 Quasar 默認樣式造成跨頁視覺分歧。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        for eid in ("siliconflow", "deepseek", "babeldoc"):
+            card = next(iter(user.find(kind=ui.card, marker=f"engine-key-{eid}").elements))
+            assert "pk-card" in card.classes, f"引擎子卡 {eid} 應套 .pk-card（主題 token）"
+
+
+@pytest.mark.asyncio
 async def test_save_key_stores_only_that_engine(tmp_path):
     """AC2+AC3：儲存一卡的 key 只寫該引擎；他引擎 key 不受影響。"""
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
