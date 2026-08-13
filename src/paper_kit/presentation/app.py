@@ -9,6 +9,7 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 import asyncio
 import logging
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,8 @@ from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
+from paper_kit.infrastructure.app_paths import app_data_dir  # v0.1.2：portable 資料目錄（單一權威）
+
 from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
     OcrService,
     has_text_layer,
@@ -74,11 +77,23 @@ from paper_kit.presentation.handlers import (  # P2：純函式統一在 handler
 )
 from paper_kit.presentation.theme import apply_theme
 
-APP_DIR = Path.home() / ".paper_kit"
+APP_DIR = app_data_dir()  # v0.1.2：打包後 = exe 旁 data/（portable，刪資料夾即全清）；開發 = ~/.paper_kit
 OUTPUTS_DIR = APP_DIR / "outputs"
 GLOSSARIES_DIR = APP_DIR / "glossaries"
 DB_PATH = APP_DIR / "paper_kit.db"
 FILES_BASE = "/files"
+
+
+def uninstall_all_data(app_dir: Path = APP_DIR) -> Path:
+    """v0.1.2：乾淨卸載——刪除整個 app 資料目錄（任務歷史、設定、KEY、
+    輸出、logs、術語表）。回傳被刪路徑（不存在也安全）。
+    v0.1.2 起資料與程式同資料夾（portable，exe 旁 data/）→ 刪除整個
+    程式資料夾即全部清除；`--uninstall` 為可選保險（只清資料、留程式，
+    2026-08-14 使用者要求「乾淨」定案）。
+    """
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+    return app_dir
 
 BADGE_COLORS = {
     JobStatus.QUEUED: "blue-grey",
@@ -1531,6 +1546,16 @@ def _history_row(view: JobCardView, job: TranslationJob, cost: CostService | Non
 
 
 def main() -> None:
+    # v0.1.2：`paper-kit --uninstall`——乾淨卸載（console 視窗執行）
+    if "--uninstall" in sys.argv:
+        try:  # Windows console 可能是 cp1252/cp950——中文訊息先轉 UTF-8
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        removed = uninstall_all_data()
+        print(f"已刪除 Paper_Kit 全部資料：{removed}")
+        print("現在可以安全刪除程式資料夾（exe 與 _internal）。")
+        sys.exit(0)
     APP_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     LOG_PATH = setup_logging(APP_DIR / "logs")  # 票 09：結構化 log 檔（debug 頁讀同一份）

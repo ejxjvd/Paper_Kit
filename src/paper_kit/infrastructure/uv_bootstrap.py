@@ -4,9 +4,10 @@
 自行安裝」）。
 
 偵測鏈：系統 PATH → ~/.local/bin（uv 官方 install script 落點）→
-~/.paper_kit/bin（app 專屬，自動安裝落點）。自動安裝直接下載 uv 官方
-二進制 release（平台分支）解壓到 app 專屬目錄——不改使用者環境（不寫
-PATH）、不需 shell（Windows 無 sh）。全鏈失敗才回 None，呼叫方給可操作錯誤。
+app 資料目錄/bin（v0.1.2 起 = 程式旁 data/bin，portable；見
+infrastructure/app_paths.py）。自動安裝直接下載 uv 官方二進制 release
+（平台分支）解壓到 app 專屬目錄——不改使用者環境（不寫 PATH）、不需
+shell（Windows 無 sh）。全鏈失敗才回 None，呼叫方給可操作錯誤。
 """
 
 import logging
@@ -18,9 +19,11 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from paper_kit.infrastructure.app_paths import app_data_dir  # v0.1.2：資料目錄單一權威（portable）
+
 logger = logging.getLogger(__name__)
 
-_APP_DIR_NAME = ".paper_kit"  # 與 presentation/app.py:76 共用語意（infra 不 import presentation）
+_APP_DIR_NAME = ".paper_kit"  # 開發/測試落點名（v0.1.2 起資料目錄單一權威在 app_paths.app_data_dir）
 
 _UV_DOWNLOAD_BASE = "https://github.com/astral-sh/uv/releases/latest/download"
 # 平台 → 官方 release 資產名（latest 浮動可接受——工具層，測試 mock 不觸網）
@@ -60,11 +63,12 @@ def download_url() -> str | None:
 
 
 def app_uv_path() -> Path:
-    """app 專屬 uv 落點（~/.paper_kit/bin/uv[.exe]）。
+    """app 專屬 uv 落點（v0.1.2 起 = 程式旁 data/bin/uv[.exe]，portable）。
 
-    動態組 Path.home()——測試會 monkeypatch Path.home 隔離家目錄。
+    走 app_paths.app_data_dir() 單一權威（打包後 exe 旁、開發 ~/.paper_kit）；
+    測試 monkeypatch Path.home / sys.executable 隔離。
     """
-    return Path.home() / _APP_DIR_NAME / "bin" / uv_executable_name()
+    return app_data_dir() / "bin" / uv_executable_name()
 
 
 def installed_uv() -> Path | None:

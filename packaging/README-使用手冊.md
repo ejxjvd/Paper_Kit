@@ -1,4 +1,4 @@
-# 📄 Paper_Kit v0.1.1 使用手冊
+# 📄 Paper_Kit v0.1.2 使用手冊
 
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
@@ -10,7 +10,7 @@
 
 ## 🚀 快速啟動
 
-1. 雙擊 `paper-kit-v0.1.1.exe`（**黑色視窗 = 伺服器本體，請勿關閉**；關閉視窗 = 關閉服務）
+1. 雙擊 `paper-kit-v0.1.2.exe`（**黑色視窗 = 伺服器本體，請勿關閉**；關閉視窗 = 關閉服務）
 2. 瀏覽器自動開啟 **http://localhost:8080/**（若未自動開啟，請手動輸入此網址）
 3. 首次使用請先到**設定頁**填入引擎 API key（見下方「設定 API keys」）
 4. 拖放 PDF（或 .tex）→ 選引擎 → 開始翻譯
@@ -52,12 +52,12 @@
 
 ## 🍎 macOS 使用者（v0.1.1 新增）
 
-1. 下載 `paper-kit-v0.1.1-macos-arm64.zip`（Apple 晶片）並解壓
+1. 下載 `paper-kit-v0.1.2-macos-arm64.zip`（Apple 晶片）並解壓
 2. **首次開啟需繞過 Gatekeeper**（未簽名程式）：右鍵 exe → 選「開啟」→ 再點「開啟」
 3. 之後流程與 Windows 相同——「📁 瀏覽資料夾」會用 Finder（open）開啟
 4. 進階路線（LaTeX／BabelDOC）需自裝工具（見下方「進階路線前置需求」）
 
-> x86_64 Mac（Intel）請用 `paper-kit-v0.1.1-macos-x64.zip`（若 CI 有出）。
+> x86_64 Mac（Intel）請用 `paper-kit-v0.1.2-macos-x64.zip`（若 CI 有出）。
 
 ---
 
@@ -80,18 +80,34 @@
 
 ---
 
-## 💾 資料位置
+## 💾 資料位置（v0.1.2 起：資料跟程式走）
 
 | 內容 | 位置 |
 |---|---|
-| 設定（API keys）、任務歷史 | `%USERPROFILE%\.paper_kit\paper_kit.db` |
-| 輸出翻譯 PDF | `%USERPROFILE%\.paper_kit\outputs\` |
-| 術語表庫 | `%USERPROFILE%\.paper_kit\glossaries\` |
-| 翻譯快取 | `%USERPROFILE%\.paper_kit\cache\` |
-| 除錯 log | `%USERPROFILE%\.paper_kit\logs\` |
-| 自動安裝的 uv 工具 | `%USERPROFILE%\.paper_kit\bin\` |
+| 設定（API keys）、任務歷史 | `data\paper_kit.db`（程式資料夾內） |
+| 輸出翻譯 PDF | `data\outputs\` |
+| 術語表庫 | `data\glossaries\` |
+| 翻譯快取 | `data\cache\` |
+| 除錯 log | `data\logs\` |
+| 自動安裝的 uv 工具 | `data\bin\` |
 
-> 移除全部資料＝刪除 `.paper_kit` 資料夾（程式會自動重建全新乾淨環境）。
+> **換新版**：解壓新版本後，把舊版本資料夾裡的 `data` 整個複製到新資料夾，
+> 歷史與設定（API keys）就會帶過去。不複製＝全新開始（零殘留）。
+
+---
+
+## 🧹 完整移除（v0.1.2 新增）
+
+**刪除整個程式資料夾即完成卸載**——`data` 在程式資料夾內，刪掉資料夾 =
+任務歷史、設定、API keys、輸出全部清除，**系統零殘留**（無需登錄檔或
+其他位置）。
+
+1. 先關閉黑色視窗（若正在執行）
+2. 刪除整個 `paper-kit-v0.1.2` 資料夾
+3. 完成
+
+> 可選：只想清資料、保留程式——執行 `paper-kit-v0.1.2.exe --uninstall`
+> （黑視窗會短暫出現後自動關閉，`data` 即被清空）。
 
 ---
 
@@ -102,6 +118,7 @@
 - **防毒誤報**：PyInstaller 打包程式有時被誤判——如遭移除，請加入信任清單後重新解壓執行
 - **翻譯品質**：免費引擎（google/bing/siliconflowfree）限流且品質較低——正式使用請用 SiliconFlow 或 DeepSeek key
 - **「系統缺少 uv 工具且自動下載失敗」**：表示離線或 GitHub 無法連線——連網後重試翻譯即可
+- **換新版後沒看到歷史紀錄/設定？**：資料跟程式走——把舊版本資料夾的 `data` 複製到新資料夾即可帶過去（見「💾 資料位置」）
 
 ---
 
