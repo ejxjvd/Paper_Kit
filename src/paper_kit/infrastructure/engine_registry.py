@@ -205,9 +205,11 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         id="nvidia",
         label="NVIDIA NIM（免費旗艦）",
         provider="openai",
-        # v0.1.3（2026-08-14 使用者實測 410 Gone）：deepseek-v4-flash 於
-        # 2026-08-07 EOL 下線 → 改用 0731 快照版（設定頁可下拉挑選＋自訂，見 settings UI）
-        model="deepseek-ai/deepseek-v4-flash-0731",
+        # v0.1.3（2026-08-14 research 實測）：deepseek-v4-flash 2026-08-07 EOL 410，
+        # 0731 快照高風險（測試中、隨機輸出回報、家族下架前例）→ 預設改
+        # nemotron-3-super-120b-a12b（WMT24++ 55 語種 MT #1 0.867、1M ctx、
+        # 中文 LMArena 1402）。設定頁可下拉挑選＋自訂任一切換。
+        model="nvidia/nemotron-3-super-120b-a12b",
         needs_key=True,
         sensitive_ok=False,
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
@@ -217,11 +219,12 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         # （pdf2zh 預設併發瞬間踩爆 40 RPM 拿 429）。
         qps=0.6,
         max_workers=1,
-        card_desc="DeepSeek-V4-Flash 免費（T1/T2；40 RPM、無日總量）",
-        info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：DeepSeek-V4-Flash/GLM-5.2/"
-        "Kimi-K2.6 等旗艦模型免費、無日總量、免綁卡。無 SLA——429 會退避重試；"
-        "免費層限 40 RPM／並發 2-5——已內建節流（每 1.7 秒一發、不併發），"
-        "長文件需等待。檔案上 NVIDIA 雲端——機密文件不可用。設定頁可下拉挑選模型（API 即時拉取）。",
+        card_desc="Nemotron-3-Super-120B 免費（MT 榜首；40 RPM、無日總量）",
+        info="NVIDIA 官方免費端（build.nvidia.com，nvapi- key）：Nemotron-3-Super-120B"
+        "（WMT24++ 55 語種翻譯 #1）／GLM-5.2／Kimi-K2.6 等旗艦模型免費、無日總量、免綁卡。"
+        "無 SLA——429 會退避重試；免費層限 40 RPM／並發 2-5——已內建節流"
+        "（每 1.7 秒一發、不併發），長文件需等待。檔案上 NVIDIA 雲端——機密文件不可用。"
+        "設定頁可下拉挑選模型（API 即時拉取）。",
     ),
     "modelscope": EngineSpec(
         id="modelscope",
