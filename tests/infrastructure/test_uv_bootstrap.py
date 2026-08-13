@@ -71,13 +71,13 @@ def test_detect_path_first(fake_home, monkeypatch):
 def test_detect_home_local_bin_fallback(fake_home, monkeypatch):
     monkeypatch.setattr(ub.shutil, "which", lambda _: None)
     (fake_home / ".local" / "bin").mkdir(parents=True)
-    (fake_home / ".local" / "bin" / "uv").touch()
-    assert ub.installed_uv() == fake_home / ".local" / "bin" / "uv"
+    (fake_home / ".local" / "bin" / ub.uv_executable_name()).touch()
+    assert ub.installed_uv() == fake_home / ".local" / "bin" / ub.uv_executable_name()
 
 
 def test_detect_app_dir_third(fake_home, monkeypatch):
     monkeypatch.setattr(ub.shutil, "which", lambda _: None)
-    app_uv = fake_home / ".paper_kit" / "bin" / "uv"
+    app_uv = fake_home / ".paper_kit" / "bin" / ub.uv_executable_name()
     app_uv.parent.mkdir(parents=True)
     app_uv.touch()
     assert ub.installed_uv() == app_uv
@@ -92,7 +92,7 @@ def test_detect_none_when_absent(fake_home, monkeypatch):
 
 def test_ensure_uv_existing_skips_download(fake_home, monkeypatch):
     monkeypatch.setattr(ub.shutil, "which", lambda _: None)
-    app_uv = fake_home / ".paper_kit" / "bin" / "uv"
+    app_uv = fake_home / ".paper_kit" / "bin" / ub.uv_executable_name()
     app_uv.parent.mkdir(parents=True)
     app_uv.touch()
     calls = []
@@ -194,11 +194,13 @@ def test_runner_uses_resolved_uv(fake_home, monkeypatch):
     """app 專屬目錄有 uv → runner 用它（不觸網、不用裸 "uv"）。"""
     monkeypatch.setattr(
         "paper_kit.infrastructure.cli_adapter_base.resolve_uv",
-        lambda timeout=60: str(fake_home / ".paper_kit" / "bin" / "uv"),
+        lambda timeout=60: str(fake_home / ".paper_kit" / "bin" / ub.uv_executable_name()),
     )
     adapter, captured = _runner_capture(monkeypatch)
     adapter.translate(_make_job())
-    assert captured["cmd"][0] == str(fake_home / ".paper_kit" / "bin" / "uv")
+    assert captured["cmd"][0] == str(
+        fake_home / ".paper_kit" / "bin" / ub.uv_executable_name()
+    )
 
 
 def test_runner_error_when_autodownload_fails(fake_home, monkeypatch):

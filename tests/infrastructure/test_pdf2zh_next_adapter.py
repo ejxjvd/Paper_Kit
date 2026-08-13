@@ -48,8 +48,10 @@ def test_uv_falls_back_to_home_local_bin(monkeypatch, tmp_path):
     uv.exe）——存在就改用絕對路徑執行，任何啟動方式（systemd/手動/無頭）
     都免疫；兩者皆無才給安裝指引。檢查在真實 runner 層。
     """
+    from paper_kit.infrastructure.uv_bootstrap import uv_executable_name
+
     (tmp_path / ".local" / "bin").mkdir(parents=True)
-    (tmp_path / ".local" / "bin" / "uv").touch()
+    (tmp_path / ".local" / "bin" / uv_executable_name()).touch()
     monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
                         lambda _: None)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -76,7 +78,7 @@ def test_uv_falls_back_to_home_local_bin(monkeypatch, tmp_path):
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 真 runner，不注入
     result = adapter.translate(make_job())
     # 用的絕對路徑 uv，不是裸 "uv"（PATH 找不到時裸名直接 Errno）
-    assert captured["cmd"][0] == str(tmp_path / ".local" / "bin" / "uv")
+    assert captured["cmd"][0] == str(tmp_path / ".local" / "bin" / uv_executable_name())
     assert isinstance(result, JobResult)
 
 
@@ -430,8 +432,10 @@ def test_inactivity_timeout_raises_when_no_output(monkeypatch, tmp_path):
     5–20s，段落 warning 行＝活性信號），卻被牆鐘硬殺。新機制改以「最後一行的
     時間」判 hang：有輸出就續命，只剩真的卡住才逾時。
     """
+    from paper_kit.infrastructure.uv_bootstrap import uv_executable_name
+
     (tmp_path / ".local" / "bin").mkdir(parents=True)
-    (tmp_path / ".local" / "bin" / "uv").touch()
+    (tmp_path / ".local" / "bin" / uv_executable_name()).touch()
     monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
                         lambda _: None)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -448,6 +452,7 @@ def test_inactivity_timeout_raises_when_no_output(monkeypatch, tmp_path):
     class SilentProc:
         returncode = 0
         pid = 99999  # kill_tree 會 killpg → ProcessLookupError → 放行
+        args = ["taskkill", "/T", "/F", "/PID", "99999"]  # subprocess.run 收尾組 CompletedProcess
 
         def __init__(self, cmd, **kwargs):
             self.stdout = NeverStream()
@@ -457,6 +462,23 @@ def test_inactivity_timeout_raises_when_no_output(monkeypatch, tmp_path):
 
         def wait(self):
             return 0
+
+        # Windows 上 _kill_tree 走 taskkill：subprocess.run 內部 `with Popen(...)`
+        # （Popen 自 3.9 是 context manager）——fake 要補齊介面（Linux 走
+        # killpg 不觸發，CI win-x64 實測 TypeError）
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        # subprocess.run 成功路徑會 communicate()、任何例外路徑都會 kill()——
+        # 兩者 fake 都要有（taskkill 已「跑完」，返回值無關緊要）
+        def communicate(self, input=None, timeout=None):
+            return (None, None)
+
+        def kill(self):
+            pass
 
     monkeypatch.setattr(
         "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", SilentProc
@@ -473,7 +495,8 @@ def test_translate_runs_engine_in_job_source_directory():
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"), runner=runner)
     adapter.translate(job)
     _, _, cwd = runner.calls[0]
-    assert cwd == "/in", f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
+    # Path 比較：Windows 上 Path("/in").parent str 為 "\\in"（CI win-x64 實測）
+    assert Path(cwd) == Path("/in"), f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
 
 
 # ── 票 08：取消 ─────────────────────────────────────────────
@@ -490,18 +513,24 @@ def test_translate_after_cancel_raises_without_running_engine():
         adapter.translate(make_job())
 
 
-def test_cancel_kills_running_subprocess(monkeypatch):
+def test_cancel_kills_running_subprocess(monkeypatch, tmp_path):
     """真實子程序：cancel() 要真的殺掉在跑的引擎（Popen handle 掛回 adapter）。"""
     import threading
     import time
 
-    # 讓引擎命令變成 sleep 30（build_command 換成假指令，保持預設 Popen runner）
+    # 讓引擎命令變成長睡（build_command 換成假指令，保持預設 Popen runner）
+    # Windows 的 timeout.exe 遇 stdin 重定向立刻退出（Input redirection is not
+    # supported）→ 換 ping -n 30（~30s，可重定向）；POSIX 用 sleep
+    sleep_cmd = (
+        ["ping", "-n", "30", "127.0.0.1"] if sys.platform == "win32" else ["sleep", "30"]
+    )
     monkeypatch.setattr(
         "paper_kit.infrastructure.pdf2zh_next_adapter.build_command",
-        lambda job, cfg: ["sleep", "30"],
+        lambda job, cfg: sleep_cmd,
     )
     adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))  # 預設 runner（真 Popen）
-    job = make_job(source_path="/tmp/slow.pdf")
+    # source_path 用 tmp_path：Windows 上 "/tmp/..." 當 cwd 會 WinError 267
+    job = make_job(source_path=str(tmp_path / "slow.pdf"))
     errors = []
 
     def run():

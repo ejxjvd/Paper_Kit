@@ -12,6 +12,7 @@
 import json
 import logging
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -299,7 +300,8 @@ def test_translate_runs_engine_in_job_source_directory():
     adapter = BabelDocAdapter(BabelDocConfig(api_key="KEY"), runner=runner)
     adapter.translate(make_job())  # source_path = /in/paper.pdf
     _, _, cwd = runner.calls[0]
-    assert cwd == "/in", f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
+    # Path 比較：Windows 上 Path("/in").parent str 為 "\\in"（CI win-x64 實測）
+    assert Path(cwd) == Path("/in"), f"引擎要以任務資料夾為 cwd（實得 {cwd!r}）"
 
 
 def test_engine_output_leaking_api_key_is_redacted_in_error_and_log(tmp_path):
