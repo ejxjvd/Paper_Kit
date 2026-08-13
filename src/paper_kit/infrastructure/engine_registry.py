@@ -216,6 +216,20 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         " 上限（併發 2——批次翻譯是天然限流）。品質存疑（第三方實測大幅退步）——"
         "請先試譯一段再決定。檔案上智譜雲端——機密文件不可用。",
     ),
+    "dashscope": EngineSpec(
+        id="dashscope",
+        label="阿里雲 Model Studio（Qwen 官方）",
+        provider="openai",
+        model="qwen3.7-flash",
+        needs_key=True,
+        sensitive_ok=False,
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        card_desc="Qwen3.7-Flash 免費（1M tokens／90 天）",
+        info="阿里雲 Model Studio 國際站（dashscope-intl，新加坡端點）：新帳號每合格模型"
+        " 1M tokens 一次性免費額度（90 天效期）、email 註冊免中國實名（比 ModelScope"
+        " 更國際化）。Qwen3.7-Flash 品質 T2/T3。⚠️ 免費額度非無限——翻譯量大會提早"
+        " 耗盡。資料上阿里雲新加坡端點——機密文件不可用。",
+    ),
     "gemini": EngineSpec(
         id="gemini",
         label="Google Gemini（gemma 長文）",
@@ -248,7 +262,7 @@ UI_FREE_ENGINE_IDS: tuple[str, ...] = ("siliconflowfree", "google", "bing")
 # 全走 provider=openai（pdf2zh --openai 三旗標）、BYOK（自申請免費 key 填入）。
 # app.py 只迭代此 tuple——加引擎單點。
 UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
-    "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini",
+    "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini",
 )
 
 

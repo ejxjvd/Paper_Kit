@@ -1284,7 +1284,7 @@ async def test_free_engine_section_dom_order(tmp_path):
 
 @pytest.mark.asyncio
 async def test_free_key_engine_cards_render(tmp_path):
-    """免費 LLM 區渲染：header＋品質提示＋6 張卡（依優先序）＋ⓘ tooltip。"""
+    """免費 LLM 區渲染：header＋品質提示＋7 張卡（依優先序）＋ⓘ tooltip。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1293,7 +1293,7 @@ async def test_free_key_engine_cards_render(tmp_path):
         await _open_twice(user)
         await user.should_see("免費 LLM（自備免費 key）")
         user.find(marker="free-key-engine-hint")  # 品質提示存在
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
             card = _engine_card(user, eid)
             assert next(iter(card.elements)), f"{eid} 免費 LLM 卡應渲染"
             user.find(kind=ui.icon, marker=f"info-engine-{eid}")  # ⓘ tooltip 存在
@@ -1375,7 +1375,7 @@ def test_resolve_free_key_engine_requires_key(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
     """機密模式（票 10 紅線）：免費 LLM 卡全禁用（免費層無 SLA／第三方雲端）——
-    勾機密 → 6 卡灰化、點擊不切換（引擎仍 DeepSeek）。"""
+    勾機密 → 7 卡灰化、點擊不切換（引擎仍 DeepSeek）。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1384,7 +1384,7 @@ async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
         await _open_twice(user)
         _sensitive_checkbox(user).set_value(True)
         await user.should_see("本任務將使用 DeepSeek", retries=20)
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
             card = next(iter(_engine_card(user, eid).elements))
             assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡應禁用（機密紅線）"
         _engine_card(user, "nvidia").click()
@@ -1395,7 +1395,7 @@ async def test_sensitive_blocks_free_key_engine_cards(tmp_path):
 @pytest.mark.asyncio
 async def test_free_key_engine_section_dom_order(tmp_path):
     """免費 LLM 區 DOM 位置：零 key 免費區之後（bing 末卡 → 新區 header → hint →
-    6 卡依優先序 nvidia 首）；輸出目錄/任務區之前。"""
+    7 卡依優先序 nvidia 首）；輸出目錄/任務區之前。"""
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1412,7 +1412,8 @@ async def test_free_key_engine_section_dom_order(tmp_path):
         assert order.index("engine-card-modelscope") < order.index("engine-card-groq")
         assert order.index("engine-card-groq") < order.index("engine-card-openrouter")
         assert order.index("engine-card-openrouter") < order.index("engine-card-bigmodel")
-        assert order.index("engine-card-bigmodel") < order.index("engine-card-gemini")
+        assert order.index("engine-card-bigmodel") < order.index("engine-card-dashscope")
+        assert order.index("engine-card-dashscope") < order.index("engine-card-gemini")
         assert order.index("engine-card-gemini") < order.index("browse-output-dir"), (
             "免費 LLM 卡必須在輸出目錄/任務區上方"
         )
@@ -1452,7 +1453,7 @@ async def test_free_key_cards_greyed_out_without_key(tmp_path):
         root=lambda: _index_page(service, settings, cost, glossaries)
     ) as user:
         await _open_twice(user)
-        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini"):
+        for eid in ("nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini"):
             card = next(iter(_engine_card(user, eid).elements))
             assert "pk-engine-card--disabled" in card.classes, f"{eid} 免費 LLM 卡無 key 應灰化"
 

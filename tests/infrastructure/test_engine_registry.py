@@ -223,11 +223,12 @@ def test_all_keyless_specs_in_ui_free_ids():
 def test_ui_free_key_engine_ids_priority_order():
     """免費 LLM 卡集合與順序＝研究報告優先序：NVIDIA NIM（T1/T2、40RPM、無日總量）
     ＞ ModelScope（T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron
-    翻譯數據免費群最佳）＞ 智譜（無 token 上限）＞ Gemini（T2 但免費層資料訓練）。"""
+    翻譯數據免費群最佳）＞ 智譜（無 token 上限）＞ 阿里雲 Model Studio（Qwen 官方，
+    1M tokens 一次性）＞ Gemini（T2 但免費層資料訓練，殿後）。"""
     from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
 
     assert UI_FREE_KEY_ENGINE_IDS == (
-        "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "gemini",
+        "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini",
     )
 
 
