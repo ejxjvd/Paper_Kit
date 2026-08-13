@@ -227,7 +227,7 @@ async def test_refresh_without_clear_keeps_dialog(tmp_path, monkeypatch):
     """
     service, settings, cost, glossaries = _build(tmp_path)
 
-    def _no_clear_refresh(cards, svc, cost_svc, settings_svc, memo, *extra):
+    def _no_clear_refresh(cards, svc, cost_svc, settings_svc, memo, *extra, **kwargs):
         # 原 _refresh 只刪 cards.clear() 一行；其餘照舊（重繪仍在）
         engine_labels = app_mod._engine_label_map()
         for job in svc.list_jobs():

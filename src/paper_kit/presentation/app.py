@@ -31,10 +31,9 @@ from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
 from paper_kit.application.pages import parse_pages
 from paper_kit.application.ports import EngineError, TranslationEnginePort
 from paper_kit.application.settings_service import SettingsService
-from paper_kit.domain.translation_job import InvalidTransition
+from paper_kit.domain.translation_job import InvalidTransition, JobStatus, TranslationJob
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
-from paper_kit.domain.translation_job import JobStatus
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, build_engine
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
@@ -125,6 +124,25 @@ def _pages_for_file(selected: list[str], file_pages: int) -> str | None:
     if not pages or len(pages) >= file_pages:
         return None  # 空交集或全選＝全部頁面
     return ",".join(str(p) for p in pages)
+
+
+# #85 切片D：免費額度資訊條——BabelDOC 風格（沉浸式翻譯 UI 的 0/500,000 Tokens）。
+# 本地工具無真正額度──聚合已完成任務 tokens 顯示「已用」參考值，不強制限流。
+FREE_TOKEN_QUOTA = 500_000
+
+
+def _aggregate_used_tokens(jobs: list[TranslationJob]) -> int:
+    """已用 tokens＝全部已完成任務 in+out 加總（失敗/排隊/翻譯中不計）。"""
+    return sum(
+        (job.result.input_tokens or 0) + (job.result.output_tokens or 0)
+        for job in jobs
+        if job.status is JobStatus.COMPLETED and job.result
+    )
+
+
+def _quota_label(used: int) -> str:
+    """額度條文字：`免費額度 10,000/500,000 Tokens`（千分位）。"""
+    return f"免費額度 {used:,}/{FREE_TOKEN_QUOTA:,} Tokens"
 
 
 def _start_job(
@@ -445,8 +463,12 @@ def _refresh(
     delete_state: dict | None = None,
     preview_dialog=None,
     preview_box=None,
+    quota_label=None,  # #85 切片D：免費額度資訊條（1s 輪詢同步聚合值）
 ) -> None:
     cards.clear()
+    # #85 切片D：已用 tokens 聚合（已完成任務 in+out）→ 額度條文字
+    if quota_label is not None:
+        quota_label.set_text(_quota_label(_aggregate_used_tokens(service.list_jobs())))
     # spec review：引擎欄顯示 label（「DeepSeek（純文字…）」）不是 raw id
     engine_labels = _engine_label_map()
     for job in service.list_jobs():
@@ -1215,6 +1237,8 @@ def _index_page(
         )
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
+            # #85 切片D：免費額度資訊條（BabelDOC 風格；聚合已完成任務 tokens，1s 輪詢更新）
+            quota_label = ui.label(_quota_label(0)).classes("text-xs text-grey-7")
             # 票 10：上傳即提示「檔案將送雲端」＋機密確認（R18／隱私紅線）
             ui.label(
                 "⚠️ 上傳即代表同意：檔案內容將送雲端 API 翻譯。"
@@ -1412,6 +1436,7 @@ def _index_page(
             lambda: _refresh(
                 cards, service, cost, settings, memo,
                 delete_dialog, delete_state, preview_dialog, preview_box,
+                quota_label=quota_label,  # #85 切片D：額度條隨輪詢同步
             ),
         )
 

@@ -561,6 +561,67 @@ async def test_main_panel_glossary_selection_flows_into_job(
         assert names == ["dl"], f"job 應帶勾選的術語表，實際 {names}"
 
 
+# ── #85 切片D：免費額度資訊條（0/500,000 Tokens） ──
+
+
+def _completed_job(job_id: str, *, in_t: int, out_t: int):
+    """造一筆已完成任務（領域狀態機＋result）——聚合額度的唯一來源。"""
+    from paper_kit.domain.job_result import JobResult
+    from paper_kit.domain.translation_job import JobStatus, TranslationJob
+
+    job = TranslationJob(job_id=job_id, source_path="/out/x.pdf")
+    job.transition(JobStatus.TRANSLATING)
+    job.transition(JobStatus.COMPLETED)
+    job.result = JobResult(
+        mono_path="/out/x.zh-TW.mono.pdf", dual_path="/out/x.zh-TW.dual.pdf",
+        input_tokens=in_t, output_tokens=out_t,
+    )
+    return job
+
+
+def test_aggregate_used_tokens_counts_only_completed():
+    """#85 切片D：已用 tokens＝已完成任務 in+out 加總；失敗/排隊/翻譯中不計。"""
+    from paper_kit.domain.job_result import JobResult
+    from paper_kit.domain.translation_job import JobStatus, TranslationJob
+    from paper_kit.presentation.app import _aggregate_used_tokens, _quota_label
+
+    done = _completed_job("a", in_t=3000, out_t=7000)
+    failed = TranslationJob(job_id="b", source_path="/out/x.pdf")
+    failed.transition(JobStatus.TRANSLATING)
+    failed.transition(JobStatus.FAILED)  # 失敗 → 不計入（就算有 result 也不計）
+    failed.result = JobResult(
+        mono_path="/out/x.mono.pdf", dual_path="/out/x.dual.pdf",
+        input_tokens=9999, output_tokens=9999,
+    )
+    jobs = [done, failed, TranslationJob(job_id="c", source_path="/out/y.pdf")]
+    assert _aggregate_used_tokens(jobs) == 10_000
+    assert _aggregate_used_tokens([]) == 0
+    assert _quota_label(10_000) == "免費額度 10,000/500,000 Tokens"
+    assert _quota_label(0) == "免費額度 0/500,000 Tokens"
+
+
+@pytest.mark.asyncio
+async def test_free_quota_bar_shows_aggregated_tokens(tmp_path, make_blank_pdf):
+    """#85 切片D：主面板頂部額度條——無任務顯示 0/500,000；已有完成任務
+    的 tokens 聚合顯示（timer 1s 輪詢刷新，側信道文字）。"""
+    from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
+    from paper_kit.presentation.app import _index_page
+
+    repo = InMemoryJobRepository()
+    done = _completed_job("q1", in_t=3000, out_t=7000)
+    repo.add(done)
+    service = JobService(jobs=repo, outputs_dir=tmp_path / "outputs")
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("免費額度 10,000/500,000 Tokens", retries=5)
+
+
 # ── _pages_for_file：範圍套用單一檔案（純函式） ──
 
 
