@@ -45,7 +45,8 @@ class JobService:
         upload_path: str | Path,
         target_lang: str = "zh-TW",
         pages: str | None = None,
-        total_pages: int | None = None,  # #15：PDF 總頁數（進度框「N/M 頁」的 M）
+        total_pages: int | None = None,  # #27：翻譯頁數（選取頁碼數；進度框「N/M 頁」的 N）
+        pdf_pages: int | None = None,    # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
         output_dir: str = "",
         sensitive: bool = False,
         ocr: bool = False,
@@ -74,7 +75,8 @@ class JobService:
             source_path=str(dest),
             target_lang=target_lang,
             pages=pages,
-            total_pages=total_pages,  # #15
+            total_pages=total_pages,  # #27：翻譯頁數
+            pdf_pages=pdf_pages,      # #27：PDF 總頁數
             output_dir=output_dir,
             sensitive=sensitive,
             ocr=ocr,

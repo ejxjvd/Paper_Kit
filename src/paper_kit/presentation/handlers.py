@@ -44,14 +44,30 @@ class JobCardView:
     sensitive: bool = False          # 票 10：機密文件（卡片顯示 🔒）
     ocr: bool = False                # 票 12：掃描件（卡片顯示 🔍）
     from_cache: bool = False         # 票 26：快取命中（引擎未呼叫——卡片顯示 ⚡）
-    pages_label: str = "全文"        # 票 17：歷史表格「頁數」欄（None→「全文」對映在 build_job_card）
-    total_pages: int | None = None   # #15：PDF 總頁數（進度框「N/M 頁」的 M）
+    pages_label: str = "全文"        # 票 17：#27 歷史表格「頁數」欄（「N/M 頁」組字在 build_job_card）
+    total_pages: int | None = None   # #27：翻譯頁數（進度框「N/M 頁」的 N）
+    pdf_pages: int | None = None     # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
+    pages_raw: str | None = None     # #27：原始選取頁碼（歷史表格 hover 顯示用）
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
     if not result_path:
         return None
     return f"{files_base}/{job_id}/{Path(result_path).name}"
+
+
+def _pages_summary(job: TranslationJob) -> str:
+    """#27：歷史表格「頁數」欄組字——「N/M 頁」（N＝翻譯頁數、M＝PDF 總頁數）。
+
+    使用者實測：挑 2 頁翻譯歷史頁卻只顯示頁號「29,30」，看不出總頁數；
+    改顯示「2/58 頁」。舊任務（無 total_pages）維持既有「選取頁碼／全文」；
+    有翻譯頁數無總頁數 → 「N 頁」。
+    """
+    if job.total_pages:
+        if job.pdf_pages:
+            return f"{job.total_pages}/{job.pdf_pages} 頁"
+        return f"{job.total_pages} 頁"
+    return job.pages or "全文"
 
 
 def build_job_card(
@@ -106,8 +122,10 @@ def build_job_card(
         sensitive=job.sensitive,   # 票 10：機密標記顯示（🔒）
         ocr=job.ocr,               # 票 12：掃描件標記顯示（🔍）
         from_cache=bool(job.result and job.result.from_cache),  # 票 26：快取命中（⚡）
-        pages_label=job.pages or "全文",  # 票 17：頁數欄（"1-2" 或全文）
-        total_pages=job.total_pages,  # #15：進度框「N/M 頁」的 M
+        pages_label=_pages_summary(job),  # 票 17：#27「N/M 頁」組字（選取頁碼／全文 fallback）
+        total_pages=job.total_pages,  # #27：翻譯頁數（進度框「N/M 頁」的 N）
+        pdf_pages=job.pdf_pages,      # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
+        pages_raw=job.pages,          # #27：原始選取頁碼（hover 顯示）
     )
 
 

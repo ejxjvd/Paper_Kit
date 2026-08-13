@@ -145,6 +145,15 @@ def test_create_job_records_pages_and_output_dir(tmp_path: Path, upload_pdf: Pat
     assert job.output_dir == "/out/custom"
 
 
+def test_create_job_passes_total_and_pdf_pages(tmp_path: Path, upload_pdf: Path):
+    """#27：翻譯頁數（total_pages）與 PDF 總頁數（pdf_pages）分開透傳——
+    挑 2 頁翻譯（total=2）但 PDF 58 頁（pdf=58），進度框「2/2 頁」、歷史「2/58 頁」。"""
+    service, _ = make_service(tmp_path)
+    job = service.create_job(upload_path=upload_pdf, total_pages=2, pdf_pages=58)
+    assert job.total_pages == 2
+    assert job.pdf_pages == 58
+
+
 def test_completed_job_copies_outputs_to_configured_dir(tmp_path: Path, upload_pdf: Path):
     """票 07：完成任務把 mono/dual 複製到設定的輸出目錄。"""
     service, repo = make_service(tmp_path)

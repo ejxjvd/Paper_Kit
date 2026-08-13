@@ -290,3 +290,39 @@ def test_progress_label_translating_no_pages_fallback():
 def test_progress_label_queued_none():
     job = TranslationJob(job_id="tp6", source_path="/out/tp6/a.pdf", total_pages=10)
     assert progress_label(build_job_card(job)) is None
+
+
+# ── #27：頁數欄「N/M 頁」（翻譯頁數／PDF 總頁數） ─────────────
+
+
+def test_pages_label_selected_pages_summary():
+    """#27：挑 2 頁（29,30／PDF 58 頁）→ 歷史頁顯示「2/58 頁」（先前錯顯示「29,30」）。"""
+    job = TranslationJob(
+        job_id="p1", source_path="/out/p1/a.pdf",
+        pages="29,30", total_pages=2, pdf_pages=58,
+    )
+    assert build_job_card(job).pages_label == "2/58 頁"
+
+
+def test_pages_label_full_document_summary():
+    """全文翻譯 → 「58/58 頁」（翻譯頁數＝PDF 總頁數）。"""
+    job = TranslationJob(
+        job_id="p2", source_path="/out/p2/a.pdf", total_pages=58, pdf_pages=58,
+    )
+    assert build_job_card(job).pages_label == "58/58 頁"
+
+
+def test_pages_label_legacy_job_falls_back():
+    """舊任務（無 total_pages/pdf_pages）→ 維持既有「全文」／選取頁碼。"""
+    assert (
+        build_job_card(TranslationJob(job_id="p3", source_path="/out/p3/a.pdf")).pages_label
+        == "全文"
+    )
+    job = TranslationJob(job_id="p4", source_path="/out/p4/a.pdf", pages="1-2")
+    assert build_job_card(job).pages_label == "1-2"
+
+
+def test_pages_label_translated_only():
+    """有翻譯頁數無 PDF 總頁數 → 「2 頁」。"""
+    job = TranslationJob(job_id="p5", source_path="/out/p5/a.pdf", pages="1,2", total_pages=2)
+    assert build_job_card(job).pages_label == "2 頁"

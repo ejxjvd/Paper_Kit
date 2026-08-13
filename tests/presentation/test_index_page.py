@@ -649,6 +649,27 @@ def test_pages_for_file_out_of_range_pages_dropped():
     assert _pages_for_file(["5"], 3) is None
 
 
+# ── #27：翻譯頁數計算（total_pages 語意修正——挑 2 頁不可顯示 58 頁） ──
+
+
+def test_translated_pages_selection_counts_selected():
+    """挑 2 頁（29,30）→ 翻譯頁數 2（不是 PDF 總頁數 58——使用者實測 bug）。"""
+    assert app_module._translated_pages("29,30", 58) == 2
+    assert app_module._translated_pages("1,2,3", 58) == 3
+
+
+def test_translated_pages_no_selection_uses_file_pages():
+    """全文（無選取）→ 翻譯頁數＝PDF 總頁數。"""
+    assert app_module._translated_pages(None, 58) == 58
+    assert app_module._translated_pages("", 58) == 58
+
+
+def test_translated_pages_no_info_returns_none():
+    """檔案頁數讀不到（理論上不會）→ None（舊任務相容）。"""
+    assert app_module._translated_pages(None, None) is None
+    assert app_module._translated_pages("", 0) is None
+
+
 # ── #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎顯示） ──
 
 

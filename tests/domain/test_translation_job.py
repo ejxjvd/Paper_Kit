@@ -100,3 +100,14 @@ def test_total_pages_defaults_none():
 def test_total_pages_can_be_set():
     job = TranslationJob(job_id="tp2", total_pages=10)
     assert job.total_pages == 10
+
+
+def test_pdf_pages_defaults_none():
+    """#27：PDF 總頁數（歷史頁「N/M 頁」的 M）預設 None。"""
+    job = TranslationJob(job_id="pp1")
+    assert job.pdf_pages is None
+
+
+def test_pdf_pages_can_be_set():
+    job = TranslationJob(job_id="pp2", pdf_pages=58)
+    assert job.pdf_pages == 58

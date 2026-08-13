@@ -145,6 +145,18 @@ def _engine_picker(pick, eid: str):
     return pick_engine
 
 
+def _translated_pages(pages_text: str | None, file_pages: int | None) -> int | None:
+    """#27：翻譯頁數——選取頁碼數（pages_text 非空）或 PDF 總頁數（無選取）。
+
+    total_pages 語意＝「本次實際翻譯的頁數」：挑 2 頁（29,30）→ 2（不是 58——
+    使用者實測「完成 100% · 58/58 頁」是錯誤顯示）；全文 → file_pages。
+    檔案頁數讀不到 → None（舊任務相容，進度框省略頁數）。
+    """
+    if pages_text:
+        return len(pages_text.split(","))
+    return file_pages or None
+
+
 def _pages_for_file(selected: list[str], file_pages: int) -> str | None:
     """#85：頁面範圍（多選頁碼）套用單一檔案——選中頁碼 ∩ 1..file_pages。
 
@@ -185,7 +197,8 @@ def _start_job(
     file_path: Path,
     file_name: str,
     pages_text: str = "",
-    total_pages: int | None = None,  # #15：PDF 總頁數（進度框「N/M 頁」的 M）
+    total_pages: int | None = None,  # #27：翻譯頁數（進度框「N/M 頁」的 N）
+    pdf_pages: int | None = None,    # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
     sensitive: bool = False,
     ocr: bool = False,
     engine_id: str | None = None,    # 票 19：引擎卡點選（None=設定頁 global）
@@ -227,7 +240,8 @@ def _start_job(
         file_path,
         target_lang=target_lang or settings.target_lang(),  # 票 19：下拉就地選覆寫
         pages=pages,
-        total_pages=total_pages,  # #15：進度框「N/M 頁」的 M（暫存時已讀頁數）
+        total_pages=total_pages,  # #27：翻譯頁數
+        pdf_pages=pdf_pages,      # #27：PDF 總頁數
         output_dir=settings.output_dir(),
         sensitive=sensitive,
         ocr=ocr,
@@ -1184,6 +1198,12 @@ def _history_page(
                 "body-cell-status",
                 "<q-td><q-badge :color='props.row.status_color' :label='props.row.status_label' /></q-td>",
             )
+            # #27：頁數欄顯示「N/M 頁」（翻譯頁數/PDF 總頁數）；hover 顯示原始選取頁碼
+            table.add_slot(
+                "body-cell-pages",
+                "<q-td :title=\"props.row.pages_raw ? '選取頁碼：' + props.row.pages_raw : ''\">"
+                "{{ props.row.pages_label }}</q-td>",
+            )
             # 操作列：mono／dual 下載（dual 不可退化——使用者明定）；
             # download attr＝附件下載（與主頁 ui.download 行為一致）。
             # 重試／取消：Vue slot 無法綁 Python handler，票 17 review 裁決——
@@ -1317,6 +1337,7 @@ def _history_row(view: JobCardView) -> dict:
         "file_name": view.file_name,
         "created_label": view.created_label,
         "pages_label": view.pages_label,
+        "pages_raw": view.pages_raw,  # #27：原始選取頁碼（hover title）
         "engine_label": view.engine_label or "",
         "cache_label": "⚡ 快取" if view.from_cache else "—",  # 票 26：來源欄
         "status_label": view.status_label,
@@ -1550,10 +1571,14 @@ def _index_page(
                         file_pages = len(pypdf.PdfReader(str(path)).pages)
                     except Exception:
                         file_pages = 0  # 理論上不會：暫存時已驗證可讀
+                    pages_text = _pages_for_file(selected, file_pages)
                     ok = _start_job(
                         service, settings, cost, glossaries, path, name,
-                        pages_text=_pages_for_file(selected, file_pages) or "",
-                        total_pages=file_pages or None,  # #15：進度框「N/M 頁」的 M
+                        pages_text=pages_text or "",
+                        # #27：翻譯頁數（選取頁碼數）與 PDF 總頁數分開——
+                        # 挑 2 頁翻譯 → 「完成 100% · 2/2 頁」＋歷史「2/58 頁」（先前錯顯示 58/58）
+                        total_pages=_translated_pages(pages_text, file_pages),
+                        pdf_pages=file_pages or None,
                         sensitive=sensitive_input.value,
                         ocr=ocr_input.value,
                         # 票 19：只在使用者實際點選（≠設定頁 global）才 override——

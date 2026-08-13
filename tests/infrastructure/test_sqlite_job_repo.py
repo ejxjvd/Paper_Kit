@@ -300,3 +300,17 @@ def test_total_pages_none_stays_none(tmp_path: Path):
     repo = make_repo(tmp_path)
     repo.add(sample_job())
     assert repo.get("abc123").total_pages is None
+
+
+# ── #27：pdf_pages 持久化（PDF 總頁數，歷史頁「N/M 頁」的 M） ─────
+
+
+def test_pdf_pages_survives_roundtrip_and_restart(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    job = sample_job()
+    job.total_pages = 2
+    job.pdf_pages = 58
+    repo.add(job)
+    repo2 = make_repo(tmp_path)  # 重啟：新連線（auto-migrate 補欄）
+    assert repo2.get("abc123").total_pages == 2
+    assert repo2.get("abc123").pdf_pages == 58
