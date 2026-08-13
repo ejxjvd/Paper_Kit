@@ -1,6 +1,6 @@
 """SiliconFlow 視覺翻譯（票 14）：把幻燈片圖送 gemma 眼睛翻譯成目標語言。
 
-紅線（Vault CLAUDE.md §8 立法）：外部 API 一律 fallback 鏈＋逾時——主模型
+紅線（內部規範 §8 立法）：外部 API 一律 fallback 鏈＋逾時——主模型
 google/gemma-4-31B-it（40s，複雜圖品質實測定案；同 paste-vision hook）＋
 備援 12B（8s），成功即停、全掛才失敗（EngineError）。key 走既有
 SettingsService 槽位（與設定頁一致）；失敗訊息不外洩 key。

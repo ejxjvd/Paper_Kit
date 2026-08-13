@@ -1,6 +1,6 @@
 """票 14：SiliconFlow 視覺翻譯——單頁圖 → 繁中譯文（gemma 眼睛模型鏈）。
 
-紅線（Vault CLAUDE.md §8 立法）：外部 API 一律 fallback 鏈＋逾時——主模型
+紅線（內部規範 §8 立法）：外部 API 一律 fallback 鏈＋逾時——主模型
 google/gemma-4-31B-it（40s，複雜圖品質實測定案）＋備援 12B（8s），成功即停、
 全掛才失敗。測試以 monkeypatch urlopen 為接縫（不碰真實 API）。
 """

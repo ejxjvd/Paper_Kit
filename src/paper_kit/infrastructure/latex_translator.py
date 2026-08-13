@@ -1,6 +1,6 @@
 """LaTeX 純文字翻譯（票 15）：LaTeX 源碼片段 → 目標語言。
 
-§8 模型鏈（Vault CLAUDE.md 強制）：主 deepseek-chat（40s）＋備援
+§8 模型鏈（內部規範強制）：主 deepseek-chat（40s）＋備援
 deepseek-reasoner（40s）——同端點雙模型（防模型級整顆掛事件；備援罕見
 觸發，成本影響可忽略）。佔位符 \\PKP{n} 保真是硬規則、寫進 prompt
 （AC2 公式 100% 原樣——LLM 不得改動佔位符）。key 走既有 SettingsService

@@ -1,5 +1,8 @@
 # 📄 Paper_Kit
 
+[![Release](https://img.shields.io/github/v/release/ejxjvd/Paper_Kit?label=最新發布)](https://github.com/ejxjvd/Paper_Kit/releases)
+[![Tests](https://img.shields.io/badge/tests-641%20passed-green)](https://github.com/ejxjvd/Paper_Kit/actions)
+
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
 純 Python 一體的 Web UI：拖放 PDF 上傳即翻譯成繁體中文（mono 僅譯文＋dual 雙語並排）。
@@ -16,9 +19,16 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 - 🔒 **機密模式**：R18／隱私文件只准 DeepSeek 純文字引擎（視覺模型不上雲）
 - 🔍 **掃描件 OCR**：本機 RapidOCR（onnxruntime）預處理，不上雲——機密相容
 - 💰 **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
-- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**590 tests passed**
+- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**641 tests passed**
 
 ## 🚀 快速開始
+
+### 一般使用者（免安裝版）
+
+下載 [**paper-kit-v0.1.0-win-x64.zip**](https://github.com/ejxjvd/Paper_Kit/releases)（Release v0.1.0）→ 解壓 → 雙擊 `paper-kit-v0.1.0.exe` → 瀏覽器自動開啟 http://localhost:8080/。
+自包含免安裝（內建 Python runtime＋全部依賴），操作說明見資料夾內 `README-使用手冊.md`。
+
+### 開發者（原始碼）
 
 先決條件：Python ≥3.12＋[uv](https://docs.astral.sh/uv/)、任一引擎的 API key
 （SiliconFlow 為預設；`google`／`bing`／`siliconflowfree` 三支免費引擎不需 key）。
@@ -35,7 +45,7 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 - **BYOK（推薦）**：每個使用者在自己的設定頁填各自的 API key（每引擎獨立、遮罩回顯）——您的 key 不會外流、費用各自承擔
 - **免費引擎**：三支不需 key 的引擎已內建（`google`／`bing`／`siliconflowfree`）——限流／品質較低，適合試用入口
 - **自架選項**：本機 ollama 等 OpenAI 相容後端可直接插（引擎註冊表單點）——零 API 費用
-- 詳細評估見 `docs/research/免費LLM-API-分析與套用評估.md`
+- 免費引擎（Free-LLM-Collection）查證與品質優先序收錄於開發知識庫
 
 ## 📖 使用教學
 
@@ -57,17 +67,13 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 
 ## 📁 文件
 
-- `docs/規格書.md` — 原始規格書（PRD，GitHub issue #1 同步）
-- `docs/UI補強-規格書.md` — UI 補強規格書（issue #17 同步）
-- `docs/tickets/` — 20 張開發票（GitHub issues #2–#16 與 #18–#22 同步）
-- `docs/research/` — 免費 API 分析／三引擎成本比較／架構研究
-- `docs/problems/` — 問題與修復紀錄（票 27 等）
-- 完整研究與計畫庫存於 Obsidian Vault（`_personal/Paper_Kit/`）
+規格書（PRD）、20 張開發票（GitHub issues #2–#22 同步）、研究與問題修復紀錄
+已移至開發知識庫管理——專案文件不入 repo，repo 只留程式碼。
 
 ## 📊 狀態
 
-票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合——**590 tests passed**
-（2026-08-13）；冒煙全綠。後續工作以 GitHub issues 追蹤。
+票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #3／#1+2+8——**641 tests passed**
+（2026-08-14）；冒煙全綠。**v0.1.0 已發布**（免安裝 exe 版，見 [Releases](https://github.com/ejxjvd/Paper_Kit/releases)）。後續工作以 GitHub issues 追蹤。
 
 ## 🙏 致謝
 
