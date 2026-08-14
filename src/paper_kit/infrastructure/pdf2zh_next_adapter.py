@@ -25,6 +25,9 @@ from paper_kit.infrastructure.llm_probe import diagnose, probe_model  # 卡①�
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
 DEFAULT_MODEL = "google/gemma-4-31B-it"
+# 卡④（2026-08-14）：inactivity 預設常數——build_engine 兜底讀此（修「為讀
+# 預設而實例化 EngineConfig」的壞味道）。#76：段落活性信號間隔 5–20s；300s 有餘裕。
+DEFAULT_INACTIVITY_SECONDS = 300
 
 # babeldoc log 有欄位式折行（路徑/token 行會斷行）→ 先移除全部空白再搜
 _RE_MONO = re.compile(r"MonoPDF:(.*?\.pdf)")
@@ -54,7 +57,7 @@ class EngineConfig:
     # #73（CH4 真因）：總牆鐘只是保險（拉高，不再當主判据）；inactivity_seconds
     # 才是「判 hang」——最後一行輸出超過此秒數無新行才逾時（翻譯中有段落行=續命）。
     timeout_seconds: int = 3600
-    inactivity_seconds: int = 300           # 段落活性信號間隔 5–20s；300s 有餘裕
+    inactivity_seconds: int = DEFAULT_INACTIVITY_SECONDS  # 段落活性信號間隔 5–20s；300s 有餘裕
 
 
 def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:

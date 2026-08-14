@@ -2,13 +2,21 @@
 
 驗證：spec 完整性（免費引擎、機密紅線 flag）、build_engine 對映正確 provider、
 未知引擎 KeyError、free 引擎的 CLI 旗標正確、票 13 第二支插頭（BabelDoc）。
+卡④（2026-08-14）：spec→config 對映單點＋欄位清單鎖（平行演化防呆）。
 """
 
+import dataclasses
 import pytest
 from decimal import Decimal
 
 from paper_kit.application.ports import EngineError
-from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, EngineSpec, build_engine
+from paper_kit.infrastructure.engine_registry import (
+    ENGINE_SPECS,
+    EngineSpec,
+    _SPEC_TO_CONFIG_FIELDS,
+    build_engine,
+    spec_to_config,
+)
 from paper_kit.infrastructure.babeldoc_adapter import (
     BabelDocAdapter,
     DEFAULT_BABELDOC_BASE_URL,
@@ -16,6 +24,8 @@ from paper_kit.infrastructure.babeldoc_adapter import (
 )
 from paper_kit.infrastructure.pdf2zh_next_adapter import (
     DEFAULT_BASE_URL,
+    DEFAULT_INACTIVITY_SECONDS,
+    EngineConfig,
     Pdf2zhNextAdapter,
     build_command,
 )
@@ -101,6 +111,70 @@ def test_build_engine_inactivity_falls_back_to_default():
     """#76：未設 inactivity 的引擎（siliconflow 等）維持 adapter 預設 300 不變。"""
     adapter = build_engine(ENGINE_SPECS["siliconflow"], api_key="SF-KEY")
     assert adapter._config.inactivity_seconds == 300
+
+
+def test_engine_spec_construction_defaults_base_url():
+    spec = EngineSpec(
+        id="x", label="X", provider="x", model="", needs_key=False, sensitive_ok=True,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 架構健檢 #3：定價必填
+    )
+
+
+# ── 架構健檢卡④（2026-08-14）：spec→config 對映單點＋欄位清單鎖 ──
+
+
+def _make_spec(**overrides) -> EngineSpec:
+    base = dict(
+        id="x", label="X", provider="p", model="m", needs_key=False,
+        sensitive_ok=True, pricing=(Decimal("0"), Decimal("0"), 5000),
+    )
+    base.update(overrides)
+    return EngineSpec(**base)
+
+
+def test_engine_config_parallel_fields_are_locked():
+    """卡④ 鎖：EngineConfig 每個欄位都必須聲明來源——spec 共用欄位在
+    _SPEC_TO_CONFIG_FIELDS 清單（加引擎旗標＝入列＋建對映），其餘只能是
+    注入（api_key/term_api_key/model）或 adapter 專屬（retries/timeout_seconds）。
+    平行演化防呆：新增 EngineConfig 欄位漏聲明來源，此測試先紅。"""
+    fields = set(EngineConfig.__dataclass_fields__)
+    declared = set(_SPEC_TO_CONFIG_FIELDS.values())  # 鎖的是 config 側欄位名
+    injected = {"api_key", "term_api_key", "model"}
+    adapter_internal = {"retries", "timeout_seconds"}
+    undeclared = fields - declared - injected - adapter_internal
+    assert not undeclared, (
+        f"EngineConfig 欄位未聲明來源：{undeclared}——若由 spec 派生請加入 "
+        f"_SPEC_TO_CONFIG_FIELDS＋對映；若 adapter 專屬請列入 adapter_internal"
+    )
+
+
+@pytest.mark.parametrize(
+    ("spec_field", "config_field", "value"),
+    [
+        ("provider", "provider", "custom-provider"),
+        ("base_url", "base_url", "https://custom.example/v1"),
+        ("qps", "qps", 3),
+        ("max_workers", "max_workers", 2),
+        ("inactivity_seconds", "inactivity_seconds", 900),
+        ("needs_key", "requires_key", True),
+    ],
+)
+def test_spec_to_config_maps_each_shared_field(spec_field, config_field, value):
+    """卡④：_SPEC_TO_CONFIG_FIELDS 每個對映都實際生效——改 spec 欄位，
+    config 對應欄位跟著變（漏對映此測試先紅）。"""
+    spec = _make_spec(**{spec_field: value})
+    cfg = spec_to_config(spec)
+    assert getattr(cfg, config_field) == value, (
+        f"spec.{spec_field} → config.{config_field} 對映失效"
+    )
+
+
+def test_inactivity_default_is_module_constant_not_config_instantiation():
+    """卡④：inactivity 預設讀模組常數（修 build_engine 為讀預設而
+    實例化 EngineConfig 的壞味道）。"""
+    assert EngineConfig().inactivity_seconds == DEFAULT_INACTIVITY_SECONDS
+    cfg = spec_to_config(_make_spec())  # inactivity None → 常數
+    assert cfg.inactivity_seconds == DEFAULT_INACTIVITY_SECONDS
 
 
 def test_engine_spec_construction_defaults_base_url():

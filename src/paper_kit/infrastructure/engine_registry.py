@@ -25,6 +25,7 @@ from paper_kit.infrastructure.latex_adapter import (
 )
 from paper_kit.infrastructure.pdf2zh_next_adapter import (
     DEFAULT_BASE_URL,
+    DEFAULT_INACTIVITY_SECONDS,
     DEFAULT_MODEL,
     EngineConfig,
     Pdf2zhNextAdapter,
@@ -378,16 +379,53 @@ UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
 )
 
 
+# 卡④（2026-08-14）：spec → EngineConfig 共用欄位對映清單（單一真相）——
+# 平行演化防呆：加引擎旗標＝入列＋建對映（spec_to_config），欄位清單測試鎖住。
+# 左＝EngineSpec 欄位名，右＝EngineConfig 對應欄位名（needs_key 以 requires_key 命名）。
+# model 不在清單：model_override 語義（覆寫優先）由 spec_to_config 內部解析。
+_SPEC_TO_CONFIG_FIELDS: dict[str, str] = {
+    "provider": "provider",
+    "base_url": "base_url",
+    "qps": "qps",
+    "max_workers": "max_workers",
+    "inactivity_seconds": "inactivity_seconds",
+    "needs_key": "requires_key",
+}
+
+
+def spec_to_config(
+    spec: EngineSpec, api_key: str = "", term_api_key: str = "",
+    model_override: str | None = None,
+) -> EngineConfig:
+    """spec → EngineConfig 明確轉換（卡④）：共用欄位單點對映。
+
+    model_override 非空時取代 spec.model（v0.1.3 設定頁挑選語義，NVIDIA EOL 教訓）；
+    inactivity None 兜底 DEFAULT_INACTIVITY_SECONDS（修「為讀預設而實例化
+    EngineConfig」壞味道——#76：NIM 120B 單頁 402s，300s 會誤殺）。"""
+    return EngineConfig(
+        provider=spec.provider,
+        model=model_override or spec.model,
+        api_key=api_key,
+        term_api_key=term_api_key,  # #84：術語提取獨立 key（空＝build_command 沿用主 key）
+        base_url=spec.base_url,
+        requires_key=spec.needs_key,  # 2026-08-13：免費引擎 translate 守衛放行
+        qps=spec.qps,            # v0.1.3：速率防火牆（NVIDIA 40 RPM）
+        max_workers=spec.max_workers,  # v0.1.3：並發上限（NVIDIA 2-5 → 503）
+        inactivity_seconds=spec.inactivity_seconds or DEFAULT_INACTIVITY_SECONDS,
+    )
+
+
 def build_engine(
     spec: EngineSpec, api_key: str = "", term_api_key: str = "",
     model_override: str | None = None,  # v0.1.3：設定頁挑選的模型覆寫（NVIDIA EOL 教訓）
-) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter:
+) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter | LatexAdapter:
     """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。
 
     #84：term_api_key＝術語提取引擎（SiliconFlow）獨立 key——只對
     Pdf2zhNextAdapter 有意義（term 旗標僅 siliconflow provider 發送，#83）。
     v0.1.3：model_override 非空時取代 spec.model（設定頁下拉/自訂挑選——
-    2026-08-14 NVIDIA deepseek-v4-flash EOL 410 實測教訓）。"""
+    2026-08-14 NVIDIA deepseek-v4-flash EOL 410 實測教訓）。
+    卡④：pdf2zh 系欄位對映收進 spec_to_config 單點（含 LatexAdapter 型別註記補齊）。"""
     model = model_override or spec.model
     if spec.provider == "babeldoc":
         cfg = BabelDocConfig(
@@ -410,19 +448,9 @@ def build_engine(
             base_url=spec.base_url,
         )
         return LatexAdapter(cfg)
-    cfg = EngineConfig(
-        provider=spec.provider,
-        model=model,
-        api_key=api_key,
-        term_api_key=term_api_key,  # #84：術語提取獨立 key（空＝build_command 沿用主 key）
-        base_url=spec.base_url,
-        requires_key=spec.needs_key,  # 2026-08-13：免費引擎（needs_key=False）translate 守衛放行
-        qps=spec.qps,            # v0.1.3：速率防火牆（NVIDIA 40 RPM）
-        max_workers=spec.max_workers,  # v0.1.3：並發上限（NVIDIA 2-5 → 503）
-        # #76：inactivity 兜底（None＝adapter 預設 300；NVIDIA 120B 900s）
-        inactivity_seconds=spec.inactivity_seconds or EngineConfig().inactivity_seconds,
+    return Pdf2zhNextAdapter(
+        spec_to_config(spec, api_key=api_key, term_api_key=term_api_key, model_override=model_override)
     )
-    return Pdf2zhNextAdapter(cfg)
 
 
 # ── 架構健檢 #1+2+8（2026-08-13）：引擎挑選規則收斂 registry ──
