@@ -20,6 +20,18 @@ from pathlib import Path
 
 from paper_kit.platform import macos, windows
 
+# dispatch 的屬性查找（windows.processes/explorer、macos.processes/finder）
+# 依賴子模組被 import 過（「import package」不會掛載子模組屬性）——測試
+# 環境曾被測試檔頭部 import 副作用遮蔽（v0.1.9.1 全綠假象），frozen exe
+# 乾淨環境每翻譯必炸（2026-08-15 使用者真機抓到 AttributeError: no
+# attribute 'processes'，任務建立→開始→同秒失敗）；PyInstaller 分析器
+# 亦以本層 import 為準收包。此處為 dispatch 父層職責，不違反
+# macos/ 與 windows/ 互不 import 的分離守則。
+import paper_kit.platform.macos.finder  # noqa: F401 掛載屬性
+import paper_kit.platform.macos.processes  # noqa: F401 掛載屬性
+import paper_kit.platform.windows.explorer  # noqa: F401 掛載屬性
+import paper_kit.platform.windows.processes  # noqa: F401 掛載屬性
+
 PLATFORM_LABELS = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
 
 

@@ -207,3 +207,37 @@ def test_macos_windows_processes_are_isolated():
     """processes 模組同樣互不 import（樹殺實作各自乾淨）。"""
     _assert_isolated(Path(macos_processes.__file__), "windows", "macos/processes.py")
     _assert_isolated(Path(win_processes.__file__), "macos", "windows/processes.py")
+
+
+# ── 乾淨環境 dispatch（測試序 import 遮蔽防護，2026-08-15 真機抓到） ──
+
+
+def test_dispatch_works_in_clean_interpreter():
+    """獨立解釋器（無測試檔頭 import 子模組的副作用）實呼 dispatch 兩入口。
+
+    2026-08-15 使用者真機抓到：v0.1.9.1 exe 任務「建立→開始翻譯→同秒失敗」
+    AttributeError `module 'paper_kit.platform.windows' has no attribute
+    'processes'`——dispatch 依賴屬性查找（platform/__init__.py 的
+    windows.processes/macos.processes），屬性由「某處 import 過子模組」的
+    副作用掛載；本機/CI pytest 恰被本檔頭部 import 遮蔽（761 passed 假象），
+    frozen exe 乾淨環境無副作用 → 每翻譯必炸（_default_runner 每任務呼叫
+    spawn_kwargs()，逾時/取消再走 kill_tree()）。
+    修復：platform/__init__.py 顯式 import 子模組。本測試 subprocess 跑
+    獨立解釋器（乾淨環境）實呼兩個 dispatch 入口，防回歸。
+    """
+    code = (
+        "import paper_kit.platform as p\n"
+        "class P:\n"
+        "    pid = 99999\n"
+        "    def poll(self): return None\n"
+        "p.spawn_kwargs()\n"
+        "p.kill_tree(P())\n"
+        "print('OK')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout

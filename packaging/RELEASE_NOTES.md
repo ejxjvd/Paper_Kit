@@ -2,6 +2,34 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.2
+
+### 🐛 緊急修復：翻譯任務同秒失敗（2026-08-15 使用者真機抓到）
+
+v0.1.9.1 Windows exe 實測發現：任務建立→開始翻譯→**同秒失敗**
+`AttributeError: module 'paper_kit.platform.windows' has no attribute 'processes'`。
+
+- **根因**：平台分派（`platform/__init__.py`）以屬性查找取用子模組
+  （`windows.processes`／`windows.explorer`／`macos.processes`／`macos.finder`），
+  而「import package」不會掛載子模組屬性——只有某處 import 過子模組才存在。
+  pytest 恰被測試檔頭部 import 的副作用遮蔽（v0.1.9.1 全套件 761 passed 假象）；
+  frozen exe 無此副作用 → `spawn_kwargs()` 每翻譯必呼叫 → 立即 AttributeError。
+- **修復**：`platform/__init__.py` 顯式 import 四個子模組（分派父層職責，不違反
+  macOS／Windows 互不 import 的分離守則）；PyInstaller 分析器亦以本層 import
+  為準收包（子模組必進 exe）。
+- **防回歸**：新測試以**獨立解釋器**（無測試側 import 副作用）實呼
+  `spawn_kwargs()`＋`kill_tree()` 兩個分派入口——本機 Linux／CI Windows、
+  macOS runner 各走真實平台分支。
+- **Windows／macOS 同修**：macOS 分支（finder／processes）同一修法掛載——
+  mac exe 同病同藥，CI macos-arm64 實跑驗證。
+
+### ✅ 驗證
+
+- TDD 1 新測試先紅後綠（修復前乾淨解釋器實測 AttributeError 重現使用者症狀）
+  ——全套件 **762 passed**（+1）
+- 真實翻譯驗證（驗證紀律）：adapter 路徑（google 免費引擎、paper_p34.pdf
+  第 1 頁）**19.1s 產出 mono 464KB＋dual 455KB**——分派修復後真實執行路徑成功
+
 ## v0.1.9.1
 
 ### 🐛 macOS 嚴重問題修復（使用者實測轉交，BUG_REPORT_macOS_v0.1.8）
