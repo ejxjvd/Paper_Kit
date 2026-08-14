@@ -29,6 +29,16 @@ from paper_kit.infrastructure.babeldoc_adapter import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _preflight_ok(monkeypatch):
+    """卡②（2026-08-14）：BabelDoc 有 key 即 preflight（骨架鉤子）——全部
+    translate 測試的 preflight 打 200（探測單點由 test_llm_probe 自行涵蓋）；
+    專門的 preflight 測試（401/404/200 呼叫）在測試內覆寫此 patch。"""
+    import paper_kit.infrastructure.llm_probe as probe_mod
+
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (200, "ok"))
+
+
 def make_job(**kw) -> TranslationJob:
     base = dict(
         job_id="job-1",
@@ -250,6 +260,66 @@ def test_parse_output_unwraps_wrapped_total_and_prompt():
     result = parse_output(wrapped, make_job())
     assert result.input_tokens == 7240
     assert result.output_tokens == 2830
+
+
+# ── translate：preflight 預檢（卡②：BabelDoc 同走 OpenAI 相容端點）──
+
+
+def test_translate_preflight_401_blocks_before_engine(monkeypatch):
+    """卡②（2026-08-14 架構健檢）：#78 假成功防禦原本只內嵌 Pdf2zhNextAdapter
+    ——BabelDoc 同走 OpenAI 相容端點（--openai 三旗標）、同受「上游吞錯 rc=0
+    假成功」風險（查證 BabelDOC 官方 README：only OpenAI-compatible LLM is
+    supported）。preflight 骨架化後 BabelDoc 自動獲得：401 → EngineError 帶
+    診斷、引擎根本不上（FakeRunner 不被呼叫）。"""
+
+    import paper_kit.infrastructure.llm_probe as probe_mod
+
+    runner = FakeRunner((0, LOG))
+    adapter = BabelDocAdapter(
+        BabelDocConfig(api_key="bad-key", base_url="https://x/v1", model="m1"),
+        runner=runner,
+    )
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (401, "Authentication failed"))
+    with pytest.raises(EngineError, match="key 無效"):
+        adapter.translate(make_job())
+    assert runner.calls == [], "preflight 失敗不得啟動引擎子進程"
+
+
+def test_translate_preflight_404_blocks_with_model_hint(monkeypatch):
+    """preflight 404（模型不存在）→ 診斷訊息帶「模型」提示。"""
+
+    import paper_kit.infrastructure.llm_probe as probe_mod
+
+    runner = FakeRunner((0, LOG))
+    adapter = BabelDocAdapter(
+        BabelDocConfig(api_key="k", base_url="https://x/v1", model="bad-model"),
+        runner=runner,
+    )
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (404, "not found"))
+    with pytest.raises(EngineError, match="模型不存在"):
+        adapter.translate(make_job())
+    assert runner.calls == []
+
+
+def test_translate_preflight_ok_continues_to_engine(monkeypatch):
+    """preflight 200 → 照常翻譯（FakeRunner 被呼叫、正常產出）；並證明
+    preflight 真的被執行（探測單點被呼叫）。"""
+
+    import paper_kit.infrastructure.llm_probe as probe_mod
+
+    called = []
+    runner = FakeRunner((0, LOG))
+    adapter = BabelDocAdapter(
+        BabelDocConfig(api_key="good", base_url="https://x/v1", model="m1"),
+        runner=runner,
+    )
+    monkeypatch.setattr(
+        probe_mod, "probe_model", lambda *a, **k: (called.append(a) or (200, "ok"))
+    )
+    result = adapter.translate(make_job())
+    assert called, "BabelDoc 有 key 必須 preflight（骨架鉤子生效）"
+    assert runner.calls, "preflight 通過後應啟動引擎"
+    assert result.input_tokens == 7127
 
 
 # ── translate：共用骨架行為（跨插頭守證） ────────────────

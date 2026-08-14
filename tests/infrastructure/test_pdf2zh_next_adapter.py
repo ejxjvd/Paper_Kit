@@ -401,22 +401,25 @@ def test_parse_output_missing_mono_fallback_uses_target_lang():
     assert result.dual_path == "/out/paper.zh-TW.dual.pdf"  # 既有行不受影響
 
 
-# ── translate：preflight 預檢（#78 假成功杜絕第三層）──────────────────
+# ── translate：preflight 預檢（#78 假成功杜絕第三層；卡②：骨架鉤子＋探測單點）──
 
 
 def test_translate_preflight_401_blocks_before_engine(monkeypatch):
     """#78（2026-08-14）：翻譯前先 POST chat/completions 驗證 key＋模型——
     401（ModelScope 跨站 key／Gemini 壞 key）→ 直接 EngineError 帶診斷、
-    引擎根本不上（FakeRunner 不被呼叫）——吞錯 rc=0 假成功從根杜絕。"""
+    引擎根本不上（FakeRunner 不被呼叫）——吞錯 rc=0 假成功從根杜絕。
 
-    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+    卡②（2026-08-14）：preflight 提升為 CliAdapterBase 骨架鉤子、探測走
+    llm_probe 單點 → patch 位置跟隨單點（pdf2zh 模組層名字已移除）。"""
+
+    import paper_kit.infrastructure.llm_probe as probe_mod
 
     runner = FakeRunner((0, LOG))
     adapter = Pdf2zhNextAdapter(
         EngineConfig(provider="openai", api_key="bad-key", base_url="https://x/v1", model="m1"),
         runner=runner,
     )
-    monkeypatch.setattr(mod, "probe_model", lambda *a, **k: (401, "Authentication failed"))
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (401, "Authentication failed"))
     with pytest.raises(EngineError, match="key 無效"):
         adapter.translate(make_job())
     assert runner.calls == [], "preflight 失敗不得啟動引擎子進程"
@@ -426,14 +429,14 @@ def test_translate_preflight_404_blocks_with_model_hint(monkeypatch):
     """preflight 404（模型不存在，Gemini gemini-3-pro-latest 案例）→ 診斷訊息帶
     「模型」提示。"""
 
-    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+    import paper_kit.infrastructure.llm_probe as probe_mod
 
     runner = FakeRunner((0, LOG))
     adapter = Pdf2zhNextAdapter(
         EngineConfig(provider="openai", api_key="k", base_url="https://x/v1", model="bad-model"),
         runner=runner,
     )
-    monkeypatch.setattr(mod, "probe_model", lambda *a, **k: (404, "not found"))
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (404, "not found"))
     with pytest.raises(EngineError, match="模型不存在"):
         adapter.translate(make_job())
     assert runner.calls == []
@@ -442,14 +445,14 @@ def test_translate_preflight_404_blocks_with_model_hint(monkeypatch):
 def test_translate_preflight_ok_continues_to_engine(monkeypatch):
     """preflight 200 → 照常翻譯（FakeRunner 被呼叫、正常產出）。"""
 
-    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+    import paper_kit.infrastructure.llm_probe as probe_mod
 
     runner = FakeRunner((0, LOG))
     adapter = Pdf2zhNextAdapter(
         EngineConfig(provider="openai", api_key="good", base_url="https://x/v1", model="m1"),
         runner=runner,
     )
-    monkeypatch.setattr(mod, "probe_model", lambda *a, **k: (200, "ok"))
+    monkeypatch.setattr(probe_mod, "probe_model", lambda *a, **k: (200, "ok"))
     result = adapter.translate(make_job())
     assert runner.calls, "preflight 通過後應啟動引擎"
     assert result.mono_path == "/out/paper.zh.mono.pdf"
@@ -467,6 +470,39 @@ def test_translate_skips_preflight_when_no_key_required():
     result = adapter.translate(make_job())
     assert runner.calls, "無 key 免費引擎不應被 preflight 擋住"
     assert result.mono_path == "/out/paper.zh.mono.pdf"
+
+
+def test_translate_non_openai_provider_skips_preflight(monkeypatch):
+    """卡②：preflight 只對 OpenAI 相容端點（provider=openai）——siliconflow/
+    deepseek 走引擎原生通道，不上探測（探測知識 llm_probe 單點）。"""
+
+    import paper_kit.infrastructure.llm_probe as probe_mod
+
+    def boom(*a, **k):
+        raise AssertionError("非 openai provider 不得 preflight")
+
+    monkeypatch.setattr(probe_mod, "probe_model", boom)
+    runner = FakeRunner((0, LOG))
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="siliconflow", api_key="KEY"), runner=runner
+    )
+    result = adapter.translate(make_job())
+    assert runner.calls, "siliconflow 不 preflight、直接跑引擎"
+    assert result.mono_path == "/out/paper.zh.mono.pdf"
+
+
+def test_diagnose_no_output_401_delegates_to_llm_probe():
+    """卡②：診斷文案收斂單點——引擎 log 的 401 特徵委派 llm_probe.diagnose
+    （舊版 pdf2zh_next_adapter 內嵌第三份文案；委派後文案改一處全端生效）。"""
+
+    from paper_kit.infrastructure.llm_probe import diagnose
+    from paper_kit.infrastructure.pdf2zh_next_adapter import _diagnose_no_output
+
+    msg = _diagnose_no_output(
+        "ERROR pdf2zh_next.high_level: Authentication failed, "
+        "please make sure that a valid ModelScope token is supplied."
+    )
+    assert msg == f"上游 401：{diagnose(401, '')}", msg
 
 
 # ── translate：錯誤對映 ──────────────────────────────────

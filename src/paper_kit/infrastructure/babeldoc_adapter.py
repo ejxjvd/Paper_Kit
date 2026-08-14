@@ -134,6 +134,16 @@ class BabelDocAdapter(CliAdapterBase):
     def _api_key(self) -> str:
         return self._config.api_key
 
+    def _preflight(self, job: TranslationJob) -> None:
+        """卡②（2026-08-14 架構健檢）：BabelDoc 必走 OpenAI 相容端點
+        （--openai 三旗標——官方 README 唯一支援整合方式）→ 有 key 即預檢。
+        骨架鉤子覆寫，防禦邏輯共用 CliAdapterBase._preflight_openai；修復前
+        整支 adapter 無 preflight——「上游吞錯 rc=0 假成功」同風險裸奔。"""
+        if self._config.api_key:
+            self._preflight_openai(
+                self._config.base_url, self._config.api_key, self._config.model
+            )
+
     def _build_command(self, job: TranslationJob) -> list[str]:
         return build_babeldoc_command(job, self._config)
 

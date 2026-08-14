@@ -21,7 +21,7 @@ from paper_kit.infrastructure.cli_adapter_base import (
     _kill_tree as _base_kill_tree,
     CliAdapterBase,
 )
-from paper_kit.infrastructure.llm_probe import diagnose, probe_model  # 卡①：探測單點
+from paper_kit.infrastructure.llm_probe import diagnose  # 卡①：探測單點（preflight 走基底 _preflight_openai，卡②）
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
 DEFAULT_MODEL = "google/gemma-4-31B-it"
@@ -141,21 +141,21 @@ def _diagnose_no_output(output: str) -> str:
     if re.search(r"choices\[0\]\.message\.content", normalized) and re.search(
         r"NoneType", normalized
     ):
-        return (
-            "模型未提供服務或回應異常（choices/content 為空）——"
-            "該模型登錄但未開放或為思考型，換模型或換引擎"
-        )
+        # 卡②：委派 llm_probe.diagnose(590)——「模型未提供服務」文案單點
+        # （舊版內嵌第三份空殼文案）
+        return diagnose(590, "")
     if re.search(r"(?i)error.{0,40}4\s?04", normalized) or "404" in normalized:
-        return "上游 404：模型不存在或不支援此用法——檢查模型 ID（設定頁「載入模型清單」挑選可生成模型）"
+        return f"上游 404：{diagnose(404, '')}"
     if re.search(r"(?i)429|toodeeprequests|ratelimit", normalized):
-        return "上游 429：限流（免費額度/RPM 用完）——稍後重試或換引擎"
+        return f"上游 429：{diagnose(429, '')}"
     if re.search(
         r"(?i)(?<!line)401|unauthorized|invalidkey|apikey|authenticationfailed",
         normalized,
     ):
         # authentication failed：ModelScope 跨站 key（.cn vs .ai 不互通）案例
-        # ——錯誤訊息不含 401 字樣，regex 補 authentication。
-        return "上游 401：API key 無效或已過期——檢查 key（ModelScope 注意站別 .cn/.ai 不互通）"
+        # ——錯誤訊息不含 401 字樣，regex 補 authentication。卡②：診斷文案
+        # 委派 llm_probe.diagnose 單點（舊版內嵌第三份文案，改一處全端生效）。
+        return f"上游 401：{diagnose(401, '')}"
     return "上游可能失敗但回傳成功（詳見引擎 log）"
 
 
@@ -200,27 +200,21 @@ class Pdf2zhNextAdapter(CliAdapterBase):
         )
         self._config = config
 
-    def translate(self, job: TranslationJob) -> JobResult:
+    def _preflight(self, job: TranslationJob) -> None:
         """#78（2026-08-14 實測教訓）preflight：provider=openai 且有 key 的
         引擎，翻譯前先 POST chat/completions（max_tokens=1）驗證 key＋模型
         可生成——上游錯誤（401/404/429）在啟動引擎前就攔下、帶診斷訊息。
-        pdf2zh 對 HTTP 錯誤吞錯 rc=0 假成功的根因：根本不用它翻譯。"""
+        pdf2zh 對 HTTP 錯誤吞錯 rc=0 假成功的根因：根本不用它翻譯。
+        卡②：骨架鉤子覆寫——防禦邏輯在 CliAdapterBase._preflight_openai
+        （BabelDoc 同源共用，不再內嵌在 translate）。"""
         if (
             self._config.provider == "openai"
             and self._config.requires_key
             and self._config.api_key
         ):
-            # 卡①：preflight 收斂 llm_probe.probe_model（單點——UA/payload/診斷
-            # 文案與設定頁「測試 API」同源，任一端修復全端生效）
-            code, body = probe_model(
+            self._preflight_openai(
                 self._config.base_url, self._config.api_key, self._config.model
             )
-            if code != 200:
-                raise EngineError(
-                    diagnose(code, body) if code == 0
-                    else f"上游 {code}：{diagnose(code, body)}"
-                )
-        return super().translate(job)
 
     def _api_key(self) -> str:
         return self._config.api_key

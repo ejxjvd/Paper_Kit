@@ -18,6 +18,7 @@ from pathlib import Path
 from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
+import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
 from paper_kit.infrastructure.uv_bootstrap import resolve_uv
 
@@ -103,6 +104,29 @@ class CliAdapterBase:
 
     def _is_transient(self, output: str) -> bool:
         return any(sig in output for sig in self._transient_signatures)
+
+    def _preflight(self, job: TranslationJob) -> None:
+        """翻譯前預檢鉤子（卡②，2026-08-14 架構健檢）。
+
+        #78 假成功防禦：OpenAI 相容引擎覆寫——翻譯前先 POST chat/completions
+        （max_tokens=1）驗證 key＋模型可生成，上游錯誤（401/404/429）在引擎
+        啟動前攔下。pdf2zh/babeldoc 對上游 HTTP 錯誤吞錯 rc=0 假成功的根因：
+        根本不用它翻譯。預設 no-op（latex/ppt/rapidocr 非 LLM 引擎）。
+        """
+
+    def _preflight_openai(self, base_url: str, api_key: str, model: str) -> None:
+        """OpenAI 相容端點共用預檢（卡②）：probe_model 非 200 → EngineError。
+
+        診斷文案單點（llm_probe.diagnose）——Pdf2zhNextAdapter 與 BabelDocAdapter
+        共用同一防禦；修一次兩支引擎（含未來 OpenAI 相容新引擎）自動獲得。
+        """
+        code, body = llm_probe.probe_model(base_url, api_key, model)
+        if code != 200:
+            raise EngineError(
+                llm_probe.diagnose(code, body)
+                if code == 0
+                else f"上游 {code}：{llm_probe.diagnose(code, body)}"
+            )
 
     def _on_line(self, line: str) -> None:
         """流式 runner 每行輸出回調（子類覆寫以解析進度）。基線 no-op。
@@ -217,6 +241,7 @@ class CliAdapterBase:
             raise EngineError(MISSING_API_KEY_MESSAGE)
         if self._cancelled:
             raise EngineError("已取消")
+        self._preflight(job)  # 卡②：openai 系在引擎啟動前驗證 key＋模型（預設 no-op）
         cmd = self._build_command(job)
         # babeldoc 輸出走子程序 CWD → 以任務資料夾為 cwd，產出才落在該處（票 03 實測教訓）
         cwd = str(Path(job.source_path).parent) if job.source_path else None

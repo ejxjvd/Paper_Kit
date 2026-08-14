@@ -293,3 +293,12 @@ def test_diagnose_messages():
     assert "限流" in diagnose(429, "{}")
     assert "連線失敗" in diagnose(0, "boom")
     assert "500" in diagnose(500, "server error")
+
+
+def test_diagnose_401_includes_expired_and_station_hints():
+    """卡②（2026-08-14 架構健檢）：401 診斷知識收斂——「已過期」與 ModelScope
+    站別提示（.cn/.ai 不互通）併入 llm_probe 單點（引擎 log 掃描委派此處，
+    文案改一處全端生效；舊版第三份文案在 pdf2zh_next_adapter）。"""
+    msg = diagnose(401, "{}")
+    assert "key 無效" in msg
+    assert "已過期" in msg

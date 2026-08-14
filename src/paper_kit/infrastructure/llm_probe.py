@@ -140,7 +140,12 @@ def diagnose(code: int, body: str) -> str:
             "該模型登錄但未開放，換模型或換引擎"
         )
     if code in (401, 403):
-        return "API key 無效——請檢查是否複製完整"
+        # 卡②（2026-08-14）：診斷知識收斂——「已過期」與 ModelScope 站別提示
+        # 併入單點（引擎 log 掃描委派此處，改一處全端生效）
+        return (
+            "API key 無效或已過期——檢查 key 是否複製完整"
+            "（ModelScope 注意站別 .cn/.ai 不互通）"
+        )
     if code == 404:
         return (
             "模型不存在或不支援此用法——檢查模型 ID"
