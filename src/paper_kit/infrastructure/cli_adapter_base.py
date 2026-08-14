@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
-from paper_kit.infrastructure.uv_bootstrap import resolve_uv
+from paper_kit.infrastructure.uv_bootstrap import download_failures, resolve_uv
 from paper_kit.platform import kill_tree as _platform_kill_tree  # 平台分離（2026-08-14）
 from paper_kit.platform import spawn_kwargs  # POSIX 進程組長／win32 無操作
 
@@ -30,6 +31,39 @@ _KNOWN_ERRORS = [
     (("'source' and 'target'", "must contain"),
      "術語表 CSV 格式錯誤：標頭列必須含 source,target"),
 ]
+
+
+def _manual_install_hint() -> str:
+    """平台正確的手動安裝備援指令（v0.1.9.3：Windows 無 sh——`curl | sh`
+    在 PowerShell 已實證直接 CommandNotFoundException，使用者照做必卡）。
+
+    Windows 給兩條 PowerShell 可執行備援（內建 winget／官方 install.ps1）；
+    macOS/Linux 給官方 install script（macOS 加 brew 備援）。
+    """
+    if sys.platform == "win32":
+        return (
+            "可手動安裝後重試（CMD／PowerShell 皆可執行）："
+            "①`winget install astral-sh.uv`；"
+            "②`powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\"`；"
+            "③瀏覽 https://github.com/astral-sh/uv/releases/latest 下載 "
+            "uv-x86_64-pc-windows-msvc.zip，解壓後把 uv.exe 放入本程式 "
+            "data\\bin 資料夾"
+        )
+    if sys.platform == "darwin":
+        return (
+            "可手動安裝後重試："
+            "①`curl -LsSf https://astral.sh/uv/install.sh | sh`；"
+            "②`brew install uv`；"
+            "③瀏覽 https://github.com/astral-sh/uv/releases/latest 下載 "
+            "uv-aarch64-apple-darwin.tar.gz（或 x86_64 版），解壓後把 uv "
+            "放入本程式 data/bin 資料夾"
+        )
+    return (
+        "可手動安裝後重試："
+        "①`curl -LsSf https://astral.sh/uv/install.sh | sh`；"
+        "②瀏覽 https://github.com/astral-sh/uv/releases/latest 下載 "
+        "uv-x86_64-unknown-linux-gnu.tar.gz，解壓後把 uv 放入本程式 data/bin 資料夾"
+    )
 
 
 def _friendly_error(output: str) -> str:
@@ -158,10 +192,14 @@ class CliAdapterBase:
                 # 全鏈失敗才給可操作訊息（含手動安裝指令），不是裸 Errno。
                 uv = resolve_uv()
                 if uv is None:
+                    # v0.1.9.3：訊息帶各源失敗實因（取代「離線?」猜測——實測
+                    # 機器有網但 GitHub 域不可達，猜測誤導）＋平台正確的多重
+                    # 手動備援指令（Windows 給 PowerShell 可執行的）。
+                    reasons = download_failures()
+                    detail = "；".join(reasons) if reasons else "（無詳細資訊）"
                     raise EngineError(
-                        "系統缺少 uv 工具（引擎中介）且自動下載失敗（離線？）。"
-                        "可手動執行 `curl -LsSf https://astral.sh/uv/install.sh | sh` "
-                        "安裝後重試"
+                        "系統缺少 uv 工具（引擎中介）且自動下載失敗"
+                        f"（各源原因：{detail}）。{_manual_install_hint()}"
                     )
                 cmd = [uv, *cmd[1:]]
             kwargs = {"cwd": cwd}

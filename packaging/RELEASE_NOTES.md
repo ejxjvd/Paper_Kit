@@ -2,6 +2,49 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.3
+
+### 🔧 修復：uv 自動下載在部分網路全滅（全新 Windows 機器真機實測）
+
+v0.1.9.2 在無 uv 的全新 Windows 機器（使用者測試機）實測：Google 免費引擎任務
+失敗「系統缺少 uv 工具（引擎中介）且自動下載失敗（離線?）」——機器有網但
+**GitHub 域被擋**：自動下載只有 GitHub release 單一來源＝單點故障。
+
+- 根因①：自動下載單一 GitHub 源——任何「GitHub 域被擋／慢／超時」的網路直接全滅
+- 根因②：錯誤訊息「離線?」是猜測（實測機器有網），且手動備援給 POSIX 指令
+  （`curl -LsSf … | sh`）——Windows PowerShell 實證 `sh : 無法將 'sh' 詞彙
+  辨識為 Cmdlet`，使用者照做必卡
+
+### 🛠 修復內容
+
+1. **多源自動下載（4 源依序嘗試，任何一源可用即成功）**：GitHub 官方 release →
+   PyPI 官方（uv 同發 wheel）→ 清華鏡像 → 阿里雲鏡像（PEP 503 簡單索引）；
+   每源**自動重試 2 次**（瞬時網路問題可救回）
+2. **安裝進度即時顯示**（使用者要求）：安裝中每 ~2 秒或每 8MB 輸出
+   「下載中 X%（… MB，速度 Z MB/s）」＋來源/嘗試次數/完成/失敗 log——
+   直接印在 exe 的 CMD 視窗
+3. **失敗實因呈現**：錯誤訊息改帶各源失敗原因（取代「離線?」猜測），
+   未知使用者照樣看得懂下一步
+4. **平台正確的手動備援**：Windows 給 CMD／PowerShell 皆可執行的 3 條備援
+   （`winget install astral-sh.uv`／官方 install.ps1／手動下載放 data\bin）；
+   macOS 給 install.sh＋brew＋手動
+5. **PyPI wheel 支援**：wheel 解壓（執行檔在 `.data/scripts/uv`）、
+   非 Windows 補執行權限位、平台＋架構精準匹配（真網實測避免誤選 aarch64
+   wheel 致 Exec format error）、鏡像相對 href 正確解析（urljoin）
+
+### ✅ 驗證
+
+- TDD：uv_bootstrap 測試擴充至 27 個（多源 fallback 順序、重試 2 次、
+  進度 log、失敗實因、Windows／POSIX 備援指令文案）——全套件 **774 passed**
+- 真網三源實測（`scripts/verify-uv-sources.py`，2026-08-15）：
+  情境 A 全鏈 → uv 0.12.4、B 只留 PyPI → 0.12.4、C 只留清華鏡像 → 0.9.9，
+  各產物 `uv --version` 可執行
+- 真實翻譯驗證（`scripts/verify-translate.py`，驗證紀律）：google 免費引擎
+  paper_p34.pdf 第 1 頁 **16.4s 產出 mono 464KB＋dual 455KB**（resolve_uv
+  命中自動安裝產物）
+- 驗證腳本化（使用者要求）：真翻譯／多源真網驗證收進 `scripts/` 可重用，
+  鏡像存 Obsidian Vault
+
 ## v0.1.9.2
 
 ### 🐛 緊急修復：翻譯任務同秒失敗（2026-08-15 使用者真機抓到）

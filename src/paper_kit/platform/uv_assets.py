@@ -20,17 +20,20 @@ def uv_executable_name() -> str:
     return "uv.exe" if sys.platform == "win32" else "uv"
 
 
+def platform_key() -> str | None:
+    """平台分類 key（win32/darwin-arm64/darwin-x86_64/linux）——官方資產名
+    （platform_asset_name）與 PyPI wheel 查表（uv_bootstrap）共用的分類單點。
+    未知平台回 None。"""
+    if sys.platform == "win32":
+        return "win32"
+    if sys.platform == "darwin":
+        arch = platform.machine().lower()
+        return "darwin-arm64" if arch in ("arm64", "aarch64") else "darwin-x86_64"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    return None
+
+
 def platform_asset_name() -> str | None:
     """平台 → 官方資產檔名（純函式，測試直接斷言）。未知平台回 None。"""
-    if sys.platform == "win32":
-        return _PLATFORM_ASSETS["win32"]
-    if sys.platform == "darwin":
-        arch = (
-            "arm64"
-            if platform.machine().lower() in ("arm64", "aarch64")
-            else "x86_64"
-        )
-        return _PLATFORM_ASSETS[f"darwin-{arch}"]
-    if sys.platform.startswith("linux"):
-        return _PLATFORM_ASSETS["linux"]
-    return None
+    return _PLATFORM_ASSETS.get(platform_key())  # noqa: dict.get(None) 回 None
