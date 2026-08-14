@@ -738,7 +738,20 @@ def test_cancel_kills_running_subprocess(monkeypatch, tmp_path):
     t = threading.Thread(target=run, daemon=True)
     t0 = time.monotonic()
     t.start()
-    time.sleep(0.3)  # 等子程序跑起來
+    # 等 adapter._proc 就緒（Popen 完成、子程序運行中）再 cancel——固定
+    # sleep(0.3) 在慢 runner 上會落在 _proc 指派（_default_runner 內 Popen
+    # 之後）之前：cancel 無物可殺 → ping 跑滿 30s → 10s join 炸。CI 實測
+    # （2026-08-14 run 31815027635）：同源碼前一 run（31814014160）此測試
+    # PASSED、本次 FAILED——計時 flake 無誤，非邏輯錯誤；輪詢後決定性。
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        proc = getattr(adapter, "_proc", None)
+        if proc is not None and proc.poll() is None:
+            break
+        time.sleep(0.02)
+    assert adapter._proc is not None and adapter._proc.poll() is None, (
+        "子程序應在 10s 內就緒（Popen 指派且運行中）"
+    )
     adapter.cancel()
     t.join(timeout=10)
     elapsed = time.monotonic() - t0

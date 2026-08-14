@@ -128,6 +128,10 @@ def test_kill_tree_posix_routes_to_killpg(monkeypatch):
     CI 平台盲區（2026-08-14 win-x64 實測修正）：Windows 的 os 模組根本
     沒有 killpg 屬性，monkeypatch.setattr 預設 raising=True 直接炸
     AttributeError——需 raising=False（POSIX 平台上有屬性，兩者皆可）。
+    第二波（run 31815027635）：raising=False 過得了 patch，但執行期
+    macos/processes.py 的 signal.SIGKILL 在 Windows signal 模組不存在
+    （AttributeError: Did you mean: 'SIGILL'?）→ 連 signal 一起 patch
+    成假命名空間（SimpleNamespace 只當查表用，無需 os 行為）。
     """
     monkeypatch.setattr(sys, "platform", "darwin")
     killed: list = []
@@ -137,6 +141,7 @@ def test_kill_tree_posix_routes_to_killpg(monkeypatch):
         lambda pid, sig: killed.append(pid),
         raising=False,
     )
+    monkeypatch.setattr(macos_processes, "signal", SimpleNamespace(SIGKILL=9))
     platform_mod.kill_tree(_FakeProc(pid=42))
     assert killed == [42]
 
