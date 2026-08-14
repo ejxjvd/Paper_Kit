@@ -1007,6 +1007,10 @@ def _settings_page(
                         glossaries, glossary_select, edit_select, new_name_input
                     ),
                 ).props("outline")
+                ui.button(
+                    "匯入內建詞表（paper-kit-basic，265 條自研）",
+                    on_click=lambda: _seed_builtin(glossaries, glossary_select, edit_select),
+                ).props("outline")
                 ui.separator()
                 ui.label("編輯術語表").classes("font-bold")
                 edit_select = ui.select(
@@ -1144,6 +1148,24 @@ def _create_glossary(
     _sync_glossary_pickers(
         glossaries, glossary_select, edit_select, list(glossary_select.value) + [name]
     )
+
+
+def _seed_builtin(glossaries: GlossaryService, glossary_select, edit_select) -> None:
+    """#84 方案 A：匯入內建基礎詞表（自研 265 條；冪等——已存在不覆寫）。
+
+    授權紅線：immersive-terms 無 LICENSE 不得嵌入，本詞表全自研彙編
+    （見 builtin_glossary 模組 docstring／docs/research/…-immersive-terms術語庫-查證.md）。
+    """
+    try:
+        created = glossaries.seed_builtin()
+    except OSError as exc:
+        ui.notify(to_user_message(exc), type="negative")
+        return
+    if created:
+        ui.notify("已匯入內建詞表 paper-kit-basic（265 條）", type="positive")
+    else:
+        ui.notify("內建詞表已存在，未覆寫（可從下方編輯）", type="warning")
+    _sync_glossary_pickers(glossaries, glossary_select, edit_select, list(glossary_select.value))
 
 
 def _delete_glossary(

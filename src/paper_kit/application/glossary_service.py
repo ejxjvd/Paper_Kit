@@ -44,6 +44,23 @@ class GlossaryService:
         self._repo.write(name, glossary)
         return len(glossary)
 
+    def seed_builtin(self) -> bool:
+        """#84 方案 A：匯入內建基礎詞表（自研 265 條，繁中論文翻譯核心領域）。
+
+        冪等：名稱已存在絕不覆寫（使用者可能已編輯）。回傳是否新建立。
+        詞條全自研（授權紅線見 builtin_glossary 模組 docstring——immersive
+        terms 無 LICENSE 不得複製，此為格式相容的自研資料）。
+        """
+        from paper_kit.infrastructure.builtin_glossary import (
+            BUILTIN_GLOSSARY_CSV,
+            BUILTIN_GLOSSARY_NAME,
+        )
+
+        if BUILTIN_GLOSSARY_NAME in self._repo.list_names():
+            return False
+        self.import_csv(BUILTIN_GLOSSARY_NAME, BUILTIN_GLOSSARY_CSV, target_lang="zh-TW")
+        return True
+
     def paths_for(self, names: list[str]) -> list[str]:
         """挑選的術語表名 → 存在檔案的絕對路徑（不存在的跳過）。"""
         existing = set(self._repo.list_names())

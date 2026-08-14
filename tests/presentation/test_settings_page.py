@@ -11,6 +11,7 @@ from nicegui import ui
 from nicegui.testing import user_simulation
 
 from paper_kit.application.cost_service import CostService
+from paper_kit.infrastructure.builtin_glossary import BUILTIN_GLOSSARY_NAME
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.settings_service import SettingsService
@@ -56,6 +57,27 @@ async def test_settings_page_save_engine_without_touching_inputs(tmp_path):
         await user.open("/settings")
         user.find("儲存引擎設定").click()
         await user.should_see("引擎設定已儲存")
+
+
+@pytest.mark.asyncio
+async def test_seed_builtin_button_imports_and_is_idempotent(tmp_path):
+    """#84 方案 A：設定頁「匯入內建詞表」按鈕——建立成功通知＋冪等通知。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")  # 暖身
+        await user.open("/settings")
+        user.find("匯入內建詞表").click()
+        await user.should_see("已匯入內建詞表 paper-kit-basic")
+        assert BUILTIN_GLOSSARY_NAME in glossaries.list_glossaries()
+        assert len(glossaries.entries(BUILTIN_GLOSSARY_NAME)) > 100
+        # 冪等：再點一次 → 不覆寫通知
+        user.find("匯入內建詞表").click()
+        await user.should_see("內建詞表已存在，未覆寫")
 
 
 # ── 票 20：每引擎獨立 API key 欄位＋遮罩＋清除 ────────────────
