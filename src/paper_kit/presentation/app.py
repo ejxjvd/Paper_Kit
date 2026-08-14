@@ -233,7 +233,9 @@ def _resolve_task_engine(
         if not key:
             raise EngineError("尚未設定 LaTeX／DeepSeek 的 API key（設定頁填入後再翻譯）")
         return spec.id, build_engine(spec, api_key=key)
-    if spec.needs_key and not settings.api_key(spec.id):
+    # 卡③（2026-08-14）：key 存在判定收斂 registry 單點（spec_has_key——
+    # latex 槽位沿用已含；此分支 spec.id≠latex，等價裸查但規則不再內聯重算）
+    if not spec_has_key(spec.id, settings.api_key):
         raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
     # v0.1.3：model 覆寫（設定頁挑選）一併套用——主頁選引擎與設定頁 global 同源
     return spec.id, build_engine(
@@ -330,9 +332,9 @@ def _start_job(
         ui.notify("LaTeX 引擎僅適用 .tex 源碼——PDF 請選上方三引擎", type="negative")
         return False
     # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
-    # .get()：未知引擎保守視為視覺（機密 fail-closed）
-    spec = ENGINE_SPECS.get(engine_id)
-    if sensitive and (spec is None or not spec.sensitive_ok):
+    # 卡③（2026-08-14）：fail-closed 語意收斂進 registry 單點（未知引擎視為
+    # 不支援機密——.get() 保守語意不再於 UI 內聯重算）
+    if sensitive_blocked(engine_id, sensitive, unknown_sensitive_ok=False):
         ui.notify("機密文件只可使用 DeepSeek 純文字引擎（先到設定切換引擎）", type="negative")
         return False
     # 票 14 spec review：OCR 只適用 PDF——勾了但上傳非 PDF → 警告＋忽略旗標
@@ -382,10 +384,12 @@ def _start_job(
         job.estimated_tokens = est.total_tokens  # 2026-08-13：UI 預估顯示用（隨任務持久化）
     _notify_estimate(cost, engine_id, est)
     ui.notify(f"任務已建立：{file_name}", type="positive")
-    # 票 10：engine_allows_sensitive 由 UI 層查 ENGINE_SPECS 傳入（service 兜底防衛）
+    # 票 10：engine_allows_sensitive 由 UI 層查 registry 傳入（service 兜底防衛）。
+    # 卡③：機密允許值收斂 registry 單點（未知引擎 fail-closed 視為不允許）
     service.start(
         job.job_id, engine, engine_id=engine_id,
-        engine_allows_sensitive=spec.sensitive_ok if spec else False,
+        engine_allows_sensitive=not sensitive_blocked(
+            engine_id, True, unknown_sensitive_ok=False),
     )
     return True
 
@@ -425,11 +429,11 @@ def _retry_job(service: JobService, settings: SettingsService, job_id: str) -> N
     try:
         engine_id = settings.engine_id()
         # 票 10：機密任務重試也用目前的引擎判定（視覺引擎 → ValueError 拒絕）。
-        # .get()：未知引擎保守視為視覺（機密 fail-closed）
-        spec = ENGINE_SPECS.get(engine_id)
+        # 卡③：fail-closed 語意收斂 registry 單點（未知引擎視為不支援機密）
         service.retry(
             job_id, engine, engine_id=engine_id,
-            engine_allows_sensitive=spec.sensitive_ok if spec else False,
+            engine_allows_sensitive=not sensitive_blocked(
+                engine_id, True, unknown_sensitive_ok=False),
         )
         ui.notify("已重新排隊", type="positive")
     except InvalidTransition as exc:

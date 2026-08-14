@@ -4,7 +4,12 @@
 """
 
 from paper_kit.application.ports import EngineError, TranslationEnginePort
-from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, EngineSpec, build_engine
+from paper_kit.infrastructure.engine_registry import (
+    ENGINE_SPECS,
+    EngineSpec,
+    build_engine,
+    resolve_key,
+)
 from paper_kit.infrastructure.settings_repo import (
     DEFAULT_ENGINE_ID,
     DEFAULT_TARGET_LANG,
@@ -59,15 +64,21 @@ class SettingsService:
         self._repo.set(f"engine_model_{engine_id}", model)
 
     def resolve_engine(self) -> TranslationEnginePort:
-        """依設定建引擎；缺 key 給友善錯誤（FakeEngine 注入路徑不受影響）。"""
+        """依設定建引擎；缺 key 給友善錯誤（FakeEngine 注入路徑不受影響）。
+
+        卡③（2026-08-14）：key 判定與取值統一走 registry 的 resolve_key——
+        latex 未獨立填時沿用 deepseek 槽位（與點卡路徑 _pick_engine 同規則；
+        之前裸查 api_key(spec.id) 誤報「尚未設定 LaTeX 的 API key」＝同一
+        規則兩路徑答案不一致的實際 bug）。"""
         spec = self.engine_spec()
-        if spec.needs_key and not self.api_key(spec.id):
+        key = resolve_key(spec.id, self.api_key)
+        if spec.needs_key and not key:
             raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
         # #84：術語提取獨立 key 一併帶入（空＝沿用主 key，向後相容）
         # v0.1.3：model 覆寫（設定頁挑選）取代 registry 預設
         return build_engine(
             spec,
-            api_key=self.api_key(spec.id),
+            api_key=key,
             term_api_key=self.term_api_key(spec.id),
             model_override=self.engine_model(spec.id) or None,
         )

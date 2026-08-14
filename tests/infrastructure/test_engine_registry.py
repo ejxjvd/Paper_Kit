@@ -453,6 +453,18 @@ def test_sensitive_blocked_unknown_engine_raises():
         sensitive_blocked("nope", True)
 
 
+def test_sensitive_blocked_unknown_engine_parametrized():
+    """卡③（2026-08-14）：未知引擎語意參數化——預設 fail-fast（KeyError，既有
+    契約）；unknown_sensitive_ok=bool 給 fail-closed（_start_job/_retry_job 的
+    .get() 保守語意收斂進 registry 單點：未知引擎視為不支援機密）。"""
+    from paper_kit.infrastructure.engine_registry import sensitive_blocked
+
+    with pytest.raises(KeyError):
+        sensitive_blocked("nope", True)
+    assert sensitive_blocked("nope", True, unknown_sensitive_ok=False) is True
+    assert sensitive_blocked("nope", False, unknown_sensitive_ok=False) is False
+
+
 def test_resolve_key_latex_prefers_own_slot():
     """票 27：latex 獨立填 key 時優先自己的槽位。"""
     from paper_kit.infrastructure.engine_registry import resolve_key
@@ -505,6 +517,17 @@ def test_spec_has_key_unknown_engine_raises():
 
     with pytest.raises(KeyError):
         spec_has_key("nope", {}.get)
+
+
+def test_spec_has_key_unknown_engine_parametrized():
+    """卡③：spec_has_key 未知引擎語意——預設 fail-fast；unknown_has_key=bool
+    給 fail-closed（未知引擎視為該值）。"""
+    from paper_kit.infrastructure.engine_registry import spec_has_key
+
+    with pytest.raises(KeyError):
+        spec_has_key("nope", {}.get)
+    assert spec_has_key("nope", {}.get, unknown_has_key=False) is False
+    assert spec_has_key("nope", {}.get, unknown_has_key=True) is True
 
 
 def test_can_select_combines_sensitive_and_key():

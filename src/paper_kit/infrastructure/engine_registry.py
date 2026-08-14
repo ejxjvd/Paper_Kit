@@ -434,11 +434,20 @@ def build_engine(
 # 不 import application（infrastructure 層立場不顛倒）。
 
 
-def sensitive_blocked(eid: str, sensitive: bool) -> bool:
+def sensitive_blocked(
+    eid: str, sensitive: bool, unknown_sensitive_ok: bool | None = None
+) -> bool:
     """機密模式紅線（票 10）：sensitive 且引擎不支援機密 → 不可選。
 
-    未知引擎 KeyError（fail-fast——UI 只從 registry 選，未知 eid＝程式 bug）。"""
-    spec = ENGINE_SPECS[eid]
+    未知引擎語意（卡③ 2026-08-14 收斂）：unknown_sensitive_ok=None（預設）
+    → KeyError fail-fast（UI 只從 registry 選，未知 eid＝程式 bug）；
+    unknown_sensitive_ok=bool → 未知引擎視為 sensitive_ok＝該值（fail-closed，
+    _start_job/_retry_job 的 .get() 保守語意收斂進單點）。"""
+    spec = ENGINE_SPECS.get(eid)
+    if spec is None:
+        if unknown_sensitive_ok is None:
+            raise KeyError(eid)
+        return sensitive and not unknown_sensitive_ok
     return sensitive and not spec.sensitive_ok
 
 
@@ -453,10 +462,19 @@ def resolve_key(eid: str, api_key: Callable[[str], str]) -> str:
     return api_key(eid) or ""
 
 
-def spec_has_key(eid: str, api_key: Callable[[str], str]) -> bool:
+def spec_has_key(
+    eid: str, api_key: Callable[[str], str], unknown_has_key: bool | None = None
+) -> bool:
     """key 存在判定（單點）：keyless 引擎免查（永遠可選）；needs_key 引擎查
-    有效 key（resolve_key——含 latex 槽位沿用）。未知引擎 KeyError（fail-fast）。"""
-    spec = ENGINE_SPECS[eid]
+    有效 key（resolve_key——含 latex 槽位沿用）。
+
+    未知引擎語意（卡③）：unknown_has_key=None（預設）→ KeyError fail-fast
+    （既有契約）；unknown_has_key=bool → 未知引擎視為該值（fail-closed 語意）。"""
+    spec = ENGINE_SPECS.get(eid)
+    if spec is None:
+        if unknown_has_key is None:
+            raise KeyError(eid)
+        return unknown_has_key
     if not spec.needs_key:
         return True
     return bool(resolve_key(eid, api_key))

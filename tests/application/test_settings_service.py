@@ -81,6 +81,20 @@ def test_resolve_engine_missing_key_gives_friendly_error(tmp_path):
         svc.resolve_engine()
 
 
+def test_resolve_engine_latex_reuses_deepseek_key(tmp_path):
+    """卡③（2026-08-14）：預設引擎=latex 且只有 deepseek key——resolve_engine
+    應沿用 deepseek 槽位成功（latex 後端＝deepseek-chat，同一 key）。
+
+    實際 bug：點卡路徑（app._pick_engine 用 resolve_key）能過，設定頁 global
+    路徑（resolve_engine 裸查 api_key(spec.id)）誤報「尚未設定 LaTeX 的 API
+    key」——同一規則兩路徑答案不一致。"""
+    svc = make_service(tmp_path)
+    svc.set_api_key("deepseek", "DS-KEY")
+    svc.set_engine("latex")
+    engine = svc.resolve_engine()  # 不應拋「尚未設定 LaTeX 的 API key」
+    assert engine._config.api_key == "DS-KEY"
+
+
 def test_ppt_vision_engine_resolves_through_registry(tmp_path):
     """票 14：PPT 視覺走同一 resolve 路徑（needs_key 守證，UI 引擎下拉自動出現）。"""
     svc = make_service(tmp_path)
