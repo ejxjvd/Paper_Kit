@@ -131,12 +131,23 @@ def _diagnose_no_output(output: str) -> str:
     """#78（2026-08-14 Gemini 404 實測教訓）：pdf2zh 對上游 HTTP 錯誤吞錯
     （rc=0 靜默退出）→ 假成功。掃引擎 log 帶出真實原因，不讓使用者猜。"""
     normalized = re.sub(r"\s+", "", output)
+    # v0.1.8（#79 誤報根因）：空殼模型（HTTP 200 choices=null）→ pdf2zh 在
+    # choices[0].message.content 對 NoneType 拋 TypeError——traceback 的
+    # 「line 401」（行號）會被下方 401 regex 誤判為「API key 無效」。
+    # 空殼特徵（choices[0]＋NoneType，含思考型 content=None）優先診斷。
+    if re.search(r"choices\[0\]\.message\.content", normalized) and re.search(
+        r"NoneType", normalized
+    ):
+        return (
+            "模型未提供服務或回應異常（choices/content 為空）——"
+            "該模型登錄但未開放或為思考型，換模型或換引擎"
+        )
     if re.search(r"(?i)error.{0,40}4\s?04", normalized) or "404" in normalized:
         return "上游 404：模型不存在或不支援此用法——檢查模型 ID（設定頁「載入模型清單」挑選可生成模型）"
     if re.search(r"(?i)429|toodeeprequests|ratelimit", normalized):
         return "上游 429：限流（免費額度/RPM 用完）——稍後重試或換引擎"
     if re.search(
-        r"(?i)401|unauthorized|invalidkey|apikey|authenticationfailed",
+        r"(?i)(?<!line)401|unauthorized|invalidkey|apikey|authenticationfailed",
         normalized,
     ):
         # authentication failed：ModelScope 跨站 key（.cn vs .ai 不互通）案例

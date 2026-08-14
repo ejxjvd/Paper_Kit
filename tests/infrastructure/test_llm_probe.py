@@ -181,6 +181,60 @@ def test_probe_model_network_error_returns_zero(monkeypatch):
     assert "connection refused" in body
 
 
+# ── 空殼檢測（v0.1.8，#79 誤報 401 根因修復）───────────────────
+
+
+def test_probe_model_empty_shell_returns_590():
+    """#79 空殼群組（ERNIE-4.5-300B/21B、Hy3、Intern-S1、GLM-4.7-Flash）：
+    HTTP 200 但 choices=null（登錄但未提供服務）→ 590「模型未提供服務」——
+    不得誤報 401（v0.1.6 實測：真翻譯報「上游 401」但 curl 200 choices=null）。"""
+
+    class Handler(_Base):
+        def do_POST(self):
+            length = int(self.headers["Content-Length"])
+            self.rfile.read(length)
+            body = b'{"id":"chatcmpl-x","choices":null,"usage":{"total_tokens":0}}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = _server(Handler)
+    try:
+        code, _ = probe_model(f"http://127.0.0.1:{server.server_port}/v1", "k", "m")
+        assert code == 590, f"空殼（choices=null）應回 590，實際 {code}"
+    finally:
+        server.shutdown()
+
+
+def test_probe_model_empty_choices_list_returns_590():
+    """choices 為空陣列同屬空殼（部分平台 200 回 [] 而非 null）。"""
+
+    class Handler(_Base):
+        def do_POST(self):
+            length = int(self.headers["Content-Length"])
+            self.rfile.read(length)
+            body = b'{"choices":[]}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = _server(Handler)
+    try:
+        code, _ = probe_model(f"http://127.0.0.1:{server.server_port}/v1", "k", "m")
+        assert code == 590, f"空殼（choices=[]）應回 590，實際 {code}"
+    finally:
+        server.shutdown()
+
+
+def test_diagnose_empty_shell_message():
+    """590 → 「模型未提供服務」診斷（空殼＝登錄未開放，換模型或換引擎）。"""
+    assert "模型未提供服務" in diagnose(590, "{}")
+
+
 # ── list_models（GET /models → id 清單，v0.1.3 模型挑選）──────────
 
 

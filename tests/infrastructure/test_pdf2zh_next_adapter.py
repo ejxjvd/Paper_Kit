@@ -364,6 +364,33 @@ def test_parse_output_no_path_diagnoses_auth_failed():
         parse_output(out, make_job())
 
 
+def test_diagnose_no_output_ignores_line_number_401():
+    """v0.1.8（#79 誤報根因）：pdf2zh traceback「line 401」（真實空殼場景——
+    response.choices[0].message.content 對 NoneType 拋錯）被 regex 誤判為
+    HTTP 401「API key 無效」。line-number 不得觸發 401 診斷；空殼特徵
+    （choices[0]＋NoneType）優先報「模型未提供服務」。"""
+
+    from paper_kit.infrastructure.pdf2zh_next_adapter import _diagnose_no_output
+
+    out = (
+        'File "/usr/lib/python3.12/site-packages/pdf2zh/translator/_base.py", '
+        "line 401, in response.choices[0].message.content\n"
+        "TypeError: 'NoneType' object is not subscriptable"
+    )
+    msg = _diagnose_no_output(out)
+    assert "401" not in msg, f"line 401 是 traceback 行號不是 HTTP 401：{msg}"
+    assert "模型未提供服務" in msg, msg
+
+
+def test_diagnose_no_output_empty_shell_signature():
+    """空殼特徵（choices[0]＋NoneType）→ 「模型未提供服務」診斷。"""
+
+    from paper_kit.infrastructure.pdf2zh_next_adapter import _diagnose_no_output
+
+    out = "response.choices[0].message.content ... TypeError: 'NoneType' object is not subscriptable"
+    assert "模型未提供服務" in _diagnose_no_output(out)
+
+
 def test_parse_output_missing_mono_fallback_uses_target_lang():
     """檔名小瑕疵（frontier）：log 只有 DualPDF 行 → mono fallback 檔名必須用
     實際 target_lang（zh-TW）——舊行為硬編碼 .zh.mono.pdf 與引擎產出

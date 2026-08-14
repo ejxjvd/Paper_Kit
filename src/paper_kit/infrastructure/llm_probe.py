@@ -73,7 +73,8 @@ def probe_model(
 
     #78（2026-08-14 實測教訓）：GET /models 只驗 key 活性不驗模型可用——
     gemini-3-pro-latest 在清單但 generateContent 404（使用者 3 任務全滅）。
-    200＝可生成；401/403＝key 無效；404＝模型不存在；429＝限流；0＝連線失敗。
+    200＝可生成；401/403＝key 無效；404＝模型不存在；429＝限流；0＝連線失敗；
+    #79（v0.1.8）：200 但 choices 為空（登錄未服務空殼）→ 590「模型未提供服務」。
     """
     payload = {
         "model": model,
@@ -84,12 +85,18 @@ def probe_model(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read(200).decode("utf-8", "replace")
-            return resp.status, body[:80]
+            status = resp.status
     except urllib.error.HTTPError as e:
         body = e.read(200).decode("utf-8", "replace")
         return e.code, body[:80]
     except Exception as e:  # 連線失敗／逾時
         return 0, str(e)[:80]
+    # 空殼檢測（v0.1.8，#79 誤報根因）：HTTP 200 但 choices=null/[]（ERNIE×2/
+    # Hy3/Intern-S1/GLM-4.7-Flash 實測）——不得當「可翻譯」放行（pdf2zh 在
+    # choices[0] 對 NoneType 拋錯崩潰），也不得誤報 401。
+    if status == 200 and _is_empty_shell(body):
+        return 590, body[:80]
+    return status, body[:80]
 
 
 def list_models(base_url: str, api_key: str, timeout: int = 20) -> list[str]:
@@ -112,12 +119,26 @@ def list_models(base_url: str, api_key: str, timeout: int = 20) -> list[str]:
     )
 
 
+def _is_empty_shell(body: str) -> bool:
+    """HTTP 200 但 choices 為空（null／[]）＝「登錄但未提供服務」空殼模型。"""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return False
+    return data.get("choices") in (None, [])
+
+
 def diagnose(code: int, body: str) -> str:
     """HTTP 碼 → 使用者可操作診斷文案（設定頁「測試 API」通知／preflight 錯誤共用）。
 
     呼叫方自加前綴（引擎名／「上游 {code}：」語境）——文案本身不含重複的碼
     （500 與 0 分支除外，那兩者是 body 訊息的上下文）。
     """
+    if code == 590:
+        return (
+            "模型未提供服務（HTTP 200 但 choices 為空）——"
+            "該模型登錄但未開放，換模型或換引擎"
+        )
     if code in (401, 403):
         return "API key 無效——請檢查是否複製完整"
     if code == 404:
