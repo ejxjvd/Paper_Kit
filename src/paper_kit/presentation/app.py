@@ -57,6 +57,7 @@ from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也�
     spec_has_key,  # key 存在判定（latex 特例內含）
 )
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
+from paper_kit.infrastructure.latex_detector import detect_latex_dense  # v0.1.9.5：LaTeX 密集標注
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
 from paper_kit.infrastructure.llm_probe import (  # 卡①：端點探測單點（測試 API／模型清單／preflight 共用）
     diagnose,
@@ -516,6 +517,16 @@ def _render_card(
                         ui.badge("🔍 掃描件").props("outline color=teal")
                     if view.from_cache:  # 票 26：快取命中標記（引擎未呼叫）
                         ui.badge("⚡ 快取").props("outline color=cyan")
+                    if view.latex_warning:  # v0.1.9.5：LaTeX 密集標注（行重疊風險提示）
+                        ui.badge("⚠️ 疑似 LaTeX 密集").props(
+                            "outline color=orange"
+                        ).tooltip(
+                            "偵測到此 PDF 含 LaTeX 數學字體（Computer Modern/Latin Modern/"
+                            "unicode-math 系）——翻譯後中文行距可能被引擎壓縮而產生重疊"
+                            "（BabelDOC 限制，公式參數與 mono 實測無效）；建議以下載的 "
+                            "dual 左半原文對照閱讀。判定為字體名啟發式：XeLaTeX/CTeX 中文"
+                            "論文若完全不用 CM/LM 數學字體可能漏標（僅少一次提醒，無損傷）。"
+                        )
                 # 票 08：歷史卡片顯示建立時間＋引擎
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
@@ -602,6 +613,7 @@ def _refresh(
     preview_dialog=None,
     preview_box=None,
     quota_label=None,  # #85 切片D：免費額度資訊條（1s 輪詢同步聚合值）
+    latex_memo: dict[str, bool] | None = None,  # v0.1.9.5：LaTeX 密集偵測（完成任務只偵測一次）
 ) -> None:
     cards.clear()
     # #85 切片D：已用 tokens 聚合（已完成任務 in+out）→ 額度條文字
@@ -609,10 +621,15 @@ def _refresh(
         quota_label.set_text(_quota_label(_aggregate_used_tokens(service.list_jobs())))
     # spec review：引擎欄顯示 label（「DeepSeek（純文字…）」）不是 raw id
     engine_labels = _engine_label_map()
+    if latex_memo is None:
+        latex_memo = {}
     for job in service.list_jobs():
         # memo：完成任務只算一次成本標籤（1s 輪詢下避免每輪重讀 PDF 頁數）
         if job.status is JobStatus.COMPLETED and job.job_id not in memo:
             memo[job.job_id] = cost.usage_label(job)
+        # v0.1.9.5：完成任務只偵測一次 LaTeX 密集（讀 PDF 字體清單有 IO，memo 避免每輪重掃）
+        if job.status is JobStatus.COMPLETED and job.job_id not in latex_memo:
+            latex_memo[job.job_id] = _is_latex_dense_source(job)
         # 2026-08-13：未完成任務預估標籤每輪即算——純欄位讀取無 IO（估 tokens＋美元/台幣）
         estimated_label = (
             cost.estimated_label(job) if job.status is not JobStatus.COMPLETED else None
@@ -626,6 +643,7 @@ def _refresh(
                     usage_label=memo.get(job.job_id),
                     estimated_label=estimated_label,
                     engine_labels=engine_labels,
+                    latex_warning=bool(latex_memo.get(job.job_id)),
                 ),
                 service,
                 settings,
@@ -634,6 +652,23 @@ def _refresh(
                 preview_dialog,
                 preview_box,
             )
+
+
+def _is_latex_dense_source(job) -> bool:
+    """v0.1.9.5：來源 PDF 是否 LaTeX 數學密集（只對 PDF 判定；讀取失敗→False）。
+
+    LaTeX 論文翻譯後行重疊是 BabelDOC 引擎限制（行距壓縮 < 中文字形高）——
+    偵測到時卡片標注 ⚠️ 提示使用者。非 PDF 來源（.tex 走 LaTeX 引擎）不判定。
+    """
+    src = job.source_path
+    if not src:
+        return False
+    try:
+        result = detect_latex_dense(str(src))
+    except Exception as exc:  # 偵測失敗不中斷既有流程
+        logger.debug("LaTeX 偵測失敗", extra={"path": str(src), "error": str(exc)})
+        return False
+    return bool(result and result.is_dense)
 
 
 def _save_engine_choice(settings: SettingsService, engine_id: str) -> None:
@@ -2276,6 +2311,7 @@ def _index_page(
             # （使用者回報「任務歷史一整排填滿、與上方寬度不一、割裂」；
             # CDP 實測 L=316 R=1889 vs 欄位 L=655 R=1551 定案）。
             memo: dict[str, str | None] = {}
+            latex_memo: dict[str, bool] = {}  # v0.1.9.5：LaTeX 密集偵測 memo（完成任務只算一次）
             cards = ui.column().classes("w-full gap-4")
             ui.timer(
                 1.0,
@@ -2283,6 +2319,7 @@ def _index_page(
                     cards, service, cost, settings, memo,
                     delete_dialog, delete_state, preview_dialog, preview_box,
                     quota_label=quota_label,  # #85 切片D：額度條隨輪詢同步
+                    latex_memo=latex_memo,
                 ),
             )
 

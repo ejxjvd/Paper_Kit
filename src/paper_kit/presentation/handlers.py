@@ -73,6 +73,7 @@ class JobCardView:
     total_pages: int | None = None   # #27：翻譯頁數（進度框「N/M 頁」的 N）
     pdf_pages: int | None = None     # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
     pages_raw: str | None = None     # #27：原始選取頁碼（歷史表格 hover 顯示用）
+    latex_warning: bool = False      # v0.1.9.5：LaTeX 數學密集 PDF——行重疊風險標注
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -101,6 +102,7 @@ def build_job_card(
     usage_label: str | None = None,
     engine_labels: dict[str, str] | None = None,
     estimated_label: str | None = None,  # 2026-08-13：app 層算好傳入（handlers 純函式不碰 CostService）
+    latex_warning: bool = False,  # v0.1.9.5：LaTeX 密集偵測結果（app 層算好傳入）
 ) -> JobCardView:
     """任務 → 卡片 viewmodel（純函式）。
 
@@ -151,6 +153,7 @@ def build_job_card(
         total_pages=job.total_pages,  # #27：翻譯頁數（進度框「N/M 頁」的 N）
         pdf_pages=job.pdf_pages,      # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
         pages_raw=job.pages,          # #27：原始選取頁碼（hover 顯示）
+        latex_warning=latex_warning,  # v0.1.9.5
     )
 
 

@@ -2,6 +2,32 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.5
+
+### ⚠️ 新增：LaTeX 數學密集 PDF 偵測＋行重疊風險標注
+
+**背景（2026-08-15 診斷 0211159.pdf，Perelman《Ricci 流的熵公式》——39 頁 LaTeX 數學論文）**：使用者回報翻譯後格式錯誤、文字重疊。完整診斷結論：
+
+- **不是 LaTeX 的錯**——原文排版完全正常（CMR12 字形 12pt、行距 14.4pt）
+- **真因**：pdf2zh_next 底層 BabelDOC 引擎重排時把翻譯行距壓縮到 8.7–9.4pt，而翻譯中文用 Source Han Serif TW（字形 bbox 17.2pt 高）→ 行距 < 字形高度 → 行間視覺重疊（像素剖面實測：連續 18.7pt 墨跡無間隙，正常對照行間 7–8pt 空白）
+- **公式參數 A/B 實測無效**：`--formular-font-pattern 'CMSY|CMEX|CMMI|CMR'` 與無參數版 CJK+CJK 重疊對完全同位（p12 三對、p32 三對）
+- **mono 模式實測同樣無效**：mono 版同位置 6 對 CJK+CJK、像素剖面與 dual 一致
+- 重疊分佈：使用者指定 5 頁（6/13/21/26/33）共 6–7 對 CJK+CJK 真重疊；另有大量 MATH+CJK 為 bbox 偽影（行間實有 5.5pt 空隙，gemma-31B 視覺複核讀成正常）
+
+**v0.1.9.5 實作**（UI 標注方案——參數與 mono 都無效，改成誠實告知）：
+
+1. 新模組 `latex_detector.py`：掃 PDF 全部頁字體清單（pymupdf），判別 LaTeX 字體系——Computer Modern／AMS（CMR/CMMI/CMSY/CMEX/LASY/MSBM…）＋Latin Modern（lmodern，LMRoman/LMMath）＋unicode-math 符號系（LatinModernMath/STIXTwoMath/XITSMath/TeXGyre*Math，含子集前綴 XXXX+ 剝離）——**公式符號字體存在＋LaTeX 頁面覆蓋率 ≥50%** → 判定「疑似 LaTeX 數學密集」
+2. 任務卡片標注：翻譯完成的 LaTeX 密集 PDF 顯示 **「⚠️ 疑似 LaTeX 密集」** 徽章，tooltip 說明行重疊是引擎限制、公式參數與 mono 實測無效、建議以 dual 左半原文對照閱讀；tooltip 亦誠實註明判定侷限（XeLaTeX/CTeX 中文論文若完全不用 CM/LM 數學字體可能漏標）
+3. 只偵測一次（memo 機制，1s 輪詢不重複掃 PDF）
+
+**偵測的侷限（2026-08-15 使用者質詢後補強）**：字體名判定是啟發式、非保證。漏判面——XeLaTeX/CTeX 中文論文（CJK 字體不帶 CM 名，但公式通常仍是 CM 系符號字體→多數仍命中）、TeX Gyre 系正文（LibreOffice 也有散佈，不列入正文標誌防誤報）、無文字層掃描件（無法判定）。誤判防護——50% 覆蓋率閾值擋掉論文合集（296 頁僅 2-3 頁含 LaTeX 字體，實測 ALL-Agents PDF 正確不判）。
+
+### ✅ 驗證
+
+- TDD 11 新測試（字體判別含子集前綴／Latin Modern／unicode-math 符號系／fixture paper_p34.pdf 即 LaTeX 論文正例／掃描件反例／缺檔 None／50% 閾值純函式／viewmodel 透傳）——全套件 **789 passed**（+11）
+- 真實大樣本掃描：使用者全部 PDF（29 檔）——0211159 系列 5 檔全命中 dense=True，OS_Chapter 系列／CH4／切結書／證明／說明書／SLAM 等全 False，296 頁合集正確拒絕
+- A/B 驗證（診斷核心）：base vs `--formular-font-pattern` 5 頁重疊對完全一致（CJK+CJK 6 對同位）——參數無效定案
+
 ## v0.1.9.4
 
 ### 🐛 修復：打開 exe 的 CMD 看不到 uv 安裝進度（另一台 Windows 機器真機實測）

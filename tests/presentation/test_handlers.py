@@ -79,6 +79,13 @@ def test_completed_job_respects_custom_files_base():
     assert view.mono_url.startswith("/outputs-served/abc123/")
 
 
+def test_latex_warning_flag_passthrough():
+    """v0.1.9.5：LaTeX 密集偵測結果透傳到 viewmodel（UI 顯示 ⚠️ 標注）。"""
+    assert not build_job_card(completed_job()).latex_warning  # 預設不標注
+    view = build_job_card(completed_job(), latex_warning=True)
+    assert view.latex_warning
+
+
 def test_failed_job_shows_error():
     job = TranslationJob(job_id="f1", source_path="/outputs/f1/a.pdf")
     job.transition(JobStatus.TRANSLATING)
