@@ -6,11 +6,6 @@ bug 根因：settings_page 依賴 bind_value_to(locals(), ...) 寫回變數，
 user_simulation 開真實 /settings 頁——渲染拋任何例外都會 500。
 """
 
-import io
-import json
-import urllib.error
-import urllib.request
-
 import pytest
 from nicegui import ui
 from nicegui.testing import user_simulation
@@ -253,94 +248,9 @@ def _cache_toggle(user) -> ui.switch:
 # ── 測試 API 按鈕（2026-08-13 使用者要求：填入 key 後確認是否成功啟用）──
 
 
-def test_probe_api_returns_status():
-    """_probe_api 純函式：GET {base_url}/models 驗證 key（零成本、不生成 token）。
-    （實際網路呼叫太重——用假 server 或直接測狀態判定邏輯；此處測組裝與解析。）"""
-
-    probe = app_module._probe_api
-    # 用本地假 server：200 與 401 兩種回應
-    import http.server
-    import threading
-    import urllib.parse
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            auth = self.headers.get("Authorization", "")
-            if auth == "Bearer good-key":
-                body = b'{"object":"list","data":[]}'
-                self.send_response(200)
-            else:
-                body = b'{"error":"invalid key"}'
-                self.send_response(401)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}/v1"
-        code, body = probe(base, "good-key")
-        assert code == 200, f"好 key 應 200，實際 {code} {body}"
-        code, body = probe(base, "bad-key")
-        assert code == 401, f"壞 key 應 401，實際 {code} {body}"
-    finally:
-        server.shutdown()
-
-
-def test_probe_api_verifies_model_generation():
-    """#78（2026-08-14 Gemini 404 實測教訓）：_probe_api 帶 model 時必須
-    POST /chat/completions 驗證「模型可生成」——GET /models 只驗 key 活性，
-    不驗模型可用（gemini-3-pro-latest 在清單但 generateContent 404，
-    使用者 3 任務全滅）。"""
-
-    import http.server
-    import threading
-
-    seen = {"post_paths": [], "post_bodies": []}
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"object":"list","data":[]}')
-
-        def do_POST(self):
-            length = int(self.headers["Content-Length"])
-            seen["post_paths"].append(self.path)
-            seen["post_bodies"].append(
-                json.loads(self.rfile.read(length))
-            )
-            self.send_response(404)  # 模型不存在（gemini-3-pro-latest 案例）
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"error":{"code":404,"message":"not found"}}')
-
-        def log_message(self, *a):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}/v1"
-        code, _ = app_module._probe_api(base, "good-key", model="models/gemini-3.5-flash")
-        assert code == 404, f"模型 404 應回 404（沿用現有通知分層），實際 {code}"
-        assert seen["post_paths"] == ["/v1/chat/completions"], seen["post_paths"]
-        body = seen["post_bodies"][0]
-        assert body["model"] == "models/gemini-3.5-flash", body
-        assert body["max_tokens"] == 1, f"應只驗生成 1 token（零成本），實際 {body}"
-    finally:
-        server.shutdown()
-
-
 @pytest.mark.asyncio
 async def test_test_api_button_shows_success(tmp_path, monkeypatch):
-    """設定頁每張 key 引擎卡有「測試 API」按鈕；點擊（_probe_api 回 200）
+    """設定頁每張 key 引擎卡有「測試 API」按鈕；點擊（probe_model 回 200）
     → 成功通知。"""
 
     calls = []
@@ -349,7 +259,7 @@ async def test_test_api_button_shows_success(tmp_path, monkeypatch):
         calls.append((base_url, api_key, model))
         return 200, '{"ok":true}'
 
-    monkeypatch.setattr(app_module, "_probe_api", fake_probe)
+    monkeypatch.setattr(app_module, "probe_model", fake_probe)
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
     glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
@@ -375,7 +285,7 @@ async def test_test_api_button_rejects_bad_key(tmp_path, monkeypatch):
     """key 無效（401）→ 警告通知（提示 key 有問題，不報連線失敗）。"""
 
     monkeypatch.setattr(
-        app_module, "_probe_api", lambda base, key, model=None: (401, '{"error":"bad"}')
+        app_module, "probe_model", lambda base, key, model=None: (401, '{"error":"bad"}')
     )
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
@@ -401,7 +311,7 @@ async def test_test_api_button_without_key_warns(tmp_path, monkeypatch):
         called.append(True)
         return 200, ""
 
-    monkeypatch.setattr(app_module, "_probe_api", fake_probe)
+    monkeypatch.setattr(app_module, "probe_model", fake_probe)
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
     glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
@@ -544,92 +454,6 @@ async def test_clear_cache_button_clears(tmp_path):
 
 
 # ── v0.1.3：引擎模型挑選（NVIDIA EOL 410 教訓）──────────────────
-
-
-class _FakeResp:
-    """urlopen 假的回應（with 語法＋read 支援 BytesIO 語意）。"""
-
-    def __init__(self, body: bytes, status: int = 200):
-        self._io = io.BytesIO(body)
-        self.status = status
-
-    def read(self, size: int = -1) -> bytes:
-        return self._io.read(size)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-def test_fetch_models_parses_and_sorts(monkeypatch):
-    """GET /models 回應 data 清單 → sorted id；v0.1.3 下拉選單資料源。"""
-    from paper_kit.presentation.app import _fetch_models
-
-    payload = json.dumps(
-        {
-            "data": [
-                {"id": "z-ai/glm-5.2", "object": "model"},
-                {"id": "deepseek-ai/deepseek-v4-flash-0731"},
-            ]
-        }
-    ).encode()
-    captured = {}
-
-    def fake_urlopen(req, timeout=20):
-        captured["url"] = req.full_url
-        captured["auth"] = req.get_header("Authorization")
-        return _FakeResp(payload)
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    models = _fetch_models("https://integrate.api.nvidia.com/v1", "nvapi-x")
-    assert models == ["deepseek-ai/deepseek-v4-flash-0731", "z-ai/glm-5.2"]  # 排序
-    assert captured["url"] == "https://integrate.api.nvidia.com/v1/models"
-    assert captured["auth"] == "Bearer nvapi-x"
-
-
-def test_fetch_models_skips_invalid_entries(monkeypatch):
-    """data 內非 dict／缺 id 的項目過濾掉；空 data → []。"""
-    from paper_kit.presentation.app import _fetch_models
-
-    payload = json.dumps(
-        {"data": [{"id": "ok/model"}, "garbage", {"object": "model"}, None]}
-    ).encode()
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda req, timeout=20: _FakeResp(payload)
-    )
-    assert _fetch_models("https://example.com/v1", "k") == ["ok/model"]
-
-
-def test_fetch_models_failures_return_empty(monkeypatch):
-    """缺 data 欄位／HTTP 錯誤／連線失敗 → []（UI 顯示警告而非崩潰）。"""
-    from paper_kit.presentation.app import _fetch_models
-
-    # 缺 data 欄位
-    monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
-        lambda req, timeout=20: _FakeResp(b'{"models": []}'),
-    )
-    assert _fetch_models("https://example.com/v1", "k") == []
-
-    # HTTP 錯誤（key 無效 401）
-    def boom(req, timeout=20):
-        raise urllib.error.HTTPError(
-            req.full_url, 401, "Unauthorized", {}, None
-        )
-
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
-    assert _fetch_models("https://example.com/v1", "bad-key") == []
-
-    # 連線失敗
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda req, timeout=20: (_ for _ in ()).throw(
-            urllib.error.URLError("connection refused")
-        )
-    )
-    assert _fetch_models("https://example.com/v1", "k") == []
 
 
 @pytest.mark.asyncio

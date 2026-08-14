@@ -7,15 +7,12 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 """
 
 import asyncio
-import json  # v0.1.3：模型清單解析（設定頁載入模型）
 import logging
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.error
-import urllib.request
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +56,12 @@ from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也�
 )
 from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
 from paper_kit.infrastructure.job_repo import SqliteJobRepository
+from paper_kit.infrastructure.llm_probe import (  # 卡①：端點探測單點（測試 API／模型清單／preflight 共用）
+    diagnose,
+    list_models,
+    probe_key,
+    probe_model,
+)
 from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
 from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
@@ -697,80 +700,6 @@ def _key_handlers(
     return save, clear
 
 
-def _probe_api(
-    base_url: str, api_key: str, model: str | None = None, timeout: int = 10
-) -> tuple[int, str]:
-    """測試 API 按鈕（2026-08-13 使用者要求）：GET {base_url}/models 驗證 key；
-    帶 model 時再 POST /chat/completions（max_tokens=1）驗證「模型可生成」。
-
-    #78（2026-08-14 實測教訓）：GET /models 只驗 key 活性不驗模型可用——
-    gemini-3-pro-latest 在清單但 generateContent 404（使用者 3 任務全滅）。
-    200＝key＋模型都可用；401/403＝key 無效；404＝模型不存在；
-    429＝限流；0＝連線失敗（urlopen 例外）。純函式（module 層）。
-    """
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/models", method="GET"
-    )
-    req.add_header("Authorization", f"Bearer {api_key}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            resp.read(200)
-    except urllib.error.HTTPError as e:
-        e.read(200)
-        return e.code, "key 驗證失敗"
-    except Exception as e:  # 連線失敗／逾時（urlopen 拋 URLError 等）
-        return 0, str(e)[:80]
-    if model is None:
-        # 不帶 model（載入模型清單語境）——只驗 key 活性即回
-        return 200, "ok"
-    # 模型生成驗證（#78）：POST chat/completions、max_tokens=1（零成本）
-    payload = json.dumps(
-        {
-            "model": model,
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "ping"}],
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions", data=payload, method="POST"
-    )
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read(200).decode("utf-8", "replace")
-            return resp.status, body[:80]
-    except urllib.error.HTTPError as e:
-        body = e.read(200).decode("utf-8", "replace")
-        return e.code, body[:80]
-    except Exception as e:  # 連線失敗／逾時
-        return 0, str(e)[:80]
-
-
-def _fetch_models(base_url: str, api_key: str, timeout: int = 20) -> list[str]:
-    """GET {base_url}/models → 模型 id 清單（排序；失敗回 []）。
-
-    v0.1.3：設定頁「載入模型清單」——NVIDIA EOL 410 教訓（2026-08-14 使用者
-    實測 deepseek-v4-flash 於 08-07 下線）：registry 寫死的 model 會過期，
-    改由使用者即時拉取挑選。純函式（module 層）——測試 monkeypatch urlopen。
-    """
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/models", method="GET"
-    )
-    req.add_header("Authorization", f"Bearer {api_key}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8", "replace"))
-    except Exception:
-        return []
-    ids = [
-        m.get("id")
-        for m in payload.get("data", [])
-        if isinstance(m, dict) and m.get("id")
-    ]
-    return sorted(ids)
-
-
 def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
     """設定頁單一引擎的 key 子卡（2026-08-13：付費／免費兩區共用同一渲染——
     迴圈主體不複製兩份；marker 各引擎唯一：engine-key-{eid} 等）。
@@ -818,8 +747,10 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                 if not key:
                     ui.notify(f"{spec.label}：尚未設定 key", type="warning")
                     return
+                # 卡①：探測收斂 llm_probe.probe_model（單點——UA/診斷文案與
+                # preflight 同源；v0.1.7 Groq 403 誤擋修復全端生效）
                 code, body = await asyncio.to_thread(
-                    _probe_api, spec.base_url, key, spec.model
+                    probe_model, spec.base_url, key, spec.model
                 )
                 if code == 200:
                     ui.notify(
@@ -827,28 +758,13 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                         type="positive",
                     )
                 elif code in (401, 403):
-                    ui.notify(
-                        f"⚠️ {spec.label}：key 無效（HTTP {code}）——"
-                        "請檢查是否複製完整",
-                        type="warning",
-                    )
+                    ui.notify(f"⚠️ {spec.label}：{diagnose(code, body)}", type="warning")
                 elif code == 404:
-                    ui.notify(
-                        f"❌ {spec.label}：模型不存在（HTTP 404）——"
-                        "設定頁「載入模型清單」挑選可生成模型",
-                        type="negative",
-                    )
+                    ui.notify(f"❌ {spec.label}：{diagnose(code, body)}", type="negative")
                 elif code == 429:
-                    ui.notify(
-                        f"⚠️ {spec.label}：上游限流（HTTP 429）——"
-                        "稍後重試或換引擎",
-                        type="warning",
-                    )
+                    ui.notify(f"⚠️ {spec.label}：{diagnose(code, body)}", type="warning")
                 else:
-                    ui.notify(
-                        f"❌ {spec.label}：連線失敗（HTTP {code} {body[:40]}）",
-                        type="negative",
-                    )
+                    ui.notify(f"❌ {spec.label}：{diagnose(code, body)}", type="negative")
 
             ui.button(
                 "測試 API",
@@ -912,7 +828,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                         type="warning",
                     )
                     return
-                code, body = await asyncio.to_thread(_probe_api, spec.base_url, key)
+                code, body = await asyncio.to_thread(probe_key, spec.base_url, key)
                 if code != 200:
                     ui.notify(
                         f"{spec.label}：載入模型失敗（HTTP {code} {body[:40]}）"
@@ -920,7 +836,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                         type="negative",
                     )
                     return
-                models = await asyncio.to_thread(_fetch_models, spec.base_url, key)
+                models = await asyncio.to_thread(list_models, spec.base_url, key)
                 if not models:
                     ui.notify(f"{spec.label}：模型清單為空", type="warning")
                     return

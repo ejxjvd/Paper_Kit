@@ -21,6 +21,7 @@ from paper_kit.infrastructure.cli_adapter_base import (
     _kill_tree as _base_kill_tree,
     CliAdapterBase,
 )
+from paper_kit.infrastructure.llm_probe import diagnose, probe_model  # 卡①：探測單點
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
 DEFAULT_MODEL = "google/gemma-4-31B-it"
@@ -170,59 +171,6 @@ def parse_output(output: str, job: TranslationJob) -> JobResult:
     )
 
 
-def preflight_openai(
-    base_url: str, api_key: str, model: str, timeout: int = 10
-) -> tuple[int, str]:
-    """#78 假成功杜絕第三層：翻譯前預檢——POST /chat/completions（max_tokens=1
-    零成本）一次驗證 key 活性＋模型可生成。GET /models 盲區（ModelScope/Gemini
-    實測：清單有顯示但生成 404/401）——POST 給真答案。
-
-    200＝可翻譯；401＝key 無效；404＝模型不存在；429＝限流；0＝連線失敗。
-    """
-    import json
-    import urllib.error
-    import urllib.request
-
-    payload = json.dumps(
-        {
-            "model": model,
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "ping"}],
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions", data=payload, method="POST"
-    )
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    # v0.1.7（2026-08-14 Groq 實測）：urllib 預設 UA（Python-urllib/3.x）被
-    # Groq 的 Cloudflare 指紋封鎖（403 error 1010）——curl 200 但 preflight 誤擋。
-    # 帶上瀏覽器式 UA 通過；同場域（OpenRouter 等）亦受惠。
-    req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read(200).decode("utf-8", "replace")
-            return resp.status, body[:80]
-    except urllib.error.HTTPError as e:
-        body = e.read(200).decode("utf-8", "replace")
-        return e.code, body[:80]
-    except Exception as e:
-        return 0, str(e)[:80]
-
-
-def _preflight_message(code: int, body: str) -> str:
-    """preflight 非 200 → 對齊 _diagnose_no_output 的診斷訊息風格。"""
-    if code in (401, 403):
-        return "上游 401：API key 無效或已過期——檢查設定頁 key"
-    if code == 404:
-        return "上游 404：模型不存在或不支援此用法——檢查模型 ID（設定頁「載入模型清單」挑選）"
-    if code == 429:
-        return "上游 429：限流（免費額度/RPM 用完）——稍後重試或換引擎"
-    if code == 0:
-        return "連線失敗：無法連到上游 API（檢查網路或 base_url 設定）"
-    return f"上游 {code}：{body[:60]}"
-
-
 class Pdf2zhNextAdapter(CliAdapterBase):
     """實作 TranslationEnginePort（換插頭＝換子類＋registry 分派）。runner 可注入。"""
 
@@ -248,11 +196,16 @@ class Pdf2zhNextAdapter(CliAdapterBase):
             and self._config.requires_key
             and self._config.api_key
         ):
-            code, body = preflight_openai(
+            # 卡①：preflight 收斂 llm_probe.probe_model（單點——UA/payload/診斷
+            # 文案與設定頁「測試 API」同源，任一端修復全端生效）
+            code, body = probe_model(
                 self._config.base_url, self._config.api_key, self._config.model
             )
             if code != 200:
-                raise EngineError(_preflight_message(code, body))
+                raise EngineError(
+                    diagnose(code, body) if code == 0
+                    else f"上游 {code}：{diagnose(code, body)}"
+                )
         return super().translate(job)
 
     def _api_key(self) -> str:
