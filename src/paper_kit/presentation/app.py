@@ -697,12 +697,16 @@ def _key_handlers(
     return save, clear
 
 
-def _probe_api(base_url: str, api_key: str, timeout: int = 10) -> tuple[int, str]:
-    """測試 API 按鈕（2026-08-13 使用者要求）：GET {base_url}/models 驗證 key。
+def _probe_api(
+    base_url: str, api_key: str, model: str | None = None, timeout: int = 10
+) -> tuple[int, str]:
+    """測試 API 按鈕（2026-08-13 使用者要求）：GET {base_url}/models 驗證 key；
+    帶 model 時再 POST /chat/completions（max_tokens=1）驗證「模型可生成」。
 
-    零成本——只列模型、不生成 token。200＝key 有效；401/403＝key 無效；
-    0＝連線失敗（urlopen 例外）。純函式（module 層）——測試 monkeypatch 或
-    假 server 直接測。
+    #78（2026-08-14 實測教訓）：GET /models 只驗 key 活性不驗模型可用——
+    gemini-3-pro-latest 在清單但 generateContent 404（使用者 3 任務全滅）。
+    200＝key＋模型都可用；401/403＝key 無效；404＝模型不存在；
+    429＝限流；0＝連線失敗（urlopen 例外）。純函式（module 層）。
     """
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/models", method="GET"
@@ -710,12 +714,36 @@ def _probe_api(base_url: str, api_key: str, timeout: int = 10) -> tuple[int, str
     req.add_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read(200)
+    except urllib.error.HTTPError as e:
+        e.read(200)
+        return e.code, "key 驗證失敗"
+    except Exception as e:  # 連線失敗／逾時（urlopen 拋 URLError 等）
+        return 0, str(e)[:80]
+    if model is None:
+        # 不帶 model（載入模型清單語境）——只驗 key 活性即回
+        return 200, "ok"
+    # 模型生成驗證（#78）：POST chat/completions、max_tokens=1（零成本）
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions", data=payload, method="POST"
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read(200).decode("utf-8", "replace")
             return resp.status, body[:80]
     except urllib.error.HTTPError as e:
         body = e.read(200).decode("utf-8", "replace")
         return e.code, body[:80]
-    except Exception as e:  # 連線失敗／逾時（urlopen 拋 URLError 等）
+    except Exception as e:  # 連線失敗／逾時
         return 0, str(e)[:80]
 
 
@@ -782,14 +810,16 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                 on_click=clear_key,
             ).props("outline flat color=negative").mark(f"engine-key-clear-{eid}")
             # 2026-08-13（使用者要求）：測試 API 按鈕——填入 key 後確認
-            # 是否成功啟用。GET /models（零成本、不生成 token）驗證。
+            # 是否成功啟用。GET /models（零成本）驗 key ＋ POST /chat/completions
+            # （max_tokens=1）驗模型可生成（#78：gemini-3-pro-latest 在清單但
+            # generateContent 404 的盲區）。
             async def _test_api(eid=eid, spec=spec, settings=settings) -> None:
                 key = settings.api_key(eid)
                 if not key:
                     ui.notify(f"{spec.label}：尚未設定 key", type="warning")
                     return
                 code, body = await asyncio.to_thread(
-                    _probe_api, spec.base_url, key
+                    _probe_api, spec.base_url, key, spec.model
                 )
                 if code == 200:
                     ui.notify(
@@ -800,6 +830,18 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                     ui.notify(
                         f"⚠️ {spec.label}：key 無效（HTTP {code}）——"
                         "請檢查是否複製完整",
+                        type="warning",
+                    )
+                elif code == 404:
+                    ui.notify(
+                        f"❌ {spec.label}：模型不存在（HTTP 404）——"
+                        "設定頁「載入模型清單」挑選可生成模型",
+                        type="negative",
+                    )
+                elif code == 429:
+                    ui.notify(
+                        f"⚠️ {spec.label}：上游限流（HTTP 429）——"
+                        "稍後重試或換引擎",
                         type="warning",
                     )
                 else:

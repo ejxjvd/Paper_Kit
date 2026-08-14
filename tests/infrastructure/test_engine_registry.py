@@ -251,13 +251,31 @@ def test_all_keyless_specs_in_ui_free_ids():
 def test_ui_free_key_engine_ids_priority_order():
     """免費 LLM 卡集合與順序＝研究報告優先序：NVIDIA NIM（T1/T2、40RPM、無日總量）
     ＞ ModelScope（T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron
-    翻譯數據免費群最佳）＞ 智譜（無 token 上限）＞ 阿里雲 Model Studio（Qwen 官方，
-    1M tokens 一次性）＞ Gemini（T2 但免費層資料訓練，殿後）。"""
+    翻譯數據免費群最佳）＞ 阿里雲 Model Studio（Qwen 官方，1M tokens 一次性）＞
+    Gemini（T2 但免費層資料訓練，殿後）。
+    #78（2026-08-14 移除 bigmodel）：使用者管道全為國際站——智譜中國站免費 GLM
+    需中國手機＋實名（國際站用戶拿不到 key），國際站 Z.AI 免費模型未驗證——死卡移除。"""
     from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
 
     assert UI_FREE_KEY_ENGINE_IDS == (
-        "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini",
+        "nvidia", "modelscope", "groq", "openrouter", "dashscope", "gemini",
     )
+
+
+def test_modelscope_uses_international_endpoint():
+    """#78（2026-08-14 ModelScope 實測教訓）：使用者管道全為國際站——.cn 中國站
+    端點對國際站 key 回 401（跨站不互通；GET /models 不驗 key 造成「測試 API」
+    假成功）→ base_url 必須是國際站 .ai。"""
+    spec = ENGINE_SPECS["modelscope"]
+    assert spec.base_url == "https://api-inference.modelscope.ai/v1"
+    assert "cn" not in spec.base_url, f"不應含中國站元素：{spec.base_url}"
+
+
+def test_no_cn_endpoints_in_registry():
+    """#78（2026-08-14 使用者要求）：所有申請管道皆國際站——registry 任何引擎
+    base_url 不得含中國站元素（.cn 網域）。"""
+    for eid, spec in ENGINE_SPECS.items():
+        assert ".cn" not in spec.base_url, f"{eid} base_url 含中國站元素：{spec.base_url}"
 
 
 def test_free_key_specs_openai_provider():
@@ -308,6 +326,14 @@ def test_registry_has_openai_and_gemini_pro_paid_specs():
         assert spec.base_url.startswith("https://"), f"{eid} base_url 異常"
         assert spec.model and spec.card_desc and spec.info, f"{eid} 缺 model/card_desc/info"
         assert eid not in UI_FREE_KEY_ENGINE_IDS, f"{eid} 是付費引擎不該在免費 LLM 區"
+
+
+def test_gemini_pro_model_has_models_prefix():
+    """#78（2026-08-14 實測教訓）：gemini-3-pro-latest 無 models/ 前綴在
+    OpenAI 相容端點 404（ListModels 有顯示但 generateContent 不可用）——
+    spec 預設模型改為實測可生成的 models/gemini-3.5-flash（帶前綴 7 模型全成功）。"""
+    spec = ENGINE_SPECS["gemini-pro"]
+    assert spec.model == "models/gemini-3.5-flash"
 
 
 def test_ui_engine_ids_include_new_paid_engines():

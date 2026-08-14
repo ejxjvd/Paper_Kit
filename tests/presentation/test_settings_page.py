@@ -292,6 +292,52 @@ def test_probe_api_returns_status():
         server.shutdown()
 
 
+def test_probe_api_verifies_model_generation():
+    """#78（2026-08-14 Gemini 404 實測教訓）：_probe_api 帶 model 時必須
+    POST /chat/completions 驗證「模型可生成」——GET /models 只驗 key 活性，
+    不驗模型可用（gemini-3-pro-latest 在清單但 generateContent 404，
+    使用者 3 任務全滅）。"""
+
+    import http.server
+    import threading
+
+    seen = {"post_paths": [], "post_bodies": []}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"object":"list","data":[]}')
+
+        def do_POST(self):
+            length = int(self.headers["Content-Length"])
+            seen["post_paths"].append(self.path)
+            seen["post_bodies"].append(
+                json.loads(self.rfile.read(length))
+            )
+            self.send_response(404)  # 模型不存在（gemini-3-pro-latest 案例）
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"code":404,"message":"not found"}}')
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}/v1"
+        code, _ = app_module._probe_api(base, "good-key", model="models/gemini-3.5-flash")
+        assert code == 404, f"模型 404 應回 404（沿用現有通知分層），實際 {code}"
+        assert seen["post_paths"] == ["/v1/chat/completions"], seen["post_paths"]
+        body = seen["post_bodies"][0]
+        assert body["model"] == "models/gemini-3.5-flash", body
+        assert body["max_tokens"] == 1, f"應只驗生成 1 token（零成本），實際 {body}"
+    finally:
+        server.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_test_api_button_shows_success(tmp_path, monkeypatch):
     """設定頁每張 key 引擎卡有「測試 API」按鈕；點擊（_probe_api 回 200）
@@ -299,8 +345,8 @@ async def test_test_api_button_shows_success(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_probe(base_url, api_key):
-        calls.append((base_url, api_key))
+    def fake_probe(base_url, api_key, model=None):
+        calls.append((base_url, api_key, model))
         return 200, '{"ok":true}'
 
     monkeypatch.setattr(app_module, "_probe_api", fake_probe)
@@ -318,16 +364,19 @@ async def test_test_api_button_shows_success(tmp_path, monkeypatch):
         assert next(iter(test_btn.elements)), "測試 API 按鈕應存在"
         test_btn.click()
         await user.should_see("連線成功", retries=20)
-        assert calls == [("https://api.deepseek.com/v1", "sk-ds-test")], (
-            f"應以該引擎 base_url＋key 探測，實際 {calls}"
-        )
+        # #78：探測須帶 spec.model——驗 key 後驗「模型可生成」（GET /models 盲區）
+        assert calls == [
+            ("https://api.deepseek.com/v1", "sk-ds-test", ENGINE_SPECS["deepseek"].model)
+        ], f"應以該引擎 base_url＋key＋model 探測，實際 {calls}"
 
 
 @pytest.mark.asyncio
 async def test_test_api_button_rejects_bad_key(tmp_path, monkeypatch):
     """key 無效（401）→ 警告通知（提示 key 有問題，不報連線失敗）。"""
 
-    monkeypatch.setattr(app_module, "_probe_api", lambda base, key: (401, '{"error":"bad"}'))
+    monkeypatch.setattr(
+        app_module, "_probe_api", lambda base, key, model=None: (401, '{"error":"bad"}')
+    )
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
     glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))

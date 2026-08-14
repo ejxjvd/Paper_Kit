@@ -336,6 +336,34 @@ def test_parse_output_no_path_lines_raises_engine_error():
         parse_output(out, make_job())
 
 
+def test_parse_output_no_path_diagnoses_404():
+    """#78（2026-08-14 Gemini 404 實測教訓）：pdf2zh 對上游 404 吞錯、rc=0 退出
+    ——假成功訊息必須帶出引擎 log 的真實 HTTP 錯誤（gemini-3-pro-latest 案例）。"""
+    out = (
+        "ERROR pdf2zh_next.high_level: Subprocess initialization error: "
+        "Error code: 404 - [{'error': {'code': 404, 'message': "
+        "'not found for API version v1main..."
+    )
+    with pytest.raises(EngineError, match="上游 404"):
+        parse_output(out, make_job())
+
+
+def test_parse_output_no_path_diagnoses_429():
+    """#78：429 限流（免費層 RPM/配額）→ 錯誤訊息帶「限流」原因。"""
+    out = "ERROR: Too Many Requests (429)"
+    with pytest.raises(EngineError, match="429"):
+        parse_output(out, make_job())
+
+
+def test_parse_output_no_path_diagnoses_auth_failed():
+    """#78（2026-08-14 ModelScope 實測）：401 訊息「Authentication failed」
+    不含 401 字樣——regex 補 authentication 才抓得到（跨站 key 案例）。"""
+    out = ("ERROR pdf2zh_next.high_level: Authentication failed, "
+           "please make sure that a valid ModelScope token is supplied.")
+    with pytest.raises(EngineError, match="401"):
+        parse_output(out, make_job())
+
+
 def test_parse_output_missing_mono_fallback_uses_target_lang():
     """檔名小瑕疵（frontier）：log 只有 DualPDF 行 → mono fallback 檔名必須用
     實際 target_lang（zh-TW）——舊行為硬編碼 .zh.mono.pdf 與引擎產出
@@ -344,6 +372,74 @@ def test_parse_output_missing_mono_fallback_uses_target_lang():
     result = parse_output(out, make_job())
     assert result.mono_path == "/in/paper.zh-TW.mono.pdf", f"實際 {result.mono_path}"
     assert result.dual_path == "/out/paper.zh-TW.dual.pdf"  # 既有行不受影響
+
+
+# ── translate：preflight 預檢（#78 假成功杜絕第三層）──────────────────
+
+
+def test_translate_preflight_401_blocks_before_engine(monkeypatch):
+    """#78（2026-08-14）：翻譯前先 POST chat/completions 驗證 key＋模型——
+    401（ModelScope 跨站 key／Gemini 壞 key）→ 直接 EngineError 帶診斷、
+    引擎根本不上（FakeRunner 不被呼叫）——吞錯 rc=0 假成功從根杜絕。"""
+
+    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+
+    runner = FakeRunner((0, LOG))
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="openai", api_key="bad-key", base_url="https://x/v1", model="m1"),
+        runner=runner,
+    )
+    monkeypatch.setattr(mod, "preflight_openai", lambda *a, **k: (401, "Authentication failed"))
+    with pytest.raises(EngineError, match="key 無效"):
+        adapter.translate(make_job())
+    assert runner.calls == [], "preflight 失敗不得啟動引擎子進程"
+
+
+def test_translate_preflight_404_blocks_with_model_hint(monkeypatch):
+    """preflight 404（模型不存在，Gemini gemini-3-pro-latest 案例）→ 診斷訊息帶
+    「模型」提示。"""
+
+    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+
+    runner = FakeRunner((0, LOG))
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="openai", api_key="k", base_url="https://x/v1", model="bad-model"),
+        runner=runner,
+    )
+    monkeypatch.setattr(mod, "preflight_openai", lambda *a, **k: (404, "not found"))
+    with pytest.raises(EngineError, match="模型不存在"):
+        adapter.translate(make_job())
+    assert runner.calls == []
+
+
+def test_translate_preflight_ok_continues_to_engine(monkeypatch):
+    """preflight 200 → 照常翻譯（FakeRunner 被呼叫、正常產出）。"""
+
+    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+
+    runner = FakeRunner((0, LOG))
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="openai", api_key="good", base_url="https://x/v1", model="m1"),
+        runner=runner,
+    )
+    monkeypatch.setattr(mod, "preflight_openai", lambda *a, **k: (200, "ok"))
+    result = adapter.translate(make_job())
+    assert runner.calls, "preflight 通過後應啟動引擎"
+    assert result.mono_path == "/out/paper.zh.mono.pdf"
+
+
+def test_translate_skips_preflight_when_no_key_required():
+    """needs_key=False（零 key 免費引擎：siliconflowfree/google/bing）→
+    不 preflight（無 key 可驗）——runner 照常被呼叫。"""
+
+    runner = FakeRunner((0, LOG))
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(provider="openai", api_key="", requires_key=False, base_url="https://x/v1", model="m1"),
+        runner=runner,
+    )
+    result = adapter.translate(make_job())
+    assert runner.calls, "無 key 免費引擎不應被 preflight 擋住"
+    assert result.mono_path == "/out/paper.zh.mono.pdf"
 
 
 # ── translate：錯誤對映 ──────────────────────────────────

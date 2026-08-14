@@ -126,6 +126,24 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
 _kill_tree = _base_kill_tree
 
 
+def _diagnose_no_output(output: str) -> str:
+    """#78（2026-08-14 Gemini 404 實測教訓）：pdf2zh 對上游 HTTP 錯誤吞錯
+    （rc=0 靜默退出）→ 假成功。掃引擎 log 帶出真實原因，不讓使用者猜。"""
+    normalized = re.sub(r"\s+", "", output)
+    if re.search(r"(?i)error.{0,40}4\s?04", normalized) or "404" in normalized:
+        return "上游 404：模型不存在或不支援此用法——檢查模型 ID（設定頁「載入模型清單」挑選可生成模型）"
+    if re.search(r"(?i)429|toodeeprequests|ratelimit", normalized):
+        return "上游 429：限流（免費額度/RPM 用完）——稍後重試或換引擎"
+    if re.search(
+        r"(?i)401|unauthorized|invalidkey|apikey|authenticationfailed",
+        normalized,
+    ):
+        # authentication failed：ModelScope 跨站 key（.cn vs .ai 不互通）案例
+        # ——錯誤訊息不含 401 字樣，regex 補 authentication。
+        return "上游 401：API key 無效或已過期——檢查 key（ModelScope 注意站別 .cn/.ai 不互通）"
+    return "上游可能失敗但回傳成功（詳見引擎 log）"
+
+
 def parse_output(output: str, job: TranslationJob) -> JobResult:
     normalized = re.sub(r"\s+", "", output)
     mono = _RE_MONO.search(normalized)
@@ -135,8 +153,11 @@ def parse_output(output: str, job: TranslationJob) -> JobResult:
         # #83（2026-08-13 實測）：引擎子進程失敗（401）時 rc=0 靜默吞掉、零產出、
         # log 無任何產出宣告。舊行為靜默 fallback 慣例檔名 → ghost COMPLETED →
         # 下載 404「失敗 - 沒有檔案」。log 沒有產出宣告＝明確失敗，不得製造假路徑。
+        # #78（2026-08-14）：假成功訊息帶上引擎 log 的真實 HTTP 錯誤診斷
+        #（Gemini gemini-3-pro-latest 404 案例——pdf2zh 對 404 吞錯 rc=0）。
         raise EngineError(
-            "引擎未產出任何 PDF（log 無 MonoPDF/DualPDF 行）——上游可能失敗但回傳成功"
+            f"引擎未產出任何 PDF（log 無 MonoPDF/DualPDF 行）——"
+            f"{_diagnose_no_output(output)}"
         )
     stem = job.source_path.rsplit(".", 1)[0] if job.source_path else "output"
     # 缺其一時 fallback 慣例檔名必須用實際 target_lang（引擎產出
@@ -147,6 +168,55 @@ def parse_output(output: str, job: TranslationJob) -> JobResult:
         input_tokens=int(tokens.group(1)) if tokens else 0,
         output_tokens=int(tokens.group(2)) if tokens else 0,
     )
+
+
+def preflight_openai(
+    base_url: str, api_key: str, model: str, timeout: int = 10
+) -> tuple[int, str]:
+    """#78 假成功杜絕第三層：翻譯前預檢——POST /chat/completions（max_tokens=1
+    零成本）一次驗證 key 活性＋模型可生成。GET /models 盲區（ModelScope/Gemini
+    實測：清單有顯示但生成 404/401）——POST 給真答案。
+
+    200＝可翻譯；401＝key 無效；404＝模型不存在；429＝限流；0＝連線失敗。
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions", data=payload, method="POST"
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read(200).decode("utf-8", "replace")
+            return resp.status, body[:80]
+    except urllib.error.HTTPError as e:
+        body = e.read(200).decode("utf-8", "replace")
+        return e.code, body[:80]
+    except Exception as e:
+        return 0, str(e)[:80]
+
+
+def _preflight_message(code: int, body: str) -> str:
+    """preflight 非 200 → 對齊 _diagnose_no_output 的診斷訊息風格。"""
+    if code in (401, 403):
+        return "上游 401：API key 無效或已過期——檢查設定頁 key"
+    if code == 404:
+        return "上游 404：模型不存在或不支援此用法——檢查模型 ID（設定頁「載入模型清單」挑選）"
+    if code == 429:
+        return "上游 429：限流（免費額度/RPM 用完）——稍後重試或換引擎"
+    if code == 0:
+        return "連線失敗：無法連到上游 API（檢查網路或 base_url 設定）"
+    return f"上游 {code}：{body[:60]}"
 
 
 class Pdf2zhNextAdapter(CliAdapterBase):
@@ -163,6 +233,23 @@ class Pdf2zhNextAdapter(CliAdapterBase):
             runner=runner,
         )
         self._config = config
+
+    def translate(self, job: TranslationJob) -> JobResult:
+        """#78（2026-08-14 實測教訓）preflight：provider=openai 且有 key 的
+        引擎，翻譯前先 POST chat/completions（max_tokens=1）驗證 key＋模型
+        可生成——上游錯誤（401/404/429）在啟動引擎前就攔下、帶診斷訊息。
+        pdf2zh 對 HTTP 錯誤吞錯 rc=0 假成功的根因：根本不用它翻譯。"""
+        if (
+            self._config.provider == "openai"
+            and self._config.requires_key
+            and self._config.api_key
+        ):
+            code, body = preflight_openai(
+                self._config.base_url, self._config.api_key, self._config.model
+            )
+            if code != 200:
+                raise EngineError(_preflight_message(code, body))
+        return super().translate(job)
 
     def _api_key(self) -> str:
         return self._config.api_key

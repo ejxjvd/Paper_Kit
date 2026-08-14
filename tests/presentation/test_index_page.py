@@ -1394,7 +1394,7 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
 
     monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
     service, settings, cost, glossaries = _build(tmp_path)
-    settings.set_api_key("bigmodel", "bm-test-free-key")
+    settings.set_api_key("groq", "gr-test-free-key")
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -1403,10 +1403,10 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
         free_card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
         select = next(iter(user.find(kind=ui.select, marker="free-key-engine-select").elements))
         assert "ring-primary" not in free_card.classes, "初始免費 LLM 單卡不應被選中"
-        select.value = "bigmodel"  # 下拉挑選（公開 property，同 lang_select 模式）
+        select.value = "groq"  # 下拉挑選（公開 property，同 lang_select 模式）
         assert "ring-primary" in free_card.classes, "下拉挑選後單卡應有選中高亮"
         assert "pk-engine-card--disabled" not in free_card.classes, "有 key 引擎卡不應灰化"
-        user.find(kind=ui.icon, marker="info-engine-bigmodel")  # ⓘ tooltip 隨引擎切換
+        user.find(kind=ui.icon, marker="info-engine-groq")  # ⓘ tooltip 隨引擎切換
         pdf = make_blank_pdf(tmp_path / "NIM1.pdf")
         upload_el = next(iter(user.find(ui.upload).elements))
         await upload_el.handle_uploads([
@@ -1423,8 +1423,8 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
             await asyncio.sleep(0.1)
         job = service.list_jobs()[-1]
         assert job.status is JobStatus.COMPLETED, f"翻譯未在時限內完成：{job.error}"
-        assert job.engine_id == "bigmodel", f"任務應記 bigmodel，實際 {job.engine_id}"
-        assert calls == [("bigmodel", "bm-test-free-key")], (
+        assert job.engine_id == "groq", f"任務應記 groq，實際 {job.engine_id}"
+        assert calls == [("groq", "gr-test-free-key")], (
             f"免費 LLM 引擎應收到使用者自備的免費 key，實際 {calls}"
         )
 

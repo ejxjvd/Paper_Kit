@@ -190,16 +190,21 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         id="gemini-pro",
         label="Google Gemini Pro（付費）",
         provider="openai",
-        model="gemini-3-pro-latest",
+        # #78（2026-08-14 實測教訓）：gemini-3-pro-latest 無 models/ 前綴在
+        # OpenAI 相容端點 404「not supported for generateContent」（ListModels
+        # 有顯示但不可生成）→ pdf2zh 吞錯 rc=0 假成功。改為實測可生成的
+        # models/gemini-3.5-flash（帶 models/ 前綴 7 模型真翻譯全成功）。
+        model="models/gemini-3.5-flash",
         needs_key=True,
         sensitive_ok=True,  # 付費 API 層不訓練（免費層 gemini 引擎才資料訓練紅線）
-        # Gemini 3 Pro 官方價（2026-08-13 查證）：$2.00/M in、$12.00/M out
+        # Gemini 3.5 Flash 官方價（2026-08-13 查證，Gemini 3 Pro 同代價表）：
+        # $2.00/M in、$12.00/M out
         pricing=(Decimal("0.002"), Decimal("0.012"), 5000),
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        card_desc="Gemini 3 Pro（付費層、不訓練）",
-        info="Google Gemini 付費 API（ai.google.dev 付費層 key）：Gemini 3 Pro 品質 T1"
-        "（翻譯/推理頂級）、長上下文；付費層資料不用於訓練——機密文件可用"
-        "（免費層 gemma 引擎仍會訓練——禁用）。用量付費。",
+        card_desc="Gemini 3.5 Flash（付費層、不訓練）",
+        info="Google Gemini 付費 API（ai.google.dev 付費層 key）：Gemini 3.5 Flash"
+        "品質 T1（翻譯/推理頂級）、長上下文；付費層資料不用於訓練——機密文件"
+        "可用（免費層 gemma 引擎仍會訓練——禁用）。用量付費。",
     ),
     # ── 免費 LLM（2026-08-13，Free-LLM-Collection 查證後加入）──
     # 全 provider=openai（pdf2zh --openai 三旗標共用）、BYOK 免費 key（各自申請）、
@@ -246,11 +251,16 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         needs_key=True,
         sensitive_ok=False,
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
-        base_url="https://api-inference.modelscope.cn/v1",
-        card_desc="DeepSeek-V4-Pro/GLM-5.1 免費（T1；2,000 RPD）",
-        info="阿里雲 ModelScope 免費端（ms- key，須阿里雲實名）：DeepSeek-V4-Pro/GLM-5.1/"
-        "Qwen3-235B 免費——T1 品質、中文最強。額度動態分配（熱門模型實測 ~500 RPD、"
-        "可能 insufficient_quota）——失敗請稍後重試。檔案上阿里雲——機密文件不可用。",
+        # #78（2026-08-14 實測教訓）：使用者管道全為國際站——原 .cn 中國站端點
+        # 對國際站（modelscope.ai 申請）key 回 401「Authentication failed」
+        # （跨站不互通；GET /models 不驗 key 造成「測試 API」假成功）→
+        # 改國際站 .ai 端點（國際站 key 實測 GET 200；生成前須綁阿里雲帳號：
+        # https://modelscope.ai/my/settings/account）。
+        base_url="https://api-inference.modelscope.ai/v1",
+        card_desc="DeepSeek-V4-Pro/GLM-5.2 免費（國際站；2,000 RPD）",
+        info="ModelScope 國際站（modelscope.ai 申請 key，須先綁阿里雲帳號才能生成）："
+        "DeepSeek-V4-Pro/GLM-5.2/Qwen3 免費——T1 品質、中文最強。額度動態分配"
+        "（可能 insufficient_quota）——失敗請稍後重試。檔案上阿里雲——機密文件不可用。",
     ),
     "groq": EngineSpec(
         id="groq",
@@ -279,20 +289,6 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         info="OpenRouter 免費端（免綁卡）：nemotron-3-super-120b 翻譯評測免費群最佳"
         "（WMT24++ 86.7%）；gemma-4-31b:free 長文友好。限流 20 RPM／50 RPD（充值 $10"
         " 終身升 1,000 RPD）——單日翻譯量大請升級。檔案上 OpenRouter 雲端——機密文件不可用。",
-    ),
-    "bigmodel": EngineSpec(
-        id="bigmodel",
-        label="智譜 BigModel（GLM 免費跑量）",
-        provider="openai",
-        model="glm-4.7-flash",
-        needs_key=True,
-        sensitive_ok=False,
-        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
-        base_url="https://open.bigmodel.cn/api/paas/v4",
-        card_desc="GLM-4.7-Flash 免費（無 token 上限）",
-        info="智譜官方免費端（實名後建 key）：GLM-4.7-Flash/GLM-4-Flash 永久免費、無 token"
-        " 上限（併發 2——批次翻譯是天然限流）。品質存疑（第三方實測大幅退步）——"
-        "請先試譯一段再決定。檔案上智譜雲端——機密文件不可用。",
     ),
     "dashscope": EngineSpec(
         id="dashscope",
@@ -344,8 +340,11 @@ UI_FREE_ENGINE_IDS: tuple[str, ...] = ("siliconflowfree", "google", "bing")
 # 40RPM＋無日總量）、Gemini 殿後（免費層資料訓練紅線，非敏感才可用）。
 # 全走 provider=openai（pdf2zh --openai 三旗標）、BYOK（自申請免費 key 填入）。
 # app.py 只迭代此 tuple——加引擎單點。
+# #78（2026-08-14 移除 bigmodel）：使用者管道全為國際站——智譜中國站
+# （open.bigmodel.cn）免費 GLM 需中國手機＋實名（國際站用戶拿不到 key），
+# 國際站 Z.AI（api.z.ai）免費模型未能驗證——死卡移除，留待 Z.AI 查證後回補。
 UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
-    "nvidia", "modelscope", "groq", "openrouter", "bigmodel", "dashscope", "gemini",
+    "nvidia", "modelscope", "groq", "openrouter", "dashscope", "gemini",
 )
 
 

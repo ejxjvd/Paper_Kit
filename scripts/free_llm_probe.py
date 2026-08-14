@@ -25,10 +25,11 @@ ENDPOINTS = {
     "internai": "https://chat.intern-ai.org.cn/api/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
     "cohere": "https://api.cohere.ai/compatibility/v1",
-    "bigmodel": "https://open.bigmodel.cn/api/paas/v4",
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "llm7": "https://api.llm7.io/v1",
-    "modelscope": "https://api-inference.modelscope.cn/v1",
+    # #78（2026-08-14）：使用者管道全為國際站——.cn 改 .ai（國際站 key 跨站不互通）；
+    # bigmodel 中國站死卡移除（國際站 Z.AI 免費模型未驗證）。
+    "modelscope": "https://api-inference.modelscope.ai/v1",
     "kilo": "https://api.kilo.ai/api/gateway",
     "huggingface": "https://router.huggingface.co/v1",
     "groq": "https://api.groq.com/openai/v1",
