@@ -10,6 +10,7 @@ import asyncio
 import logging
 import multiprocessing  # macOS 遞迴修復（freeze_support，BUG_REPORT v0.1.8）
 import shutil
+import threading  # _uv_startup_status：啟動背景安裝執行緒（2026-08-15）
 import socket  # 啟動前 port 檢查
 import subprocess
 import sys
@@ -1644,6 +1645,36 @@ def _history_row(view: JobCardView, job: TranslationJob, cost: CostService | Non
     }
 
 
+def _uv_startup_status() -> threading.Thread | None:
+    """啟動即顯示 uv 狀態（2026-08-15 使用者：打開 exe 的 CMD 就要看到
+    uv 是否安裝中/進度/完成——之前 uv 動作只在翻譯時 lazy 觸發，打開
+    後 CMD 只有 NiceGUI ready，什麼進度都沒有）。
+
+    找到 → log 位置；缺 → 背景下載安裝（log 即時印 CMD：來源/嘗試/進度/
+    速度/完成/失敗重試）——不阻塞 UI ready；翻譯時的 resolve_uv 走
+    download_uv 鎖（uv_bootstrap._download_lock），已完成或另一執行緒
+    在裝都會正確處理。回傳背景執行緒（測試 join）。
+    """
+    from paper_kit.infrastructure import uv_bootstrap as uv_boot
+
+    existing = uv_boot.installed_uv()
+    if existing is not None:
+        uv_boot.logger.info("uv 檢查：已找到 %s", existing)
+        return None
+    uv_boot.logger.info(
+        "uv 檢查：未找到——自動安裝中（4 源備援 GitHub→PyPI→清華→阿里雲，"
+        "進度即時顯示，失敗自動重試）"
+    )
+    t = threading.Thread(
+        target=uv_boot.download_uv,
+        kwargs={"timeout": 120},
+        daemon=True,
+        name="uv-auto-install",
+    )
+    t.start()
+    return t
+
+
 def main() -> None:
     # macOS 嚴重問題修復（BUG_REPORT_macOS_v0.1.8，2026-08-14）：PyInstaller
     # frozen exe＋macOS spawn → resource_tracker 子程序重跑主程式 → 無限遞迴
@@ -1676,6 +1707,8 @@ def main() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     LOG_PATH = setup_logging(APP_DIR / "logs")  # 票 09：結構化 log 檔（debug 頁讀同一份）
+    # 2026-08-15：啟動即顯示 uv 狀態（找到/缺→背景下載安裝，進度印 CMD）
+    _uv_startup_status()
     app.add_static_files(FILES_BASE, str(OUTPUTS_DIR))
     repo = SqliteSettingsRepository(DB_PATH)
     # 票 08：SQLite 任務歷史——重啟 app 後任務仍在（InMemory 只留給無頭執行）

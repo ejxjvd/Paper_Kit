@@ -1,6 +1,6 @@
 [project]
 name = "paper-kit"
-version = "0.1.9.3"
+version = "0.1.9.4"
 description = "Paper_Kit：自建學術 PDF/簡報翻譯器（免除線上工具綁架）"
 requires-python = ">=3.12"
 dependencies = [

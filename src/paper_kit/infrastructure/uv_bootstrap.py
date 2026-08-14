@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 import tarfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -50,6 +51,7 @@ _DOWNLOAD_TIMEOUT = 120  # 慢網下 60s 可能中斷大檔下載（v0.1.9.3 調
 
 _last_failures: list[str] = []  # 最近一次 download_uv 全敗的各源原因（呼叫方組訊息）
 _RETRY_DELAY = 2.0  # 源失敗後重試間隔（秒）——測試 monkeypatch 為 0
+_download_lock = threading.Lock()  # 2026-08-15：啟動背景安裝與翻譯並發時防重複下載/互踩
 
 
 def download_url() -> str | None:
@@ -219,7 +221,21 @@ def download_uv(timeout: int = _DOWNLOAD_TIMEOUT) -> Path | None:
     """下載官方二進制到 app 專屬目錄。多源依序嘗試（GitHub→PyPI→鏡像），
     每源重試 2 次（2026-08-15 使用者要求：失敗要自動重試——瞬時網路/牆
     問題可救回）。任一成功即回傳；全敗回 None（log 每源原因，且可經
-    download_failures() 取回供呼叫方組可操作錯誤訊息）。"""
+    download_failures() 取回供呼叫方組可操作錯誤訊息）。
+
+    2026-08-15：_download_lock 互斥＋鎖內入口查 installed_uv——啟動背景
+    安裝與翻譯時 resolve_uv 可能並發；已裝（另一執行緒完成）直接回傳、
+    不重複下載（「最後寫入者勝」雖安全但浪費）。"""
+    with _download_lock:
+        existing = installed_uv()
+        if existing is not None:
+            logger.info("uv 自動安裝：已由另一執行緒裝好（%s）", existing)
+            return existing
+        return _download_uv(timeout)
+
+
+def _download_uv(timeout: int) -> Path | None:
+    """download_uv 的實際下載主體（鎖內執行；見 download_uv 文件）。"""
     sources = _download_sources(timeout=timeout)
     if not sources:
         logger.error("uv 自動安裝：不支援的平台 %s", sys.platform)

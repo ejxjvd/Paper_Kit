@@ -39,6 +39,21 @@ class ConsoleFormatter(logging.Formatter):
     顯示格式與 debug 頁（format_log_line）同源（時間本地時區）。
     """
 
+
+class FlushingConsoleHandler(logging.StreamHandler):
+    """CMD 即時顯示的 console handler（2026-08-15 ricky 真機實測修復）。
+
+    基類 StreamHandler 寫入 stream 後**不 flush**：dev 的 stdout 是 tty
+    （line-buffered）→ 恰好即時；PyInstaller frozen exe 的 stdout 是
+    block-buffered → log 卡在緩衝區、CMD 永遠看不到（實測 CMD 只有
+    NiceGUI ready，uv 安裝進度一行都沒有）。emit 後立即 flush 保證
+    每行 log 即時出現在 exe 的 CMD 視窗。
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self.flush()
+
     def format(self, record: logging.LogRecord) -> str:
         entry = {
             "time": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
@@ -77,7 +92,9 @@ def setup_logging(
         isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
         for h in root.handlers
     ):
-        console_handler = logging.StreamHandler(sys.stdout)
+        # FlushingConsoleHandler（2026-08-15）：emit 後即 flush——frozen exe
+        # 的 stdout block-buffered，基類不 flush 會讓 log 卡緩衝、CMD 看不到
+        console_handler = FlushingConsoleHandler(sys.stdout)
         console_handler.setFormatter(ConsoleFormatter())
         root.addHandler(console_handler)
     return log_path

@@ -81,3 +81,29 @@ def test_main_exits_with_clear_message_when_port_busy(monkeypatch, tmp_path, cap
         assert "佔用" in err
     finally:
         s.close()
+
+
+# ── _uv_startup_status：啟動即顯示 uv 狀態（2026-08-15 使用者：
+#    打開 exe 的 CMD 就要看到 uv 是否已裝／安裝進度）──────────
+
+
+def test_uv_startup_status_logs_existing(monkeypatch, caplog):
+    from paper_kit.infrastructure import uv_bootstrap as ub
+
+    monkeypatch.setattr(ub, "installed_uv", lambda: "/fake/uv.exe")
+    monkeypatch.setattr(ub, "download_uv", lambda timeout=120: None)
+    assert app_module._uv_startup_status() is None, "已存在時不得啟動背景安裝"
+    assert "已找到" in caplog.text, "CMD 應顯示 uv 已找到與位置"
+
+
+def test_uv_startup_status_starts_install_when_missing(monkeypatch, caplog):
+    from paper_kit.infrastructure import uv_bootstrap as ub
+
+    calls: list[int] = []
+    monkeypatch.setattr(ub, "installed_uv", lambda: None)
+    monkeypatch.setattr(ub, "download_uv", lambda timeout=120: calls.append(1) or None)
+    t = app_module._uv_startup_status()
+    assert t is not None, "缺 uv 時必須啟動背景安裝"
+    t.join(timeout=5)
+    assert calls == [1], "背景安裝必須被執行"
+    assert "自動安裝中" in caplog.text

@@ -2,6 +2,41 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.4
+
+### 🐛 修復：打開 exe 的 CMD 看不到 uv 安裝進度（另一台 Windows 機器真機實測）
+
+v0.1.9.3 發布後實測：CMD 視窗只有 `NiceGUI ready`，承諾的 uv 安裝進度一行都沒有。
+兩個根因（皆真機/真 exe 驗證）：
+
+1. **console log 卡在緩衝區**：`logging.StreamHandler` 寫 stdout 後**不 flush**——
+   開發時 stdout 是 tty（line-buffered）恰好即時；PyInstaller frozen exe 的 stdout
+   是 **block-buffered** → log 卡在緩衝、CMD 永遠看不到（**frozen exe 實測重現**：
+   迷你 console exe 執行中讀不到 log 行，退出才吐出）。
+2. **啟動時零 uv 狀態**：uv 動作只在**第一次翻譯時** lazy 觸發——打開 exe 時什麼
+   都還沒發生，自然沒有進度可顯示。
+
+### 🛠 修復內容
+
+1. **FlushingConsoleHandler**：console handler 每次 emit 後立即 flush——
+   frozen exe 的 CMD 逐行即時顯示（frozen exe 實測：執行中 0.5s 內即讀到
+   log 行、DONE 前全部出現）
+2. **啟動即 uv 狀態檢查**（`_uv_startup_status`）：exe 啟動時立即檢查——
+   已找到 → 印位置；未找到 → **背景下載安裝**（不阻塞 UI ready），CMD
+   即時顯示「uv 檢查：未找到——自動安裝中（4 源備援…）」＋後續進度/速度/
+   完成/失敗重試
+3. **並發防護**：`download_uv` 加執行緒鎖＋鎖內入口查——啟動背景安裝與
+   翻譯時 resolve_uv 並發時不重複下載、不互踩
+
+### ✅ 驗證
+
+- TDD 4 新測試（flush 行為／鎖內入口查短路／啟動檢查已存在／缺時啟動背景安裝）
+  ——全套件 **778 passed**（+4）
+- **frozen exe 決定性驗證**（PyInstaller 迷你 console exe 實測）：執行中即時
+  讀到「uv 檢查／嘗試 1/2／下載中 50%」三行 log——flush 修復在 frozen 環境成立
+- 真實翻譯驗證（scripts/verify-translate.py）：google 免費引擎 23.1s 產出
+  mono 464KB＋dual 455KB
+
 ## v0.1.9.3
 
 ### 🔧 修復：uv 自動下載在部分網路全滅（全新 Windows 機器真機實測）

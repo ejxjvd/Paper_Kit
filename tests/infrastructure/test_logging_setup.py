@@ -255,3 +255,36 @@ def test_console_line_has_error_chain_when_failed(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "翻譯失敗" in out
     assert "上游 500" in out, "CMD 狀態列應顯示錯誤鏈"
+
+
+def test_console_handler_flushes_after_emit():
+    """2026-08-15 ricky 實測：frozen exe 的 stdout 是 block-buffered，
+    logging.StreamHandler 寫入後不 flush → log 卡在緩衝、CMD 永遠看不到
+    （dev tty 是 line-buffered 才「恰好」即時）。console handler 每次
+    emit 後必須 flush——frozen exe CMD 即時顯示的前提。"""
+    from paper_kit.infrastructure.logging_setup import (
+        ConsoleFormatter,
+        FlushingConsoleHandler,
+    )
+
+    class Recorder:
+        def __init__(self):
+            self.written = ""
+            self.flushed = 0
+
+        def write(self, text):
+            self.written += text
+
+        def flush(self):
+            self.flushed += 1
+
+    stream = Recorder()
+    handler = FlushingConsoleHandler(stream)
+    handler.setFormatter(ConsoleFormatter())
+    record = logging.LogRecord(
+        "paper_kit.infrastructure.uv_bootstrap", logging.INFO, "", 0,
+        "uv 安裝中", None, None,
+    )
+    handler.emit(record)
+    assert "uv 安裝中" in stream.written
+    assert stream.flushed >= 1, "emit 後必須 flush——frozen exe 即時顯示的前提"

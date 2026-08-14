@@ -26,6 +26,15 @@ def fake_home(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture
+def no_existing_uv(monkeypatch):
+    """鎖內入口查短路（2026-08-15）：download_uv 鎖內先查 installed_uv——
+    下載流程測試本就不測 installed_uv，mock 回 None；且 _set_platform patch
+    sys.platform 後 shutil.which 走 win32 分支（Linux 的 _winapi=None 炸
+    AttributeError）——mock 後不觸 which。"""
+    monkeypatch.setattr(uv_bootstrap, "installed_uv", lambda: None)
+
+
 def _set_platform(monkeypatch, platform: str, machine: str = "x86_64"):
     """patch sys.platform（全域——資產查表收斂後在 platform/uv_assets.py 讀
     同一 sys）＋該模組的 platform.machine（darwin 架構判定）。"""
@@ -148,7 +157,7 @@ def test_download_installs_to_app_dir(fake_home, monkeypatch):
     assert expected.read_bytes() == b"binary"
 
 
-def test_download_failure_returns_none(fake_home, monkeypatch):
+def test_download_failure_returns_none(fake_home, monkeypatch, no_existing_uv):
     monkeypatch.setattr(ub, "_RETRY_DELAY", 0)
     _set_platform(monkeypatch, "win32")
     monkeypatch.setattr(
@@ -159,7 +168,7 @@ def test_download_failure_returns_none(fake_home, monkeypatch):
     assert ub.download_uv() is None
 
 
-def test_download_unsupported_platform_returns_none(fake_home, monkeypatch):
+def test_download_unsupported_platform_returns_none(fake_home, monkeypatch, no_existing_uv):
     _set_platform(monkeypatch, "zos")
     assert ub.download_uv() is None
 
@@ -321,7 +330,7 @@ def test_download_falls_back_github_to_pypi(fake_home, monkeypatch):
     assert sum("files.pythonhosted.org" in u for u in calls) == 1, "PyPI wheel 應被下載"
 
 
-def test_all_sources_fail_records_each_reason(fake_home, monkeypatch):
+def test_all_sources_fail_records_each_reason(fake_home, monkeypatch, no_existing_uv):
     monkeypatch.setattr(ub, "_RETRY_DELAY", 0)
     _set_platform(monkeypatch, "win32")
     monkeypatch.setattr(
@@ -336,7 +345,7 @@ def test_all_sources_fail_records_each_reason(fake_home, monkeypatch):
     assert any("network down" in r for r in reasons)
 
 
-def test_download_logs_progress_to_console(fake_home, monkeypatch, caplog):
+def test_download_logs_progress_to_console(fake_home, monkeypatch, caplog, no_existing_uv):
     """安裝紀錄必須可見（2026-08-15 使用者要求：exe 的 CMD 視窗要能看到
     「是否正在安裝、進度到哪裡、實時速度、完成/失敗」——paper_kit logger
     有 console handler，訊息即入 CMD）。"""
@@ -350,7 +359,7 @@ def test_download_logs_progress_to_console(fake_home, monkeypatch, caplog):
     assert any("uv 自動安裝成功" in m for m in messages), "成功要有 log（CMD 看得到）"
 
 
-def test_download_retries_then_succeeds(fake_home, monkeypatch, caplog):
+def test_download_retries_then_succeeds(fake_home, monkeypatch, caplog, no_existing_uv):
     """失敗要自動重試（2026-08-15 使用者要求）——第 1 次失敗、重試後成功。"""
     monkeypatch.setattr(ub, "_RETRY_DELAY", 0)
     _set_platform(monkeypatch, "win32")
@@ -371,7 +380,7 @@ def test_download_retries_then_succeeds(fake_home, monkeypatch, caplog):
     assert any("嘗試 2/2" in m for m in messages), "重試嘗試要有 log"
 
 
-def test_download_failure_logs_all_sources(fake_home, monkeypatch, caplog):
+def test_download_failure_logs_all_sources(fake_home, monkeypatch, caplog, no_existing_uv):
     monkeypatch.setattr(ub, "_RETRY_DELAY", 0)
     _set_platform(monkeypatch, "win32")
     monkeypatch.setattr(
@@ -426,3 +435,19 @@ def test_windows_error_hint_winget(monkeypatch):
 def test_posix_error_hint_curl(monkeypatch):
     message = _runner_error(monkeypatch, "linux")
     assert "curl -LsSf https://astral.sh/uv/install.sh | sh" in message
+
+
+def test_download_uv_reuses_install_done_by_other_thread(monkeypatch):
+    """2026-08-15：啟動背景安裝與翻譯時 resolve_uv 可能並發——download_uv
+    鎖內入口先查 installed_uv：已裝（另一執行緒完成）直接回傳、不重複下載。"""
+    monkeypatch.setattr(ub, "_RETRY_DELAY", 0)
+    existing = ub.app_uv_path()
+    monkeypatch.setattr(ub, "installed_uv", lambda: existing)
+    calls: list[int] = []
+    monkeypatch.setattr(
+        ub, "_download_sources",
+        lambda timeout: calls.append(1) or [],
+    )
+    p = ub.download_uv()
+    assert p == existing, "已裝時直接回傳既有 uv"
+    assert calls == [], "已裝時不得觸網下載"
