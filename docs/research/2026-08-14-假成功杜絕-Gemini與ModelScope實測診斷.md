@@ -82,3 +82,24 @@ https://modelscope.ai/my/settings/account」）。
 2. **國際站與中國站 key 不互通**（ModelScope 實證；智譜 bigmodel.cn vs z.ai 亦同）。
 3. 引擎吞錯（HTTP 錯誤 rc=0）是假成功的根源——Paper_Kit 側補 preflight +
    錯誤診斷雙層，不依賴上游修正。
+
+## 補測（2026-08-14 下午，三平台新 key）
+
+### Z.AI（智譜國際站）——免費模型查證完成 ✅
+
+| 模型 ID | 結果 |
+|---------|------|
+| `glm-4.7-flash`（小寫） | ✅ 200 可生成（**思考型**）；真翻譯 275s 產出 mono 482KB＋dual 868KB |
+| `glm-4.5-flash`（小寫） | ✅ 200 可生成（非思考）；真翻譯 11min 未產出（免費層疑似限速）——主推 4.7-flash |
+| `GLM-4.7`／`GLM-4.5-air`（大寫） | ❌ 429 code 1113「餘額不足」（付費模型） |
+| `GLM-4.7-Flash`（大寫） | ❌ 429 code 1305 過載／或 400 |
+
+**陷阱**：GET /models 清單只列大寫付費版（glm-4.5/4.6/4.7/glm-5/5.1/5.2），**免費模型小寫 ID 不在清單**——直接打小寫可生成。v0.1.7 回補 bigmodel 卡為 zai（api.z.ai，model=glm-4.7-flash 小寫）。
+
+### 阿里雲 DashScope 國際站——key 有效但模型未開通 ⏳
+
+`sk-ws-` key GET /models 200（清單完整：qwen3.7/3.8-max、deepseek-v4、glm-5.2…），但**所有模型 POST 403 `AccessDenied.Unpurchased`**（含 qwen-flash 免費款）——Model Studio 國際站需先在控制台**開通模型**（API 無法代辦）。待使用者開通後全測。
+
+### ModelScope 國際站——仍待綁阿里雲 ⏳
+
+重測仍 401「Please bind your Alibaba Cloud account」——需瀏覽器登入綁定，API 無法代辦。39 模型全測待綁定。

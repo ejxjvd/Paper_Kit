@@ -243,6 +243,26 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         "（每 1.7 秒一發、不併發），長文件需等待。檔案上 NVIDIA 雲端——機密文件不可用。"
         "設定頁可下拉挑選模型（API 即時拉取）。",
     ),
+    "zai": EngineSpec(
+        id="zai",
+        label="智譜 Z.AI（GLM 免費）",
+        provider="openai",
+        model="glm-4.7-flash",
+        needs_key=True,
+        sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
+        # v0.1.7（#78 補完，2026-08-14 實測）：Z.AI（api.z.ai 國際站）回補——
+        # 免費模型實測：glm-4.7-flash（思考型）／glm-4.5-flash（非思考）**小寫**
+        # ID 200 可生成；大寫 GLM-4.7/4.5-air 系 429 code 1113「餘額不足」
+        # （免費模型須小寫 ID——清單只列大寫付費版，誤導）。真翻譯驗證：
+        # glm-4.7-flash 2 頁 275s 產出 mono(482KB)+dual(868KB) 存在。
+        base_url="https://api.z.ai/api/paas/v4",
+        card_desc="GLM-4.7-Flash 免費（Z.AI 國際站）",
+        info="智譜 Z.AI 國際站（api.z.ai，GLM 官方）：glm-4.7-flash（思考型、中文強）／"
+        "glm-4.5-flash（非思考）免費——模型 ID 須小寫（大寫系＝付費模型，"
+        "429 餘額不足）。思考型翻譯較慢（2 頁約 5 分鐘）但品質佳。設定頁可下拉挑選。"
+        "檔案上智譜雲端——機密文件不可用。",
+    ),
     "modelscope": EngineSpec(
         id="modelscope",
         label="ModelScope 魔搭（免費品質天花板）",
@@ -340,11 +360,11 @@ UI_FREE_ENGINE_IDS: tuple[str, ...] = ("siliconflowfree", "google", "bing")
 # 40RPM＋無日總量）、Gemini 殿後（免費層資料訓練紅線，非敏感才可用）。
 # 全走 provider=openai（pdf2zh --openai 三旗標）、BYOK（自申請免費 key 填入）。
 # app.py 只迭代此 tuple——加引擎單點。
-# #78（2026-08-14 移除 bigmodel）：使用者管道全為國際站——智譜中國站
-# （open.bigmodel.cn）免費 GLM 需中國手機＋實名（國際站用戶拿不到 key），
-# 國際站 Z.AI（api.z.ai）免費模型未能驗證——死卡移除，留待 Z.AI 查證後回補。
+# v0.1.7（2026-08-14）：Z.AI 查證後回補（#78 補完）——智譜國際站
+# api.z.ai 實測：glm-4.7-flash（思考）/glm-4.5-flash（非思考）小寫 ID 免費可生成，
+# 真翻譯產出存在。zai 排第 2（GLM 中文品質 T1/T2，僅次 NVIDIA）。
 UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
-    "nvidia", "modelscope", "groq", "openrouter", "dashscope", "gemini",
+    "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
 )
 
 

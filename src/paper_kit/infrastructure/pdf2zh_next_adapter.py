@@ -195,6 +195,10 @@ def preflight_openai(
     )
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
+    # v0.1.7（2026-08-14 Groq 實測）：urllib 預設 UA（Python-urllib/3.x）被
+    # Groq 的 Cloudflare 指紋封鎖（403 error 1010）——curl 200 但 preflight 誤擋。
+    # 帶上瀏覽器式 UA 通過；同場域（OpenRouter 等）亦受惠。
+    req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read(200).decode("utf-8", "replace")

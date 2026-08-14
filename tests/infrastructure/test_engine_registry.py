@@ -250,16 +250,26 @@ def test_all_keyless_specs_in_ui_free_ids():
 
 def test_ui_free_key_engine_ids_priority_order():
     """免費 LLM 卡集合與順序＝研究報告優先序：NVIDIA NIM（T1/T2、40RPM、無日總量）
-    ＞ ModelScope（T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron
-    翻譯數據免費群最佳）＞ 阿里雲 Model Studio（Qwen 官方，1M tokens 一次性）＞
-    Gemini（T2 但免費層資料訓練，殿後）。
-    #78（2026-08-14 移除 bigmodel）：使用者管道全為國際站——智譜中國站免費 GLM
-    需中國手機＋實名（國際站用戶拿不到 key），國際站 Z.AI 免費模型未驗證——死卡移除。"""
+    ＞ Z.AI（v0.1.7 回補：GLM 中文 T1/T2，api.z.ai 國際站實測免費）＞ ModelScope
+    （T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron 翻譯數據免費群
+    最佳）＞ 阿里雲 Model Studio（Qwen 官方，1M tokens 一次性）＞ Gemini（T2 但
+    免費層資料訓練，殿後）。"""
     from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
 
     assert UI_FREE_KEY_ENGINE_IDS == (
-        "nvidia", "modelscope", "groq", "openrouter", "dashscope", "gemini",
+        "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
     )
+
+
+def test_zai_spec_lowercase_free_model():
+    """v0.1.7（2026-08-14 實測）：Z.AI 免費模型 ID 須小寫——大寫 GLM-4.7 系回
+    429 code 1113「餘額不足」（付費）；小寫 glm-4.7-flash／glm-4.5-flash 200
+    可生成（GET /models 清單只列大寫付費版，極易誤導）。國際站端點 api.z.ai。"""
+    spec = ENGINE_SPECS["zai"]
+    assert spec.base_url == "https://api.z.ai/api/paas/v4"
+    assert spec.model == "glm-4.7-flash"
+    assert spec.model.islower(), f"免費模型 ID 應小寫：{spec.model}"
+    assert "cn" not in spec.base_url
 
 
 def test_modelscope_uses_international_endpoint():

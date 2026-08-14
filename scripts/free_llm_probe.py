@@ -28,8 +28,9 @@ ENDPOINTS = {
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "llm7": "https://api.llm7.io/v1",
     # #78（2026-08-14）：使用者管道全為國際站——.cn 改 .ai（國際站 key 跨站不互通）；
-    # bigmodel 中國站死卡移除（國際站 Z.AI 免費模型未驗證）。
+    # v0.1.7：Z.AI（智譜國際站）實測免費（glm-4.7-flash/glm-4.5-flash 小寫 ID）。
     "modelscope": "https://api-inference.modelscope.ai/v1",
+    "zai": "https://api.z.ai/api/paas/v4",
     "kilo": "https://api.kilo.ai/api/gateway",
     "huggingface": "https://router.huggingface.co/v1",
     "groq": "https://api.groq.com/openai/v1",

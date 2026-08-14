@@ -442,6 +442,40 @@ def test_translate_skips_preflight_when_no_key_required():
     assert result.mono_path == "/out/paper.zh.mono.pdf"
 
 
+def test_preflight_sends_browser_user_agent(monkeypatch):
+    """v0.1.7（2026-08-14 Groq 實測回歸）：urllib 預設 UA（Python-urllib/3.x）
+    被 Groq 的 Cloudflare 指紋封鎖（403 error 1010）——curl 200 但 preflight 誤擋
+    真翻譯。preflight 必須帶瀏覽器式 UA。"""
+    import urllib.request
+
+    import paper_kit.infrastructure.pdf2zh_next_adapter as mod
+
+    captured = {}
+
+    class FakeResp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, n):
+            return b"{}"
+
+    def fake_urlopen(req, timeout=10):
+        captured["ua"] = req.get_header("User-agent")
+        return FakeResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    code, _ = mod.preflight_openai("https://api.groq.com/openai/v1", "k", "m")
+    assert code == 200
+    assert captured["ua"] and "Python-urllib" not in captured["ua"], (
+        f"preflight UA 不得是 urllib 預設（被 Cloudflare 1010 封鎖）：{captured['ua']!r}"
+    )
+
+
 # ── translate：錯誤對映 ──────────────────────────────────
 
 
