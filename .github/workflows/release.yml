@@ -76,6 +76,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 需要 repo 內的 packaging/RELEASE_NOTES.md 當 notes 來源
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -85,10 +89,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # notes 從 packaging/RELEASE_NOTES.md 依 tag 提取（各版更新內容，2026-08-14 補全）
+          NOTES="$(awk -v tag="${TAG#v}" '
+            $0 ~ "^## " tag "$" {found=1; print; next}
+            found && $0 ~ "^## " {found=0}
+            found {print}' packaging/RELEASE_NOTES.md)"
+          if [ -z "${NOTES}" ]; then
+            NOTES="Paper_Kit ${TAG#v}"
+          fi
           # -R 明確指定 repo：本 job 無 checkout（只有 download-artifact），
           # gh 靠 git 解析 repo 會報 "not a git repository"（CI 實測 2026-08-14）
           gh release create "${TAG}" artifacts/*.zip \
             --title "Paper_Kit ${TAG#v}" \
-            --notes "見 zip 內 README-使用手冊.md；詳細更新說明另以 Release 描述補全。" \
+            --notes "${NOTES}" \
             -R "${GITHUB_REPOSITORY}" \
           || gh release upload "${TAG}" artifacts/*.zip --clobber -R "${GITHUB_REPOSITORY}"

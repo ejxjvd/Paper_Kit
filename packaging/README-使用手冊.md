@@ -1,16 +1,16 @@
-# 📄 Paper_Kit v0.1.4 使用手冊
+# 📄 Paper_Kit v0.1.7 使用手冊
 
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
 - 拖放 PDF 上傳即翻譯成繁體中文（mono 僅譯文＋dual 雙語並排）
 - LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**
-- 四引擎可插拔、BYOK（Bring Your Own Key）——各用各的 key，您的 key 不外流
+- 多引擎可插拔、BYOK（Bring Your Own Key）——各用各的 key，您的 key 不外流
 
 ---
 
 ## 🚀 快速啟動
 
-1. 雙擊 `paper-kit-v0.1.4.exe`（**黑色視窗 = 伺服器本體，請勿關閉**；關閉視窗 = 關閉服務）
+1. 雙擊 `paper-kit-v0.1.7.exe`（**黑色視窗 = 伺服器本體＋狀態列 log，請勿關閉**；關閉視窗 = 關閉服務）
 2. 瀏覽器自動開啟 **http://localhost:8080/**（若未自動開啟，請手動輸入此網址）
 3. 首次使用請先到**設定頁**填入引擎 API key（見下方「設定 API keys」）
 4. 拖放 PDF（或 .tex）→ 選引擎 → 開始翻譯
@@ -28,18 +28,29 @@
 - 未填 key 的引擎無法選用（卡片會灰化）
 - 免費引擎三支不需 key：`google`／`bing`／`siliconflowfree`（限流、品質較低，適合試用）
 
-| 引擎 | 用途 | 需 key |
+### 需 key 引擎
+
+| 引擎 | 用途 | key 來源 |
 |---|---|---|
-| SiliconFlow（預設） | gemma 視覺翻譯，一般 PDF | ✅ |
-| DeepSeek | 純文字翻譯，**機密文件專用** | ✅ |
+| SiliconFlow（預設） | gemma 視覺翻譯，一般 PDF | SiliconFlow 付費 key |
+| NVIDIA NIM（免費旗艦） | nemotron 3 Super 120B——WMT 品質第一、1M 上下文 | NVIDIA 免費帳號 API key |
+| 智譜 Z.AI（免費） | GLM-4.7-Flash（思考型、中文強） | api.z.ai 免費 key（小寫模型 ID） |
+| ModelScope 魔搭（免費） | DeepSeek-V3.1（品質天花板、中文最強） | modelscope.ai 免費 key（須綁阿里雲帳號） |
+| Groq（免費） | gpt-oss-120b 高速推理（30 RPM／1K RPD） | console.groq.com 免費 key |
+| Google Gemini | gemma-4-31b-it 等免費模型 | Gemini API 免費 key |
+| 阿里雲 Model Studio（免費） | Qwen 免費模型 | 國際站 key（需先開通模型） |
+| OpenRouter :free | 翻譯最強免費模型群 | OpenRouter 免費 key |
+| DeepSeek | 純文字翻譯，**機密文件專用** | DeepSeek 付費 key |
+| OpenAI | GPT 系列付費翻譯 | OpenAI 付費 key |
+| Google Gemini Pro | Gemini 付費模型 | Gemini 付費 key |
 | BabelDOC | 版面重排（公式保真） | ✅（DeepSeek key 亦可） |
-| LaTeX | .tex 源碼路線，最省 token | ✅ |
+| LaTeX | .tex 源碼路線，最省 token | ✅（DeepSeek key 亦可） |
 
 ---
 
 ## ✨ 功能一覽
 
-- **主頁就地選引擎**：四引擎卡片＋目標語言就地選
+- **主頁就地選引擎**：引擎卡片＋目標語言就地選——免費引擎集中在「免費區」優先展示
 - **LaTeX 源碼路線**：上傳 `.tex` 自動鎖定 LaTeX 引擎——公式指令原封、編譯重排（**前置需求見下**）
 - **雙輸出**：每筆任務產 mono（僅譯文）＋dual（雙語對照），卡片與歷史表格皆可下載
 - **歷史管理**：表格化＋分頁＋勾選全選＋批量刪除（二次確認）＋批量下載 mono/dual zip
@@ -48,18 +59,23 @@
 - **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
 - **頁面範圍**：可只翻譯選中頁（未選頁原樣保留）
 - **引擎模型挑選（v0.1.4 新增）**：設定頁引擎卡「🔄 載入模型清單」即時拉取該 API 最新模型下拉挑選（可自訂輸入）＋「儲存模型」——官方模型下線（EOL）不用等更新
-- **NVIDIA NIM 節流（v0.1.3 新增，v0.1.4 修正）**：免費層 40 RPM／並發 2-5——已內建節流（每秒 1 請求上限＋單線程不併發），避免 429/503
+- **NVIDIA NIM 節流（v0.1.3 新增，v0.1.4 修正）**：免費層 40 RPM——已內建節流（每秒 1 請求上限＋單線程不併發），避免 429/503
+- **翻譯超時常駐修復（v0.1.5）**：NIM 大型模型單頁生成慢（可達數百秒）——超時判定改以「無輸出閒置」為準（NIM 900 秒兜底），不再誤殺正常翻譯；log 即時輸出（unbuffered）
+- **CMD 狀態列 log（v0.1.5 新增）**：黑色視窗即時顯示人類可讀狀態列（進度、時間戳本地時區）——翻譯中可隨時看進度，不再只有啟動訊息
+- **假成功杜絕（v0.1.6 新增）**：翻譯前**自動預檢**（驗證 key＋模型可生成，零成本）、錯誤即時診斷（404 模型不存在／429 限流／401 key 無效）——不再出現「顯示成功但沒產出 PDF」
+- **國際站全支援（v0.1.6/0.1.7）**：所有引擎皆為國際站端點（modelscope.ai、api.z.ai 等）——申請到的 key 即可用，無需中國站
+- **「測試 API」更可靠（v0.1.6）**：除驗證 key 活性外，額外**實際生成一次**（零成本）確認模型可翻譯——清單有顯示≠可生成，此按鈕補上盲區
 
 ---
 
 ## 🍎 macOS 使用者（v0.1.1 新增）
 
-1. 下載 `paper-kit-v0.1.4-macos-arm64.zip`（Apple 晶片）並解壓
+1. 下載 `paper-kit-v0.1.7-macos-arm64.zip`（Apple 晶片）並解壓
 2. **首次開啟需繞過 Gatekeeper**（未簽名程式）：右鍵 exe → 選「開啟」→ 再點「開啟」
 3. 之後流程與 Windows 相同——「📁 瀏覽資料夾」會用 Finder（open）開啟
 4. 進階路線（LaTeX／BabelDOC）需自裝工具（見下方「進階路線前置需求」）
 
-> x86_64 Mac（Intel）請用 `paper-kit-v0.1.4-macos-x64.zip`（若 CI 有出）。
+> x86_64 Mac（Intel）請用 `paper-kit-v0.1.7-macos-x64.zip`（若 CI 有出）。
 
 ---
 
@@ -105,10 +121,10 @@
 其他位置）。
 
 1. 先關閉黑色視窗（若正在執行）
-2. 刪除整個 `paper-kit-v0.1.4` 資料夾
+2. 刪除整個 `paper-kit-v0.1.7` 資料夾
 3. 完成
 
-> 可選：只想清資料、保留程式——執行 `paper-kit-v0.1.4.exe --uninstall`
+> 可選：只想清資料、保留程式——執行 `paper-kit-v0.1.7.exe --uninstall`
 > （黑視窗會短暫出現後自動關閉，`data` 即被清空）。
 
 ---
@@ -118,9 +134,11 @@
 - **8080 埠被佔用**：關閉其他佔用 8080 的程式（例如其他 Paper_Kit 執行個體）後重啟
 - **Windows 安全性警告**：PyInstaller 打包的 exe 首次執行可能觸發 SmartScreen——選擇「仍要執行」（僅此一次）
 - **防毒誤報**：PyInstaller 打包程式有時被誤判——如遭移除，請加入信任清單後重新解壓執行
-- **翻譯品質**：免費引擎（google/bing/siliconflowfree）限流且品質較低——正式使用請用 SiliconFlow 或 DeepSeek key
+- **翻譯品質**：免費引擎（google/bing/siliconflowfree）限流且品質較低——正式使用請用 SiliconFlow、DeepSeek 或免費品質引擎（ModelScope/Z.AI/NIM）
 - **「系統缺少 uv 工具且自動下載失敗」**：表示離線或 GitHub 無法連線——連網後重試翻譯即可
 - **換新版後沒看到歷史紀錄/設定？**：資料跟程式走——把舊版本資料夾的 `data` 複製到新資料夾即可帶過去（見「💾 資料位置」）
+- **翻譯報「模型不存在／限流／key 無效」？**：v0.1.6 起翻譯前自動預檢＋錯誤即時診斷——依訊息換模型、稍後重試或檢查 key
+- **NIM 大型模型翻譯很久？**：120B 單頁可達數分鐘——屬正常（免費旗艦的品質代價），v0.1.5 起不會誤報超時；等待即可
 
 ---
 
@@ -129,7 +147,8 @@
 - 上傳即代表同意：檔案內容將送**您填寫的引擎 API** 翻譯
 - 機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理、不上視覺模型
 - 掃描件 OCR 全程本機執行（RapidOCR），**不上雲**
+- 免費引擎檔案送雲端（ModelScope/Z.AI/NIM/Groq 等）——機密文件用付費 DeepSeek
 
 ---
 
-Paper_Kit v0.1.1（2026-08-14）
+Paper_Kit v0.1.7（2026-08-14）
