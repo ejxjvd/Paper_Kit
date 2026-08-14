@@ -66,3 +66,59 @@ def test_regex_matches_variant_headings(heading):
     assert any(rx.fullmatch(heading) for rx in regexes), (
         f"{heading!r} 不被 CI 提取 regex 匹配：{[rx.pattern for rx in regexes]}"
     )
+
+
+# ── 常駐包定案（2026-08-14）：notes 提取失敗改硬失敗 ─────────────
+
+
+def test_workflow_hard_fails_instead_of_silent_fallback():
+    """空 notes 分支必須硬失敗（exit 1）——禁止「Paper_Kit X.Y.Z」15 字元
+    fallback 靜默出空 notes（v0.1.8 實測教訓：空 notes 不影響 CI 綠燈）。"""
+    text = RELEASE_YML.read_text(encoding="utf-8")
+    empty_check = re.search(r"if\s*\[ -z \"\$\{NOTES\}\" \].*?fi", text, re.S)
+    assert empty_check, f"release.yml 找不到空 notes 檢查分支：{RELEASE_YML}"
+    block = empty_check.group(0)
+    assert re.search(r'NOTES="Paper_Kit', block) is None, (
+        "release.yml 仍含靜默 fallback（NOTES=\"Paper_Kit …\"）——提取失敗會再次出空 notes"
+    )
+    assert re.search(r"exit 1", block), "空 notes 分支必須 exit 1（硬失敗）"
+
+
+def test_every_released_tag_has_notes_section():
+    """硬失敗安全性：所有已發布 tag 在 RELEASE_NOTES.md 都有區段——
+    歷史 tag 重發布不會誤觸硬失敗（常駐包「影響歷史重發布」顧慮排除）。"""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "tag", "-l", "v*"], cwd=REPO, capture_output=True, text=True
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        pytest.skip("無 git 或無 tag（CI checkout 通常無 tag）")
+    headings = set(
+        re.findall(
+            r"^## v?([0-9]+\.[0-9]+\.[0-9]+)$",
+            RELEASE_NOTES.read_text(encoding="utf-8"),
+            re.M,
+        )
+    )
+    missing = [t for t in result.stdout.split() if t.removeprefix("v") not in headings]
+    assert not missing, (
+        f"以下已發布 tag 缺 RELEASE_NOTES 區段 → 重發布會硬失敗：{missing}"
+    )
+
+
+def test_current_version_has_notes_section():
+    """發布前準備契約：pyproject 版本必須已有 RELEASE_NOTES 區段——
+    tag 推進時提取不會失敗（正常發布不誤觸硬失敗）。"""
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    m = re.search(r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', pyproject, re.M)
+    assert m, "pyproject.toml 找不到 version"
+    headings = re.findall(
+        r"^## v?([0-9]+\.[0-9]+\.[0-9]+)$",
+        RELEASE_NOTES.read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert m.group(1) in headings, (
+        f"pyproject version {m.group(1)} 在 RELEASE_NOTES.md 缺區段——"
+        f"tag v{m.group(1)} 發布時會硬失敗"
+    )

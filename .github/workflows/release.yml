@@ -90,15 +90,18 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           # notes 從 packaging/RELEASE_NOTES.md 依 tag 提取（各版更新內容，2026-08-14 補全）
-          # v0.1.8 bug（2026-08-15 使用者抓到）：regex 原為 "^## " tag "$"（無 v），
+          # v0.1.8 bug（2026-08-14 使用者抓到）：regex 原為 "^## " tag "$"（無 v），
           # 但 RELEASE_NOTES.md 標題帶 v 前綴（## v0.1.8）→ 提取 0 行 → fallback
           # 「Paper_Kit 0.1.8」15 字元空 notes。改 "^## v?" tag "$" 同時相容兩式。
+          # 常駐包定案（2026-08-14）：提取失敗＝發布流程缺陷——硬失敗（exit 1），
+          # 禁止 fallback 靜默出空 notes（v0.1.8 教訓：空 notes 不影響 CI 綠燈）。
           NOTES="$(awk -v tag="${TAG#v}" '
             $0 ~ "^## v?" tag "$" {found=1; print; next}
             found && $0 ~ "^## " {found=0}
             found {print}' packaging/RELEASE_NOTES.md)"
           if [ -z "${NOTES}" ]; then
-            NOTES="Paper_Kit ${TAG#v}"
+            echo "::error::Release notes 提取失敗——packaging/RELEASE_NOTES.md 缺 '## v${TAG#v}' 區段（或 awk 契約變更）；先補區段再重跑，禁止空 notes 發布"
+            exit 1
           fi
           # -R 明確指定 repo：本 job 無 checkout（只有 download-artifact），
           # gh 靠 git 解析 repo 會報 "not a git repository"（CI 實測 2026-08-14）
