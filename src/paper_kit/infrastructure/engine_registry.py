@@ -291,10 +291,13 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         sensitive_ok=False,
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
         base_url="https://api.groq.com/openai/v1",
-        card_desc="gpt-oss-120b 免費（T2；30 RPM、14,400 RPD）",
-        info="Groq 免費端（免綁卡）：gpt-oss-120b 免費、日額度 14,400 次充裕。"
-        "瓶頸＝6,000 TPM——長文分塊翻譯容易撞限流 429，請開「重試」並縮小分塊。"
-        "檔案上 Groq 雲端——機密文件不可用。",
+        # v0.1.7（2026-08-14 rate-limits 查證）：原「14,400 RPD」是 llama-3.1-8b
+        # 的值——gpt-oss-120b 免費層實為 30 RPM／1K RPD／8K TPM／200K TPD
+        # （官方頁面內嵌 JSON 直接讀取；限速以組織計、多 key 無用）。
+        card_desc="gpt-oss-120b 免費（T2；30 RPM、1K RPD）",
+        info="Groq 免費端（免綁卡）：gpt-oss-120b 免費、日額度 1,000 次（限速以組織計）。"
+        "瓶頸＝8,000 TPM——長文分塊翻譯容易撞限流 429，請開「重試」並縮小分塊。"
+        "gpt-oss-20b／qwen3.6-27b 同額度。檔案上 Groq 雲端——機密文件不可用。",
     ),
     "openrouter": EngineSpec(
         id="openrouter",
