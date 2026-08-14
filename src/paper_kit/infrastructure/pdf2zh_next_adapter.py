@@ -100,6 +100,18 @@ def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
     if cfg.max_workers:
         cmd += ["--pool-max-workers", str(cfg.max_workers)]
     if job.glossary_files:
+        # 真機實測（2026-08-14，術語庫 v0.1.9 全流程）：--google --glossaries →
+        # 引擎直接拒絕「Google does not support glossary. Please choose a
+        # different translator or remove the glossary.」——google/bing 不支援
+        # 術語表，無條件送旗標＝任務必敗（任務 UI 顯示失敗、使用者困惑）。守衛：
+        # google/bing ＋術語表 → 明確 EngineError；付費引擎（siliconflow/deepseek/
+        # openai）與 siliconflowfree 支援術語表（support_llm=yes 源碼證＋真機實測
+        # 42.2s 產出 480KB，2026-08-14），行為不變。
+        if cfg.provider in ("google", "bing"):
+            raise EngineError(
+                f"免費引擎（{cfg.provider}）不支援術語表——請改用付費引擎 "
+                "（SiliconFlow／DeepSeek）、siliconflowfree 或取消勾選術語表"
+            )
         cmd += ["--glossaries", ",".join(job.glossary_files)]
         if not job.auto_extract:
             # 自動提取開啟時不禁用（與既有術語表並存，UI 兩開關可同開；票 13 統一兩插頭）

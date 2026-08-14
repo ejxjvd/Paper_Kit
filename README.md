@@ -1,7 +1,7 @@
 # 📄 Paper_Kit
 
 [![Release](https://img.shields.io/github/v/release/ejxjvd/Paper_Kit?label=最新發布)](https://github.com/ejxjvd/Paper_Kit/releases)
-[![Tests](https://img.shields.io/badge/tests-675%20passed-green)](https://github.com/ejxjvd/Paper_Kit/actions)
+[![Tests](https://img.shields.io/badge/tests-745%20passed-green)](https://github.com/ejxjvd/Paper_Kit/actions)
 
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
@@ -19,7 +19,7 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 - 🔒 **機密模式**：R18／隱私文件只准 DeepSeek 純文字引擎（視覺模型不上雲）
 - 🔍 **掃描件 OCR**：本機 RapidOCR（onnxruntime）預處理，不上雲——機密相容
 - 💰 **成本可見**：估算→實際成本＋tokens 用量；引擎單價可在設定頁調整
-- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**675 tests passed**
+- ⚙️ **工程面**：務實 DDD＋Ports & Adapters＋TDD（紅→綠、垂直切片）——**745 tests passed**
 
 ## 🚀 快速開始
 
@@ -29,8 +29,8 @@ LaTeX 源碼路線整本約 **NT$0.34**、PDF 路線整本 **NT$5–8**。四引
 
 | 平台 | 檔案 | 說明 |
 |---|---|---|
-| Windows x64 | `paper-kit-v0.1.4-win-x64.zip` | 解壓 → 雙擊 `paper-kit-v0.1.4.exe` |
-| macOS（Apple 晶片） | `paper-kit-v0.1.4-macos-arm64.zip` | 解壓 → 右鍵 exe →「開啟」（繞過 Gatekeeper） |
+| Windows x64 | `paper-kit-v0.1.9-win-x64.zip` | 解壓 → 雙擊 `paper-kit-v0.1.9.exe` |
+| macOS（Apple 晶片） | `paper-kit-v0.1.9-macos-arm64.zip` | 解壓 → 右鍵 exe →「開啟」（繞過 Gatekeeper） |
 
 瀏覽器自動開啟 http://localhost:8080/。自包含免安裝（內建 Python runtime＋全部依賴），操作說明見資料夾內 `README-使用手冊.md`。
 **首次使用需連網**：第一次選用需要外部引擎的翻譯路線時自動下載所需工具（uv）與引擎；之後離線可重複使用。
@@ -79,8 +79,8 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 
 ## 📊 狀態
 
-票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #3／#1+2+8＋v0.1.3（NVIDIA EOL 修復＋引擎模型挑選＋NIM 節流）＋v0.1.4（NIM 節流 `--qps` 型別修復）——**675 tests passed**
-（2026-08-14）；冒煙全綠。**v0.1.4 已發布**（免安裝 exe 版：portable 資料跟程式走＋`--uninstall` 乾淨卸載＋AES 加密 PDF 修復＋NVIDIA 模型下拉挑選＋40 RPM 節流，見 [Releases](https://github.com/ejxjvd/Paper_Kit/releases)）。後續工作以 GitHub issues 追蹤。
+票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #1–9＋v0.1.3–v0.1.9（NVIDIA EOL 修復、引擎模型挑選、NIM 節流、免費引擎守衛、術語庫擴充）——**745 tests passed**
+（2026-08-14）；冒煙全綠。**v0.1.9 已發布**（免安裝 exe 版：portable 資料跟程式走＋`--uninstall` 乾淨卸載＋術語庫 naer-core 30,073 條擴充＋免費引擎術語表守衛，見 [Releases](https://github.com/ejxjvd/Paper_Kit/releases)）。後續工作以 GitHub issues 追蹤。
 
 ## 🙏 致謝
 

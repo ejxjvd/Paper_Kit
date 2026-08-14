@@ -212,6 +212,38 @@ def test_build_command_no_glossary_omits_flags():
     assert "--no-auto-extract-glossary" not in cmd
 
 
+def test_build_command_free_engine_with_glossary_raises():
+    """真機實測（2026-08-14）：--google --glossaries → 引擎直接拒絕
+    「Google does not support glossary. Please choose a different translator
+    or remove the glossary.」——google/bing 不支援術語表，build_command 卻
+    無條件送旗標＝任務必敗。守衛：明確 EngineError；付費引擎（siliconflow/
+    deepseek/openai）與 siliconflowfree 行為不變。"""
+    for prov in ("google", "bing"):
+        cfg = EngineConfig(provider=prov, requires_key=False)
+        with pytest.raises(EngineError, match="術語表"):
+            build_command(make_job(glossary_files=["/gl/a.csv"]), cfg)
+
+
+def test_build_command_siliconflowfree_with_glossary_sends_flag():
+    """真機＋源碼雙證（2026-08-14）：siliconflowfree 支援術語表——引擎源碼
+    SiliconFlowFreeSettings.support_llm=yes（術語表守衛放行）＋真機實測
+    --siliconflowfree --glossaries 42.2s 產出 480KB PDF。守衛不得擋，
+    且必須真正送出 --glossaries 旗標。"""
+    cfg = EngineConfig(provider="siliconflowfree", requires_key=False)
+    cmd = build_command(make_job(glossary_files=["/gl/a.csv"]), cfg)
+    assert cmd[cmd.index("--glossaries") + 1] == "/gl/a.csv"
+    assert "--siliconflowfree" in cmd
+
+
+def test_build_command_paid_engine_with_glossary_still_works():
+    """付費引擎不受守衛影響：siliconflow 送 --glossaries（既有契約）。"""
+    cmd = build_command(
+        make_job(glossary_files=["/gl/a.csv"]),
+        EngineConfig(provider="siliconflow", api_key="KEY"),
+    )
+    assert cmd[cmd.index("--glossaries") + 1] == "/gl/a.csv"
+
+
 def test_build_command_term_siliconflow_when_auto_extract_on():
     """票 05＋Bug 1：自動術語提取開關 → term 引擎旗標齊全（key/model/base-url）。
 
@@ -290,7 +322,8 @@ def test_free_engine_translate_without_key_skips_key_guard():
         EngineConfig(provider="siliconflowfree", requires_key=False, api_key=""),
         runner=FakeRunner((0, LOG)),
     )
-    result = adapter.translate(make_job())
+    # 本測試只驗證 key 守衛（免費引擎＋glossary 的互動由 build_command 測試管）
+    result = adapter.translate(make_job(glossary_files=[]))
     assert result.mono_path == "/out/paper.zh.mono.pdf"
     assert len(adapter._runner.calls) == 1, "免費引擎無 key 也應真正執行引擎"
 

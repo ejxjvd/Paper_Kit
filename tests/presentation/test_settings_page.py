@@ -80,6 +80,59 @@ async def test_seed_builtin_button_imports_and_is_idempotent(tmp_path):
         await user.should_see("內建詞表已存在，未覆寫")
 
 
+@pytest.mark.asyncio
+async def test_import_glossary_zero_rows_warns_negative(tmp_path):
+    """2026-08-14 真機診斷：三欄 CSV 的 tgt_lng（如 zh-TW）與任務目標語言
+    （如 zh）不符 → 領域層整表跳過 0 條。UI 舊行為仍顯示綠字「已匯入（0 條）」
+    ——使用者以為成功、任務卻無詞表可用。0 條必須負面警示＋提示原因。"""
+    from paper_kit.presentation.app import _import_glossary
+
+    settings, cost, glossaries = _build_settings(tmp_path)
+    settings.set_target_lang("zh")  # 目標簡中 → zh-TW 條目全跳過
+
+    class FakeFile:
+        name = "naer_zh_tw.csv"
+
+        async def read(self):
+            return (
+                "source,target,tgt_lng\n"
+                "attention,注意力,zh-TW\n"
+                "attention mechanism,注意力機制,zh-TW\n"
+            ).encode("utf-8")
+
+    class FakeEvent:
+        file = FakeFile()
+
+    async with user_simulation(root=lambda: ui.column()) as user:
+        await user.open("/")
+        await _import_glossary(glossaries, settings, None, None, FakeEvent())
+        await user.should_see("0 條")
+        await user.should_see("tgt_lng")
+
+
+@pytest.mark.asyncio
+async def test_seed_naer_button_imports_and_is_idempotent(tmp_path):
+    """術語庫擴充（2026-08-14）：設定頁「匯入樂詞網詞表」按鈕——建立成功＋冪等。"""
+    from paper_kit.infrastructure.builtin_glossary import NAER_GLOSSARY_NAME
+
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")  # 暖身
+        await user.open("/settings")
+        user.find("匯入樂詞網詞表").click()
+        await user.should_see("已匯入樂詞網詞表 naer-core")
+        assert NAER_GLOSSARY_NAME in glossaries.list_glossaries()
+        assert len(glossaries.entries(NAER_GLOSSARY_NAME)) > 20_000
+        # 冪等：再點一次 → 不覆寫通知
+        user.find("匯入樂詞網詞表").click()
+        await user.should_see("樂詞網詞表已存在，未覆寫")
+
+
 # ── 票 20：每引擎獨立 API key 欄位＋遮罩＋清除 ────────────────
 
 

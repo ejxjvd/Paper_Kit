@@ -2,6 +2,36 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9
+
+### 🆕 新功能
+
+- **術語庫擴充（#90）**：設定頁新增「匯入樂詞網詞表」按鈕——一鍵匯入 **`naer-core`**（國家教育研究院樂詞網學術名詞 **30,073 條單詞層**，電子計算機／電機工程／食品科技／魚類四領域全量）：
+  - 授權：**政府資料開放授權條款-第 1 版**（可再授權、商業可用、僅需顯名聲明——docstring／生成腳本檔頭即顯名聲明）；取代無 LICENSE 不可用的 immersive-translate/terms 來源（研究查證見 `docs/research/2026-08-14-Paper_Kit-研究-GitHub術語庫全面掃描-查證.md`）
+  - 資料為版本化 gzip 資源檔（`src/paper_kit/infrastructure/data/naer_core.csv.gz`，0.37 MB）；生成可重現：`uv run python scripts/naer_build.py`（下載樂詞網 ODS → 過濾 → gzip）
+  - 選取準則：source 小寫字母開頭、單詞、無括號/引號/檔名/代碼噪音；target 無簡體字形污染（官方品質，簡體防線實測 0 命中）
+  - seed 冪等（已存在不覆寫，與 paper-kit-basic 同契約）；大詞表編輯頁自動截斷（顯示前 500 條＋計數提示）不卡 UI
+
+### 🐛 修復
+
+1. **免費引擎＋術語表任務必敗（真機實測抓到）**：`--google --glossaries` 真翻譯實測引擎直接拒絕「Google does not support glossary. Please choose a different translator or remove the glossary.」——google/bing 不支援術語表，build_command 原無條件送 `--glossaries`。修復：google/bing＋術語表 → 明確 EngineError（「請改用付費引擎、siliconflowfree 或取消勾選術語表」），付費引擎與 siliconflowfree 行為不變（TDD 新測試鎖定）
+2. **術語表 0 條匯入誤導**（DEBUG log 真機定案）：三欄 CSV 的 `tgt_lng`（如 zh-TW）與任務目標語言（如 zh）不符時，BabelDOC 語言過濾器**整表跳過 0 條**——UI 舊行為綠字「已匯入（0 條）」，使用者以為成功、任務卻無詞表可用。修復：0 條匯入負面警示＋提示原因（CSV 無資料或 tgt_lng 語言不符）＋手冊說明兩欄格式為語言中性（TDD 新測試鎖定）
+
+### 📖 詞表生效真相（2026-08-14 DEBUG 真機定案）
+
+- **載入鏈路全通**（`--glossaries` → settings → `Glossary.from_csv` → hyperscan 建 DB）；斷點是 **tgt_lng 語言過濾器**——`zh_tw ≠ lang_out` → 全跳過
+- **兩欄 CSV（source,target，無 tgt_lng）＝語言中性**：任何目標語言（zh／zh-TW）都全量載入生效；seed_naer 產出即兩欄（領域 `to_csv` 收斂）
+- 真機 DEBUG 鐵證：三欄 0 entries vs 兩欄 **30,070 entries**（0.52s 建 DB）→ 產出檔 483,518 B vs 495,141 B（譯文改變＝詞表生效）
+
+### ✅ 驗證
+
+- TDD 13 新測試先紅後綠（資料契約 7：資源存在/可解析/規模 >2 萬、source 契約、tgt_lng 全 zh-TW、naive CSV 相容、source 唯一、學術詞抽樣、seed 冪等；UI 3：樂詞網按鈕建立＋冪等、0 條匯入警示；免費引擎守衛 3：google/bing 擋＋siliconflowfree 放行送旗標）——全套件 **745 passed**
+- 真翻譯驗證（真 runner／真 API／產出檔，2026-08-14 實測）：
+  - **SiliconFlow 國際站付費引擎＋naer-core 兩欄詞表**：35.9s 產出 mono PDF 495 KB；DEBUG 證 30,070 條載入＋產出檔改變＝詞表生效
+  - **siliconflowfree 免費引擎＋naer-core 詞表**：42.2s 產出 mono PDF 480 KB（支援術語表，源碼 support_llm=yes＋真機雙證）
+  - **google 免費引擎（無詞表，正確組合）**：17.8s 產出 mono PDF 482 KB
+  - 詳見 docs/research/2026-08-14-Paper_Kit-研究-術語庫對比分析 §4
+
 ## v0.1.8
 
 ### 🐛 修復

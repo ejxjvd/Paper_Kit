@@ -61,6 +61,29 @@ class GlossaryService:
         self.import_csv(BUILTIN_GLOSSARY_NAME, BUILTIN_GLOSSARY_CSV, target_lang="zh-TW")
         return True
 
+    def seed_naer(self) -> bool:
+        """術語庫擴充（2026-08-14）：匯入樂詞網詞表 `naer-core`（29,560 條單詞層）。
+
+        來源國家教育研究院樂詞網（政府資料開放授權條款-第1版，顯名聲明見
+        builtin_glossary docstring 與 scripts/naer_build.py 檔頭）；資源檔為
+        package data 目錄的 gzip（importlib.resources 讀取，執行期零網路）。
+        冪等：名稱已存在絕不覆寫（使用者可能已編輯）。回傳是否新建立。
+        """
+        import gzip
+        from importlib import resources
+
+        from paper_kit.infrastructure.builtin_glossary import (
+            NAER_GLOSSARY_GZ,
+            NAER_GLOSSARY_NAME,
+        )
+
+        if NAER_GLOSSARY_NAME in self._repo.list_names():
+            return False
+        path = resources.files("paper_kit.infrastructure.data").joinpath(NAER_GLOSSARY_GZ)
+        csv_text = gzip.decompress(path.read_bytes()).decode("utf-8")
+        self.import_csv(NAER_GLOSSARY_NAME, csv_text, target_lang="zh-TW")
+        return True
+
     def paths_for(self, names: list[str]) -> list[str]:
         """挑選的術語表名 → 存在檔案的絕對路徑（不存在的跳過）。"""
         existing = set(self._repo.list_names())

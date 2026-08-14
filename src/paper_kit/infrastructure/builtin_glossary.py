@@ -1,15 +1,31 @@
-"""內建基礎術語表（#84 方案 A：格式參考 immersive-terms，詞條全自研）。
+"""內建術語表（#84 方案 A：格式參考 immersive-terms，詞條全自研／樂詞網）。
 
-授權紅線（2026-08-14 research 實地查證，見
-docs/research/2026-08-14-Paper_Kit-研究-immersive-terms術語庫-查證.md）：
-immersive-translate/terms **無 LICENSE**＝法律「保留所有權利」——不得直接
-複製/嵌入/執行期快取其詞條。本模組詞條一律自研彙編（以使用者提供之
-「12 大 AI 術語庫核心映射」參考清單為原料逐條驗證繁中化＋Paper_Kit
-論文翻譯慣用語補充），CSV 三欄格式（source,target,tgt_lng）與其相容——
-日後上游補授權（MIT/CC-BY）可直吃通用領域子集（≈400 條），格式互轉零成本。
+兩份內建詞表（seed 皆冪等，見 glossary_service）：
+
+1. `paper-kit-basic`（265 條，自研彙編）
+   授權紅線（2026-08-14 research 實地查證，見
+   docs/research/2026-08-14-Paper_Kit-研究-immersive-terms術語庫-查證.md）：
+   immersive-translate/terms **無 LICENSE**＝法律「保留所有權利」——不得直接
+   複製/嵌入/執行期快取其詞條。本詞表詞條一律自研彙編（以使用者提供之
+   「12 大 AI 術語庫核心映射」參考清單為原料逐條驗證繁中化＋Paper_Kit
+   論文翻譯慣用語補充），CSV 三欄格式（source,target,tgt_lng）與其相容——
+   日後上游補授權（MIT/CC-BY）可直吃通用領域子集（≈400 條），格式互轉零成本。
+
+2. `naer-core`（29,560 條，樂詞網學術名詞單詞層——術語庫擴充 2026-08-14）
+   來源：國家教育研究院 樂詞網（terms.naer.edu.tw）下載專區——電子計算機／
+   電機工程／食品科技／魚類 4 領域全量（音樂 6 包與論文翻譯無關不入選）。
+   **授權：政府資料開放授權條款-第1版**（可再授權、商業可用、僅需顯名聲明——
+   本 docstring 與 scripts/naer_build.py 檔頭即為顯名聲明）。生成可重現：
+   `uv run python scripts/naer_build.py`（下載 ODS → 過濾 → gzip 資源檔）。
+   資料契約（tests/infrastructure/test_builtin_glossary.py 鎖定）：source
+   小寫字母開頭、單詞、無括號註記；target 無簡體字形污染；tgt_lng 全 zh-TW。
 """
 
 BUILTIN_GLOSSARY_NAME = "paper-kit-basic"
+
+# naer-core：樂詞網 gzip 資源檔（package data 目錄，importlib.resources 讀取）
+NAER_GLOSSARY_NAME = "naer-core"
+NAER_GLOSSARY_GZ = "naer_core.csv.gz"
 
 BUILTIN_GLOSSARY_CSV = """source,target,tgt_lng
 Transformer,Transformer 模型,zh-TW

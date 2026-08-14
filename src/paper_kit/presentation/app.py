@@ -1011,6 +1011,10 @@ def _settings_page(
                     "匯入內建詞表（paper-kit-basic，265 條自研）",
                     on_click=lambda: _seed_builtin(glossaries, glossary_select, edit_select),
                 ).props("outline")
+                ui.button(
+                    "匯入樂詞網詞表（naer-core，樂詞網學術名詞 2.9 萬條）",
+                    on_click=lambda: _seed_naer(glossaries, glossary_select, edit_select),
+                ).props("outline")
                 ui.separator()
                 ui.label("編輯術語表").classes("font-bold")
                 edit_select = ui.select(
@@ -1125,6 +1129,16 @@ async def _import_glossary(
     except (GlossaryFormatError, GlossaryNameError) as exc:
         ui.notify(to_user_message(exc), type="negative")
         return
+    if count == 0:
+        # 2026-08-14 真機診斷：三欄 CSV 的 tgt_lng（如 zh-TW）與任務目標語言
+        # （如 zh）不符 → 領域層整表跳過。舊行為綠字「已匯入（0 條）」誤導
+        # 使用者以為成功、任務卻無詞表可用 → 負面警示＋提示原因。
+        ui.notify(
+            f"匯入 {name}：0 條——CSV 無資料，或 tgt_lng 語言 "
+            f"（若有）與目標語言 {settings.target_lang()} 不符",
+            type="negative",
+        )
+        return
     ui.notify(f"已匯入 {name}（{count} 條）", type="positive")
     _sync_glossary_pickers(
         glossaries, glossary_select, edit_select, list(glossary_select.value) + [name]
@@ -1165,6 +1179,24 @@ def _seed_builtin(glossaries: GlossaryService, glossary_select, edit_select) -> 
         ui.notify("已匯入內建詞表 paper-kit-basic（265 條）", type="positive")
     else:
         ui.notify("內建詞表已存在，未覆寫（可從下方編輯）", type="warning")
+    _sync_glossary_pickers(glossaries, glossary_select, edit_select, list(glossary_select.value))
+
+
+def _seed_naer(glossaries: GlossaryService, glossary_select, edit_select) -> None:
+    """術語庫擴充（2026-08-14）：匯入樂詞網詞表 naer-core（2.9 萬條單詞層）。
+
+    來源國家教育研究院樂詞網（政府資料開放授權條款-第1版，顯名聲明見
+    builtin_glossary docstring／scripts/naer_build.py 檔頭）；冪等——已存在不覆寫。
+    """
+    try:
+        created = glossaries.seed_naer()
+    except OSError as exc:
+        ui.notify(to_user_message(exc), type="negative")
+        return
+    if created:
+        ui.notify("已匯入樂詞網詞表 naer-core（2.9 萬條）", type="positive")
+    else:
+        ui.notify("樂詞網詞表已存在，未覆寫（可從下方編輯）", type="warning")
     _sync_glossary_pickers(glossaries, glossary_select, edit_select, list(glossary_select.value))
 
 
@@ -1224,7 +1256,12 @@ def _rename_glossary(
 
 
 def _render_entries(glossaries: GlossaryService, entries_box, name) -> None:
-    """編輯頁顯示術語列（每列 source → target＋刪除鈕）。"""
+    """編輯頁顯示術語列（每列 source → target＋刪除鈕）。
+
+    大詞表截斷（術語庫擴充 2026-08-14）：naer-core 2.9 萬條全量渲染會卡死
+    UI——超過上限只顯示前段（刪除索引仍是原始序，編輯仍正確）。
+    """
+    _DISPLAY_LIMIT = 500  # 大詞表（naer-core 等）只顯示前段
     entries_box.clear()
     if not name:
         return
@@ -1233,13 +1270,19 @@ def _render_entries(glossaries: GlossaryService, entries_box, name) -> None:
     except KeyError:
         return
     with entries_box:
-        for i, (source, target) in enumerate(entries):
+        shown = entries[:_DISPLAY_LIMIT]
+        for i, (source, target) in enumerate(shown):
             with ui.row().classes("items-center w-full gap-2"):
                 ui.label(f"{source} → {target}").classes("flex-1 text-sm")
                 ui.button(
                     "✕",
                     on_click=lambda i=i: _delete_entry(glossaries, name, i, entries_box),
                 ).props("dense flat color=red")
+        if len(entries) > _DISPLAY_LIMIT:
+            ui.label(
+                f"（詞表共 {len(entries)} 條，僅顯示前 {_DISPLAY_LIMIT} 條——"
+                "大詞表供翻譯使用，編輯請用小詞表或直接改 CSV 檔）"
+            ).classes("text-grey-6 text-sm")
         if not entries:
             ui.label("（空白術語表）").classes("text-grey-6 text-sm")
 

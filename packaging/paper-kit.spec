@@ -6,7 +6,7 @@ v0.1.1 工程化（2026-08-14）：
 - upx 條件化：mac 不適用（UPX 不支援 mac binary）
 - 入口相對路徑（SPECPATH）——repo 內可攜，不再硬編碼本機絕對路徑
 
-隱私：本檔（與整個 repo）不得出現任何 Vault 相關字眼（公開 repo 紅線）。
+隱私紅線：本檔（與整個 repo）不得出現任何個人筆記系統相關字眼（公開 repo）。
 """
 import os
 import sys
