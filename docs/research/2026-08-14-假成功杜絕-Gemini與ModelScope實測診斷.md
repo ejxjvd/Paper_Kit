@@ -103,3 +103,30 @@ https://modelscope.ai/my/settings/account」）。
 ### ModelScope 國際站——仍待綁阿里雲 ⏳
 
 重測仍 401「Please bind your Alibaba Cloud account」——需瀏覽器登入綁定，API 無法代辦。39 模型全測待綁定。
+
+## 補測二（2026-08-14 晚，ModelScope 綁阿里雲後全測）✅
+
+使用者綁定阿里雲（UI「Bind Alibabacloud: ejxjvdbk1837@gmail.com ✓」）後立即重測。
+
+### 全模型可用性（42 模型，串行 1.5s 間隔）
+
+- **36/42 可生成**（POST chat/completions 200）。
+- 403 無權限（3）：`Qwen-Ambassador`／`Qwen3.7-Max`／`Qwen3.7-Plus`／`Qwen3.8-Max`（領先模型要付費）。
+- 400 無 provider（3）：`Jan-nano`／`MiniMax-M3`／`Qwen3-4B`。
+- 502 非 chat（2）：`Qwen-Image-Edit`×2（生圖模型，名稱無生圖字樣——另一個「清單有顯示≠可用」變體）。
+- 並行（xargs -P 8）大量 429——**限流以模型/帳號為單位**，串行才可信。
+
+### ⚠️ 思考型模型陷阱（本次最重要發現）
+
+| 模型 | 結果 |
+|------|------|
+| `deepseek-ai/DeepSeek-V3.1` | ✅ 200 真翻譯 **40.9s** 產出 mono 484KB＋dual 869KB（non-thinking） |
+| `deepseek-ai/DeepSeek-V4-Pro` | ⚠️ HTTP 200 但 **`message.content=None`**（thinking 模型，reasoning 耗盡 max_tokens；max_tokens=2000 時正常，=200 時 completion_tokens=201、content=None） |
+| `zai-org/GLM-5.2` | ⚠️ 同上（思考型） |
+| `zai-org/GLM-4.7-Flash` | ❌ HTTP 200 但 **`choices=null` 空殼**（usage 全 0；非思考型陷阱，是該模型在 ModelScope 上不可用） |
+
+- **機制**：pdf2zh 請求的 max_tokens 被 thinking 模型的 `reasoning_content` 耗盡 →
+  `response.choices[0].message.content` = None → pdf2zh `content.strip()` TypeError 崩潰。
+  **HTTP 200 但內容不可用**——「清單有顯示≠可生成」的新變體：**HTTP 200 ≠ 可用**。
+- **修復**：registry 預設 model 換 non-thinking `deepseek-ai/DeepSeek-V3.1`
+  （card_desc/info 註明陷阱；測試加不變式：預設模型不得含 V4/GLM）。

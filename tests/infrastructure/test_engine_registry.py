@@ -281,6 +281,19 @@ def test_modelscope_uses_international_endpoint():
     assert "cn" not in spec.base_url, f"不應含中國站元素：{spec.base_url}"
 
 
+def test_modelscope_default_model_not_thinking():
+    """#78（2026-08-14 思考型模型陷阱）：DeepSeek-V4-Pro/GLM-5.2 思考型——pdf2zh
+    的 max_tokens 被 reasoning_content 耗盡 → message.content=None → pdf2zh
+    `content.strip()` TypeError（HTTP 200 但內容不可用）→ 預設必須是 non-thinking
+    模型（DeepSeek-V3.1 真翻譯 40.9s 驗證可用；GLM-4.7-Flash choices=null 空殼）。"""
+    spec = ENGINE_SPECS["modelscope"]
+    assert spec.model == "deepseek-ai/DeepSeek-V3.1", (
+        f"預設模型必須是 non-thinking 的 V3.1（思考型 V4-Pro/GLM-5.2 content=None 崩潰）：{spec.model}"
+    )
+    assert "V4" not in spec.model, f"V4 系為思考型陷阱模型：{spec.model}"
+    assert "GLM" not in spec.model, f"GLM 系為思考型陷阱模型：{spec.model}"
+
+
 def test_no_cn_endpoints_in_registry():
     """#78（2026-08-14 使用者要求）：所有申請管道皆國際站——registry 任何引擎
     base_url 不得含中國站元素（.cn 網域）。"""

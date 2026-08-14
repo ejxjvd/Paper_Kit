@@ -267,7 +267,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         id="modelscope",
         label="ModelScope 魔搭（免費品質天花板）",
         provider="openai",
-        model="deepseek-ai/DeepSeek-V4-Pro",
+        model="deepseek-ai/DeepSeek-V3.1",
         needs_key=True,
         sensitive_ok=False,
         pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費額度
@@ -276,11 +276,18 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         # （跨站不互通；GET /models 不驗 key 造成「測試 API」假成功）→
         # 改國際站 .ai 端點（國際站 key 實測 GET 200；生成前須綁阿里雲帳號：
         # https://modelscope.ai/my/settings/account）。
+        # **思考型模型陷阱（v0.1.7 補）**：DeepSeek-V4-Pro/GLM-5.2 是思考型模型——
+        # pdf2zh 的 max_tokens 被 reasoning_content 耗盡 → message.content=None →
+        # pdf2zh `content.strip()` TypeError（HTTP 200 但內容不可用）→ 預設模型
+        # 換 non-thinking 的 DeepSeek-V3.1（真翻譯 40.9s 驗證）。GLM-4.7-Flash
+        # 在 ModelScope 上回 choices=null 空殼（200 不可用）——勿改。
         base_url="https://api-inference.modelscope.ai/v1",
-        card_desc="DeepSeek-V4-Pro/GLM-5.2 免費（國際站；2,000 RPD）",
+        card_desc="DeepSeek-V3.1 免費（國際站；2,000 RPD）",
         info="ModelScope 國際站（modelscope.ai 申請 key，須先綁阿里雲帳號才能生成）："
-        "DeepSeek-V4-Pro/GLM-5.2/Qwen3 免費——T1 品質、中文最強。額度動態分配"
-        "（可能 insufficient_quota）——失敗請稍後重試。檔案上阿里雲——機密文件不可用。",
+        "DeepSeek-V3.1/V3.2-Exp 免費（non-thinking，翻譯可用）——T1 品質、中文最強。"
+        "注意：V4-Pro/GLM-5.2 思考型模型 max_tokens 被推理耗盡回空內容（引擎崩潰），"
+        "勿選。額度動態分配（可能 insufficient_quota）——失敗請稍後重試。"
+        "檔案上阿里雲——機密文件不可用。",
     ),
     "groq": EngineSpec(
         id="groq",
