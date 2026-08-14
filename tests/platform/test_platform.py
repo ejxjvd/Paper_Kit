@@ -56,8 +56,14 @@ def test_platform_label_maps_three_platforms(monkeypatch):
 # ── 檔案管理員開啟 dispatch（單點分派） ──────────────────
 
 
-def test_open_folder_win32_routes_to_explorer(tmp_path, monkeypatch):
-    """win32 → windows/explorer.open_folder（explorer.exe＋WSL 正規化）。"""
+def test_open_folder_win32_routes_to_explorer(monkeypatch):
+    """win32 → windows/explorer.open_folder（explorer.exe＋WSL 正規化）。
+
+    CI 平台盲區（2026-08-14 win-x64 實測修正）：輸入必須固定 POSIX 路徑——
+    本機 WSL 的 tmp_path 恰為 /tmp/... 所以 wslpath 分支有走到，Windows
+    runner 的 tmp_path 是 C:\\... 命中 _WIN_DRIVE_RE 原樣回傳、正規化分支
+    永不觸發。固定 POSIX 輸入才在三平台 runner 都驗證到 wslpath 層。
+    """
     monkeypatch.setattr(sys, "platform", "win32")
     # 防 Popen mock 攔到 subprocess.run 內部的 Popen（帶 text kwargs 炸）——
     # wslpath 層單獨 mock run 給假 UNC（既有測試同法）
@@ -70,7 +76,7 @@ def test_open_folder_win32_routes_to_explorer(tmp_path, monkeypatch):
     )
     calls: list = []
     monkeypatch.setattr(subprocess, "Popen", lambda cmd: calls.append(cmd))
-    shown = platform_mod.open_folder(tmp_path / "out")
+    shown = platform_mod.open_folder(Path("/tmp/paper_kit_win32_test"))
     assert calls and calls[0][0] == "explorer.exe"
     assert shown == r"\\wsl.localhost\Ubuntu\tmp\x", "顯示 target＝正規化後的 explorer 路徑"
 
@@ -117,11 +123,19 @@ def test_kill_tree_win32_routes_to_taskkill(monkeypatch):
 
 
 def test_kill_tree_posix_routes_to_killpg(monkeypatch):
-    """darwin → macos/processes.kill_tree（killpg 殺進程組）。"""
+    """darwin → macos/processes.kill_tree（killpg 殺進程組）。
+
+    CI 平台盲區（2026-08-14 win-x64 實測修正）：Windows 的 os 模組根本
+    沒有 killpg 屬性，monkeypatch.setattr 預設 raising=True 直接炸
+    AttributeError——需 raising=False（POSIX 平台上有屬性，兩者皆可）。
+    """
     monkeypatch.setattr(sys, "platform", "darwin")
     killed: list = []
     monkeypatch.setattr(
-        macos_processes.os, "killpg", lambda pid, sig: killed.append(pid)
+        macos_processes.os,
+        "killpg",
+        lambda pid, sig: killed.append(pid),
+        raising=False,
     )
     platform_mod.kill_tree(_FakeProc(pid=42))
     assert killed == [42]
