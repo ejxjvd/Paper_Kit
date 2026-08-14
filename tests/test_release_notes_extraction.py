@@ -98,7 +98,7 @@ def test_every_released_tag_has_notes_section():
         pytest.skip("無 git 或無 tag（CI checkout 通常無 tag）")
     headings = set(
         re.findall(
-            r"^## v?([0-9]+\.[0-9]+\.[0-9]+)$",
+            r"^## v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)$",
             RELEASE_NOTES.read_text(encoding="utf-8"),
             re.M,
         )
