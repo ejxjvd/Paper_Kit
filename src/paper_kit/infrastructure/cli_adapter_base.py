@@ -8,9 +8,7 @@ Pdf2zhNextAdapter 與 BabelDocAdapter 共用同一 translate 循環——retry �
 import logging
 import os
 import shutil
-import signal
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -21,6 +19,8 @@ from paper_kit.domain.translation_job import TranslationJob
 import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
 from paper_kit.infrastructure.uv_bootstrap import resolve_uv
+from paper_kit.platform import kill_tree as _platform_kill_tree  # 平台分離（2026-08-14）
+from paper_kit.platform import spawn_kwargs  # POSIX 進程組長／win32 無操作
 
 logger = logging.getLogger("paper_kit.infrastructure.cli_adapter_base")
 
@@ -43,22 +43,13 @@ def _friendly_error(output: str) -> str:
 def _kill_tree(proc: subprocess.Popen) -> None:
     """樹殺：uv 只是中介，只 kill 它孫程序照跑、管道還握著（review 硬問題）。
 
-    零依賴方案（psutil 未裝）：POSIX 用進程組（Popen start_new_session 保證組長），
-    Windows 用 taskkill /T /F 遞迴殺整棵樹。殺不到的（已退場）直接放行。
+    平台分離（2026-08-14）：實作收斂於 paper_kit.platform.kill_tree——
+    Windows 版 = taskkill /T /F 遞迴（platform/windows/processes.py）、
+    macOS/Linux 版 = killpg 進程組（platform/macos/processes.py）；已退場
+    （poll 非 None）的守衛在 dispatch 層。本函式保留命名相容薄轉發
+    （測試/呼叫方沿用舊名）。
     """
-    if proc.poll() is not None:
-        return
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-            capture_output=True,
-            text=True,
-        )
-    else:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # 進程組已退場
+    _platform_kill_tree(proc)
 
 
 class CliAdapterBase:
@@ -184,8 +175,7 @@ class CliAdapterBase:
             # 300s inactivity 誤殺（使用者實測「翻譯超時」）。unbuffered 後每步
             # 即時輸出，活性信號連續（所有引擎受益）。
             kwargs["env"] = {**os.environ, "COLUMNS": "1000", "PYTHONUNBUFFERED": "1"}
-            if sys.platform != "win32":
-                kwargs["start_new_session"] = True  # POSIX：進程組長，_kill_tree 才殺得到整棵樹
+            kwargs.update(spawn_kwargs())  # 平台分離：POSIX 進程組長（樹殺前提）；win32 無操作
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs
             )

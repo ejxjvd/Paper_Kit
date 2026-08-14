@@ -2,6 +2,33 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.1
+
+### 🐛 macOS 嚴重問題修復（使用者實測轉交，BUG_REPORT_macOS_v0.1.8）
+
+v0.1.8 macOS arm64 實測四問題全數修復（TDD 4 新測試鎖定）：
+
+1. **`resource_tracker` 子程序無限遞迴（實測 117 程序連鎖）**：frozen exe＋macOS spawn 啟動模式 → 子程序重跑主程式。修復：入口**第一行** `multiprocessing.freeze_support()`（PyInstaller 官方慣例；Windows frozen exe 同受惠）——啟動 30 秒後程序數不再增加
+2. **8080 被佔用仍輸出「NiceGUI ready」假象＋`connection lost`**：修復：啟動前 port 檢查——被佔用時顯示明確錯誤＋排查指令（macOS/Linux `lsof`、Windows `netstat`）後退出（exit 1），不再假裝就緒
+3. **重複啟動 8080 衝突**：同上攔下（第二實例啟動即明確報錯）
+4. **PDF 上傳 `connection lost`**：根源＝程序連鎖＋埠衝突——修復後上傳不再斷線
+
+### 🖥️ 平台分離（2026-08-14 使用者要求：macOS／Windows 各自乾淨專案）
+
+- 源碼統計：7,618 行中平台分支僅 18 處（99.8% 平台無關共用核心）——全部收斂於新 `src/paper_kit/platform/` 套件：
+  - `platform/macos/`：macOS 版專屬（Finder 開啟、POSIX 樹殺）
+  - `platform/windows/`：Windows 版專屬（explorer 開啟＋WSL 路徑正規化、taskkill 樹殺）
+  - `platform/uv_assets.py`：uv 官方二進制資產查表（win32/darwin/linux）
+  - 分離鐵律測試：macos/ 與 windows/ **互不 import**（AST 掃描鎖定，新增模組自動守門）
+- 打包分離：`packaging/macos/` 與 `packaging/windows/` 各自 spec（UPX mac 不適用）＋專屬手冊（macOS 版含 Gatekeeper 繞過／`xattr -dr com.apple.quarantine` 整包處理／SHA-256 驗證／lsof 除錯）
+- App 內版本標註：瀏覽器標題「Paper_Kit 論文翻譯器（Windows 版／macOS 版）」
+- 共用核心（application/domain/infrastructure 其餘）零平台分支——未來平台行為一律進 platform/ 套件
+
+### ✅ 驗證
+
+- TDD 16 新測試（平台分離 12：標籤／open_folder 三平台分派／kill_tree 分派／spawn 參數／隔離鐵律；macOS 入口 4：port 檢查、freeze_support 最前、佔用明確退出）——全套件 **761 passed**（+16）
+- macOS 驗收條件（朋友實測回饋後）：程序數不增、`lsof` 單一監聽者、`curl -I` 穩定、上傳不 connection lost、關閉無殘留
+
 ## v0.1.9
 
 ### 🆕 新功能

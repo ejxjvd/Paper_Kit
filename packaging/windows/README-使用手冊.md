@@ -1,4 +1,8 @@
-# 📄 Paper_Kit v0.1.9 使用手冊
+# 📄 Paper_Kit v0.1.9.1（Windows 版）使用手冊
+
+> 平台分離（2026-08-14）：本手冊為 **Windows 版**專屬——macOS 版（Gatekeeper
+> 繞過、xattr、SHA-256 驗證等）見 macOS 版手冊（macOS 資產 zip 內附）。
+> 程式碼層 macOS／Windows 各自獨立資料夾（src/paper_kit/platform/），互不污染。
 
 **自建學術 PDF／簡報翻譯器 —— 免除被線上翻譯工具綁架。**
 
@@ -10,7 +14,7 @@
 
 ## 🚀 快速啟動
 
-1. 雙擊 `paper-kit-v0.1.9.exe`（**黑色視窗 = 伺服器本體＋狀態列 log，請勿關閉**；關閉視窗 = 關閉服務）
+1. 雙擊 `paper-kit-v0.1.9.1.1.exe`（**黑色視窗 = 伺服器本體＋狀態列 log，請勿關閉**；關閉視窗 = 關閉服務）
 2. 瀏覽器自動開啟 **http://localhost:8080/**（若未自動開啟，請手動輸入此網址）
 3. 首次使用請先到**設定頁**填入引擎 API key（見下方「設定 API keys」）
 4. 拖放 PDF（或 .tex）→ 選引擎 → 開始翻譯
@@ -72,17 +76,6 @@
 
 ---
 
-## 🍎 macOS 使用者（v0.1.1 新增）
-
-1. 下載 `paper-kit-v0.1.9-macos-arm64.zip`（Apple 晶片）並解壓
-2. **首次開啟需繞過 Gatekeeper**（未簽名程式）：右鍵 exe → 選「開啟」→ 再點「開啟」
-3. 之後流程與 Windows 相同——「📁 瀏覽資料夾」會用 Finder（open）開啟
-4. 進階路線（LaTeX／BabelDOC）需自裝工具（見下方「進階路線前置需求」）
-
-> x86_64 Mac（Intel）請用 `paper-kit-v0.1.9-macos-x64.zip`（若 CI 有出）。
-
----
-
 ## 📌 進階路線前置需求（非預設功能）
 
 核心翻譯（PDF 路線＋SiliconFlow／DeepSeek 引擎）開箱即用。以下兩條路線需要額外工具：
@@ -125,10 +118,10 @@
 其他位置）。
 
 1. 先關閉黑色視窗（若正在執行）
-2. 刪除整個 `paper-kit-v0.1.9` 資料夾
+2. 刪除整個 `paper-kit-v0.1.9.1` 資料夾
 3. 完成
 
-> 可選：只想清資料、保留程式——執行 `paper-kit-v0.1.9.exe --uninstall`
+> 可選：只想清資料、保留程式——執行 `paper-kit-v0.1.9.1.exe --uninstall`
 > （黑視窗會短暫出現後自動關閉，`data` 即被清空）。
 
 ---
@@ -156,4 +149,4 @@
 
 ---
 
-Paper_Kit v0.1.9（2026-08-14）
+Paper_Kit v0.1.9.1（Windows 版，2026-08-14）

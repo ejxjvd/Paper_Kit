@@ -8,10 +8,12 @@ app 資料目錄/bin（v0.1.2 起 = 程式旁 data/bin，portable；見
 infrastructure/app_paths.py）。自動安裝直接下載 uv 官方二進制 release
 （平台分支）解壓到 app 專屬目錄——不改使用者環境（不寫 PATH）、不需
 shell（Windows 無 sh）。全鏈失敗才回 None，呼叫方給可操作錯誤。
+
+平台分離（2026-08-14）：平台分支（資產查表、執行檔名）收斂於
+paper_kit.platform.uv_assets——本模組僅剩下載/安裝邏輯（平台無關）。
 """
 
 import logging
-import platform
 import shutil
 import sys
 import tarfile
@@ -20,40 +22,13 @@ import zipfile
 from pathlib import Path
 
 from paper_kit.infrastructure.app_paths import app_data_dir  # v0.1.2：資料目錄單一權威（portable）
+from paper_kit.platform.uv_assets import platform_asset_name, uv_executable_name
 
 logger = logging.getLogger(__name__)
 
 _APP_DIR_NAME = ".paper_kit"  # 開發/測試落點名（v0.1.2 起資料目錄單一權威在 app_paths.app_data_dir）
 
 _UV_DOWNLOAD_BASE = "https://github.com/astral-sh/uv/releases/latest/download"
-# 平台 → 官方 release 資產名（latest 浮動可接受——工具層，測試 mock 不觸網）
-_PLATFORM_ASSETS = {
-    "win32": "uv-x86_64-pc-windows-msvc.zip",
-    "darwin-arm64": "uv-aarch64-apple-darwin.tar.gz",
-    "darwin-x86_64": "uv-x86_64-apple-darwin.tar.gz",
-    "linux": "uv-x86_64-unknown-linux-gnu.tar.gz",
-}
-
-
-def uv_executable_name() -> str:
-    """平台執行檔名（Windows 帶 .exe）。"""
-    return "uv.exe" if sys.platform == "win32" else "uv"
-
-
-def platform_asset_name() -> str | None:
-    """平台 → 官方資產檔名（純函式，測試直接斷言）。未知平台回 None。"""
-    if sys.platform == "win32":
-        return _PLATFORM_ASSETS["win32"]
-    if sys.platform == "darwin":
-        arch = (
-            "arm64"
-            if platform.machine().lower() in ("arm64", "aarch64")
-            else "x86_64"
-        )
-        return _PLATFORM_ASSETS[f"darwin-{arch}"]
-    if sys.platform.startswith("linux"):
-        return _PLATFORM_ASSETS["linux"]
-    return None
 
 
 def download_url() -> str | None:

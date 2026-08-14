@@ -8,8 +8,9 @@ NiceGUI 走 WebSocket 推送 → 事件驅動、無整頁重載（ui.timer 輪�
 
 import asyncio
 import logging
-import re
+import multiprocessing  # macOS 遞迴修復（freeze_support，BUG_REPORT v0.1.8）
 import shutil
+import socket  # 啟動前 port 檢查
 import subprocess
 import sys
 import tempfile
@@ -80,12 +81,34 @@ from paper_kit.presentation.handlers import (  # P2：純函式統一在 handler
     progress_label,  # #15：進度框文字（「完成 100% · 10/10 頁」）
 )
 from paper_kit.presentation.theme import apply_theme
+from paper_kit.platform import (  # 平台分離（2026-08-14）：macOS／Windows 各自乾淨專案
+    open_folder as _platform_open_folder,  # 檔案管理員開啟分派單點
+    folder_opener as _platform_folder_opener,  # 平台 → 檔案管理員命令
+    platform_label,  # App 內版本標註（「Paper_Kit 論文翻譯器（Windows 版）」）
+)
+from paper_kit.platform.windows.explorer import (  # Windows 版專屬（命名相容薄轉發）
+    explorer_target as _explorer_target,  # WSL 路徑語意正規化
+    win_to_wsl as _win_to_wsl,  # C:\\... → /mnt/c/...
+)
 
 APP_DIR = app_data_dir()  # v0.1.2：打包後 = exe 旁 data/（portable，刪資料夾即全清）；開發 = ~/.paper_kit
 OUTPUTS_DIR = APP_DIR / "outputs"
 GLOSSARIES_DIR = APP_DIR / "glossaries"
 DB_PATH = APP_DIR / "paper_kit.db"
 FILES_BASE = "/files"
+# macOS 嚴重問題修復（BUG_REPORT v0.1.8）：NiceGUI 預設 port——啟動前檢查
+# 被佔用（舊實例／遞迴殘留）→ 明確錯誤退出，不再綁定失敗後假象 ready。
+DEFAULT_PORT = 8080
+
+
+def _port_available(port: int, host: str = "0.0.0.0") -> bool:
+    """port 是否可綁定（True＝可用）。bind 失敗（OSError）＝已被佔用。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+            return True
+    except OSError:
+        return False
 
 
 def uninstall_all_data(app_dir: Path = APP_DIR) -> Path:
@@ -113,79 +136,29 @@ BADGE_COLORS = {
 
 logger = logging.getLogger("paper_kit.presentation.app")
 
-# #20：路徑語意判別（Windows 盤符路徑 vs UNC——瀏覽資料夾的正規化基礎）
-_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
-_WIN_UNC_RE = re.compile(r"^\\\\")
-
-
-def _win_to_wsl(raw: str) -> str:
-    """純函式：Windows 絕對路徑 → WSL 路徑（C:\\Users\\qaref → /mnt/c/Users/qaref）。"""
-    m = re.match(r"^([A-Za-z]):[\\/](.*)$", raw)
-    if m:
-        return f"/mnt/{m.group(1).lower()}/{m.group(2).replace(chr(92), '/')}"
-    return raw
-
-
-def _explorer_target(raw: str) -> str:
-    """純函式：任意路徑語意 → explorer.exe 可開的 Windows 路徑字串。
-
-    Windows 絕對路徑（C:\\...）／UNC（\\\\...）→ 原樣（已是 Windows 語意）；
-    /mnt/<drive>/... → 手轉 C:\\...（免 subprocess，最可靠——#20 實測
-    explorer 對 C:\\ 與 \\\\wsl.localhost UNC 都能開窗）；
-    其餘 Linux 路徑（/home/... 等）→ wslpath -w（\\\\wsl.localhost UNC）；
-    wslpath 不可用／失敗 → 原樣回傳（呼叫端 try/except 接手 notify）。
-    """
-    if _WIN_DRIVE_RE.match(raw) or _WIN_UNC_RE.match(raw):
-        return raw
-    if raw.startswith("/mnt/"):
-        parts = raw.split("/")
-        return f"{parts[2].upper()}:\\" + "\\".join(parts[3:])
-    try:
-        out = subprocess.run(
-            ["wslpath", "-w", raw], capture_output=True, text=True, timeout=5
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return raw
+# 平台分離（2026-08-14 使用者要求 macOS／Windows 各自乾淨專案）：路徑語意
+# 與檔案管理員開啟的實作收斂於 paper_kit.platform——Windows 版（explorer＋
+# WSL 正規化）在 platform/windows/explorer.py、macOS 版（Finder）在
+# platform/macos/finder.py、分派單點在 platform.open_folder。既有
+# _explorer_target／_win_to_wsl／_folder_opener 為命名相容薄轉發
+# （既有測試沿用舊名）；_open_folder 保留 UI 包裝（notify 語意）。
 
 
 def _folder_opener(platform_name: str | None = None) -> str | None:
-    """平台 → 檔案管理員命令（純函式）。win32 回 None（走 explorer 正規化路徑）。"""
-    plat = platform_name or sys.platform
-    if plat == "darwin":
-        return "open"
-    if plat.startswith("linux"):
-        return "xdg-open"
-    return None
+    """平台 → 檔案管理員命令（純函式，實作收斂於 platform.folder_opener）。"""
+    return _platform_folder_opener(platform_name)
 
 
 def _open_folder(path: Path) -> None:
-    """開啟系統檔案管理員到指定資料夾（#20 強化＋v0.1.1 mac/Linux 分支）。
+    """開啟系統檔案管理員到指定資料夾（平台分派收斂於 platform.open_folder）。
 
-    win32：「瀏覽資料夾」輸入可為 Windows 路徑（C:\\...）或 WSL 路徑
-    （/mnt/c/...、/home/...）——mkdir 與 explorer 目標各自正規化（Windows
-    路徑在 /mnt 對應建、UNC 不需 mkdir）；任何失敗 → notify 錯誤（使用者
-    實測「點按無回應」的靜默感從此消除）。
-    darwin/linux：macOS 用 open（Finder）、Linux 用 xdg-open——直接吃本機
-    路徑（WSL 語意僅 win32 存在）；mkdir 後 Popen。
+    win32 → explorer.exe（WSL 路徑正規化，輸入可為 C:\\... 或 /mnt/c/...）、
+    macOS → Finder（open）、Linux → xdg-open；任何失敗 → notify 錯誤
+    （使用者實測「點按無回應」的靜默感從此消除）。
     """
     try:
-        raw = str(path)
-        opener = _folder_opener()
-        if opener is None:
-            if _WIN_DRIVE_RE.match(raw):
-                Path(_win_to_wsl(raw)).mkdir(parents=True, exist_ok=True)
-            elif not _WIN_UNC_RE.match(raw):
-                path.mkdir(parents=True, exist_ok=True)
-            target = _explorer_target(raw)
-            subprocess.Popen(["explorer.exe", target])
-            ui.notify(f"已開啟資料夾：{target}", type="positive")
-        else:
-            path.mkdir(parents=True, exist_ok=True)
-            subprocess.Popen([opener, raw])
-            ui.notify(f"已開啟資料夾：{raw}", type="positive")
+        target = _platform_open_folder(path)
+        ui.notify(f"已開啟資料夾：{target}", type="positive")
     except Exception as exc:
         logger.error("開啟資料夾失敗", extra={"path": str(path), "error": str(exc)})
         ui.notify(f"開啟資料夾失敗：{exc}", type="negative")
@@ -1672,6 +1645,12 @@ def _history_row(view: JobCardView, job: TranslationJob, cost: CostService | Non
 
 
 def main() -> None:
+    # macOS 嚴重問題修復（BUG_REPORT_macOS_v0.1.8，2026-08-14）：PyInstaller
+    # frozen exe＋macOS spawn → resource_tracker 子程序重跑主程式 → 無限遞迴
+    # （實測 117 程序）＋8080 衝突＋connection lost。freeze_support() 必須在
+    # 任何可能啟動 multiprocessing 的初始化之前（PyInstaller 官方慣例：入口
+    # 第一行；Windows frozen exe 同受惠）。
+    multiprocessing.freeze_support()
     # v0.1.2：`paper-kit --uninstall`——乾淨卸載（console 視窗執行）
     if "--uninstall" in sys.argv:
         try:  # Windows console 可能是 cp1252/cp950——中文訊息先轉 UTF-8
@@ -1682,6 +1661,18 @@ def main() -> None:
         print(f"已刪除 Paper_Kit 全部資料：{removed}")
         print("現在可以安全刪除程式資料夾（exe 與 _internal）。")
         sys.exit(0)
+    if not _port_available(DEFAULT_PORT):
+        # 啟動前檢查：port 被佔用（舊實例未關／macOS 遞迴殘留）→ 明確錯誤
+        # 退出——實測 macOS 綁定失敗後仍輸出「NiceGUI ready」的假象＋
+        # 「connection lost」；重複啟動的 8080 衝突也在此攔下。
+        print(
+            f"錯誤：Port {DEFAULT_PORT} 已被佔用——可能已有 Paper_Kit 在執行。",
+            file=sys.stderr,
+        )
+        print("請先關閉舊實例，或確認佔用者：", file=sys.stderr)
+        print(f"  lsof -nP -iTCP:{DEFAULT_PORT} -sTCP:LISTEN  （macOS／Linux）", file=sys.stderr)
+        print(f"  netstat -ano | findstr :{DEFAULT_PORT}      （Windows）", file=sys.stderr)
+        sys.exit(1)
     APP_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     LOG_PATH = setup_logging(APP_DIR / "logs")  # 票 09：結構化 log 檔（debug 頁讀同一份）
@@ -1706,7 +1697,12 @@ def main() -> None:
     _history_page(service, settings, cost)  # #26：歷史表金額欄需要 CostService
     register_batch_download_route(service)  # 票 18：批量下載 zip 路由
     _debug_page(LOG_PATH, settings)
-    ui.run(title="Paper_Kit 論文翻譯器", reload=False)
+    # 平台分離（2026-08-14）：App 內版本標註（瀏覽器 tab 標題顯示平台版本）
+    ui.run(
+        title=f"Paper_Kit 論文翻譯器（{platform_label()} 版）",
+        reload=False,
+        port=DEFAULT_PORT,
+    )
 
 def _index_page(
     service: JobService,

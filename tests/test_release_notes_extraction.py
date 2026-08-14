@@ -31,8 +31,10 @@ def _extraction_regexes() -> list[re.Pattern]:
 
 def test_release_notes_every_section_matches_ci_regex():
     """RELEASE_NOTES.md 每個 `## vX.Y.Z` 標題必須被 CI 提取 regex 匹配——
-    不匹配＝該版 Release body 會是空的（v0.1.8 實測 bug）。"""
-    headings = re.findall(r"^(## v?[0-9]+\.[0-9]+\.[0-9]+)$", RELEASE_NOTES.read_text(encoding="utf-8"), re.M)
+    不匹配＝該版 Release body 會是空的（v0.1.8 實測 bug）。
+
+    v0.1.9.1 起支援四段制（X.Y.Z.N 補強版）——awk 的 `[0-9.]+` 天然相容。"""
+    headings = re.findall(r"^(## v?[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)$", RELEASE_NOTES.read_text(encoding="utf-8"), re.M)
     assert headings, "RELEASE_NOTES.md 找不到任何版本區段標題"
     regexes = _extraction_regexes()
     bad = [h for h in headings if not any(rx.fullmatch(h) for rx in regexes)]
@@ -111,10 +113,11 @@ def test_current_version_has_notes_section():
     """發布前準備契約：pyproject 版本必須已有 RELEASE_NOTES 區段——
     tag 推進時提取不會失敗（正常發布不誤觸硬失敗）。"""
     pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-    m = re.search(r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', pyproject, re.M)
+    # 版本格式：X.Y.Z 或 X.Y.Z.N（v0.1.9.1 補強版四段制，2026-08-14 定案）
+    m = re.search(r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)"', pyproject, re.M)
     assert m, "pyproject.toml 找不到 version"
     headings = re.findall(
-        r"^## v?([0-9]+\.[0-9]+\.[0-9]+)$",
+        r"^## v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)$",
         RELEASE_NOTES.read_text(encoding="utf-8"),
         re.M,
     )

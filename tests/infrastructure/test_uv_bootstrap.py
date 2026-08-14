@@ -26,8 +26,12 @@ def fake_home(tmp_path, monkeypatch):
 
 
 def _set_platform(monkeypatch, platform: str, machine: str = "x86_64"):
+    """patch sys.platform（全域——資產查表收斂後在 platform/uv_assets.py 讀
+    同一 sys）＋該模組的 platform.machine（darwin 架構判定）。"""
     monkeypatch.setattr(uv_bootstrap.sys, "platform", platform)
-    monkeypatch.setattr(uv_bootstrap.platform, "machine", lambda: machine)
+    from paper_kit.platform import uv_assets  # 2026-08-14 平台分離：資產查表新家
+
+    monkeypatch.setattr(uv_assets.platform, "machine", lambda: machine)
 
 
 # ── 平台 → URL（純函式）──────────────────────────────────

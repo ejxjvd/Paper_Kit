@@ -30,8 +30,22 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
-SPEC_PATH = REPO_ROOT / "packaging" / "paper-kit.spec"
-MANUAL_PATH = REPO_ROOT / "packaging" / "README-使用手冊.md"
+
+
+def _platform_dir() -> str:
+    """平台打包資料夾（packaging/macos/ 或 packaging/windows/）。
+
+    平台分離（2026-08-14 使用者要求 macOS／Windows 各自乾淨專案）：spec 與
+    手冊依平台各有一份——macOS 版（arm64，無 UPX）在 packaging/macos/、
+    Windows 版（win-x64，UPX）在 packaging/windows/。Linux 僅開發兜底，
+    與 Windows 共用（UPX 可用）。
+    """
+    return "macos" if sys.platform == "darwin" else "windows"
+
+
+PLATFORM_DIR = _platform_dir()
+SPEC_PATH = REPO_ROOT / "packaging" / PLATFORM_DIR / "paper-kit.spec"
+MANUAL_PATH = REPO_ROOT / "packaging" / PLATFORM_DIR / "README-使用手冊.md"
 PORT = 8080
 READY_TIMEOUT = 90  # 首次啟動（onedir 解壓依賴）可能慢
 
