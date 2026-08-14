@@ -2,6 +2,23 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.8
+
+### 🐛 修復
+
+1. **空殼模型誤報 401（#79）**：HTTP 200 但 `choices=null` 的「登錄但未提供服務」模型群（實測 ERNIE-4.5-300B/21B、Hy3、Intern-S1、GLM-4.7-Flash）——pdf2zh 在 `choices[0].message.content` 對 `NoneType` 拋 TypeError，traceback 的「line 401」**行號**被 401 診斷 regex 誤判為「API key 無效」。修復：
+   - 翻譯前預檢（與設定頁「測試 API」同源）對 200 空殼回報 **590「模型未提供服務」**（登錄但未開放，換模型或換引擎）
+   - 引擎 log 診斷：空殼特徵（`choices[0]`＋`NoneType`，含思考型 `content=None`）優先辨識＋排除 traceback 行號誤判
+
+### 🆕 新功能
+
+- **架構健檢卡① 端點探測收斂**（內部品質）：設定頁「測試 API」／「載入模型清單」／翻譯前預檢三處共四份探測邏輯收斂為單一模組 `llm_probe`——v0.1.7 的瀏覽器 UA 修復任一端改動全端生效；淨刪 371 行
+
+### ✅ 驗證
+
+- TDD 5 新測試先紅後綠（probe_model 590×2、diagnose 590、line 排除、空殼簽名）——全套件 701 passed
+- 架構健檢卡① 測試隨遷移（76 個探測/UI/preflight 測試全綠）
+
 ## v0.1.7
 
 ### 🆕 新功能
