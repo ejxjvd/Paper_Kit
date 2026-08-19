@@ -51,6 +51,7 @@ class JobCardView:
     pdf_pages: int | None = None     # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
     pages_raw: str | None = None     # #27：原始選取頁碼（歷史表格 hover 顯示用）
     latex_warning: bool = False      # v0.1.9.5：LaTeX 數學密集 PDF——行重疊風險標注
+    stage: str | None = None         # v0.2.2：引擎目前階段（「翻譯段落」…）
 
 
 def _result_url(files_base: str, job_id: str, result_path: str | None) -> str | None:
@@ -131,13 +132,18 @@ def build_job_card(
         pdf_pages=job.pdf_pages,      # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
         pages_raw=job.pages,          # #27：原始選取頁碼（hover 顯示）
         latex_warning=latex_warning,  # v0.1.9.5
+        stage=job.stage,              # v0.2.2：階段名（取代用進度反推的假頁數）
     )
 
 
 def progress_label(view: JobCardView) -> str | None:
-    """#15：進度框文字——完成「完成 100% · N/N 頁」；翻譯中「翻譯中 X% · n/N 頁」；
-    不確定進度「翻譯中… · 共 N 頁」；無 total_pages（舊任務）頁數部分省略；
-    QUEUED 無進度框（#72 明確區分）→ None。
+    """#15：進度框文字。QUEUED 無進度框（#72 明確區分）→ None。
+
+    v0.2.2 改動：翻譯中改顯示**階段名稱**（「翻譯中 30% · 翻譯段落 · 共 39 頁」），
+    不再用進度值反推「n/N 頁」。原因是引擎給不出逐頁進度——實測 rich 在非 TTY
+    下只在結束時印一次進度條、`--report-interval` 也不走 stdout。進度值來自
+    階段階梯，拿它乘總頁數會產生一個**不存在的頁碼**，那是在騙使用者。
+    完成時 N/N 頁仍然成立（那時真的全部翻完了）。
 
     純函式：UI 只呼叫渲染，組字邏輯在此單一測試點（避免 inline 字串散落）。
     """
@@ -145,12 +151,16 @@ def progress_label(view: JobCardView) -> str | None:
     if view.status is JobStatus.COMPLETED:
         return f"完成 100% · {m}/{m} 頁" if m else "完成 100%"
     if view.status is JobStatus.TRANSLATING:
+        parts = []
         if view.progress is not None:
-            pct = round(view.progress * 100)
-            if m:
-                return f"翻譯中 {pct}% · {round(view.progress * m)}/{m} 頁"
-            return f"翻譯中 {pct}%"
-        return f"翻譯中… · 共 {m} 頁" if m else "翻譯中…"
+            parts.append(f"翻譯中 {round(view.progress * 100)}%")
+        else:
+            parts.append("翻譯中…")
+        if view.stage:
+            parts.append(view.stage)
+        if m:
+            parts.append(f"共 {m} 頁")
+        return " · ".join(parts)
     return None
 
 

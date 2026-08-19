@@ -17,6 +17,7 @@ from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
 from paper_kit.infrastructure.app_paths import app_data_dir  # v0.2.1：引擎輸出留檔位置
+from paper_kit.infrastructure.engine_progress import ProgressTracker  # v0.2.2：階段式進度
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
 from paper_kit.infrastructure.subprocess_exec import spawn, stream  # 候選 2：機制本體
 from paper_kit.infrastructure.uv_bootstrap import download_failures, resolve_uv
@@ -175,7 +176,8 @@ class CliAdapterBase:
         self._runner = runner or self._default_runner(self)
         self._proc: subprocess.Popen | None = None  # 票 08：cancel 要殺得掉子程序
         self._cancelled = False
-        self._on_progress: "Callable[[float], None] | None" = None  # 票 25：#72 進度回調
+        self._on_progress = None  # 票 25：#72 進度回調（value, stage）
+        self._progress = ProgressTracker()  # v0.2.2：階段式進度（單調前進）
 
     # ── 子類插頭 ──────────────────────────────────────────
 
@@ -220,21 +222,26 @@ class CliAdapterBase:
             )
 
     def _on_line(self, line: str) -> None:
-        """流式 runner 每行輸出回調（子類覆寫以解析進度）。基線 no-op。
+        """流式 runner 每行輸出回調：認出階段並回報進度。
 
-        #73 實測：pdf2zh_next 的 rich progress bar 用 \\r 覆寫、readline 讀不到
-        \n 行；可解析的只有段落 warning 行（`paragraph id: X`，無總數）→
-        無可靠百分比 → 不發確定進度（UI 以 indeterminate 呈現）。引擎支援
-        overall_progress 時在此解析並 _emit_progress。
+        v0.2.2（2026-08-19 兩次實測定案）：rich 的進度條在非 TTY 下只在結束時
+        印一次最終狀態，`--report-interval` 也不走 stdout——**逐頁進度拿不到**。
+        但引擎的 INFO 行是即時到達的，它們標記了處理階段（見 engine_progress）。
+
+        markers 來自 babeldoc，pdf2zh_next 與 babeldoc 都適用，所以實作在基底
+        而非子類——兩支引擎同時受益，未來的 BabelDOC 系引擎也自動獲得。
         """
+        stage = self._progress.feed(line)
+        if stage is not None:
+            self._emit_progress(stage.progress, stage.label)
 
-    def set_progress_callback(self, callback: "Callable[[float], None] | None" = None) -> None:
-        """#72：job_service 注入進度回調（0.0–1.0）。None＝清除。"""
+    def set_progress_callback(self, callback=None) -> None:
+        """#72：job_service 注入進度回調 `(value: float, stage: str | None)`。None＝清除。"""
         self._on_progress = callback
 
-    def _emit_progress(self, value: float) -> None:
+    def _emit_progress(self, value: float, stage: str | None = None) -> None:
         if self._on_progress is not None:
-            self._on_progress(value)
+            self._on_progress(value, stage)
 
     # ── 共用骨架 ──────────────────────────────────────────
 
@@ -298,6 +305,7 @@ class CliAdapterBase:
             raise EngineError("已取消")
         self._preflight(job)  # 卡②：openai 系在引擎啟動前驗證 key＋模型（預設 no-op）
         cmd = self._build_command(job)
+        self._progress = ProgressTracker()  # 每次翻譯重新計算（重試也重置）
         # babeldoc 輸出走子程序 CWD → 以任務資料夾為 cwd，產出才落在該處（票 03 實測教訓）
         cwd = str(Path(job.source_path).parent) if job.source_path else None
         last_error = ""

@@ -273,11 +273,28 @@ def test_progress_label_completed_without_pages():
     assert progress_label(build_job_card(completed_job())) == "完成 100%"
 
 
-def test_progress_label_translating_determinate():
+def test_progress_label_translating_shows_stage_not_fake_pages():
+    """v0.2.2：翻譯中改顯示階段名，不再用進度值反推「n/N 頁」。
+
+    原因：引擎給不出逐頁進度（實測 rich 非 TTY 只在結束時印進度條、
+    --report-interval 不走 stdout），進度值來自階段階梯。拿它乘總頁數
+    會產生一個**不存在的頁碼**——那是在騙使用者。
+    """
     job = TranslationJob(job_id="tp3", source_path="/out/tp3/a.pdf", total_pages=10)
     job.transition(JobStatus.TRANSLATING)
     job.progress = 0.4
-    assert progress_label(build_job_card(job)) == "翻譯中 40% · 4/10 頁"
+    job.stage = "翻譯段落"
+    label = progress_label(build_job_card(job))
+    assert label == "翻譯中 40% · 翻譯段落 · 共 10 頁"
+    assert "4/10" not in label, "不得用進度反推假頁碼"
+
+
+def test_progress_label_without_stage_still_shows_percent():
+    """舊任務（無階段）仍顯示百分比與總頁數。"""
+    job = TranslationJob(job_id="tp3b", source_path="/out/tp3b/a.pdf", total_pages=10)
+    job.transition(JobStatus.TRANSLATING)
+    job.progress = 0.4
+    assert progress_label(build_job_card(job)) == "翻譯中 40% · 共 10 頁"
 
 
 def test_progress_label_translating_indeterminate():

@@ -77,19 +77,27 @@ class JobStateGate:
         串流 runner 每行輸出都會觸發；逐行寫 SQLite 太重，值跳動也不值得——
         UI 1s 輪詢，這個節流綽綽有餘。
         """
-        last = {"value": -1.0, "t": 0.0}
+        last = {"value": -1.0, "t": 0.0, "stage": None}
 
-        def write(progress: float) -> None:
+        def write(progress: float, stage: str | None = None) -> None:
             now = time.monotonic()
-            if progress is None or (
+            if progress is None:
+                return
+            # 階段變動一律寫入（v0.2.2）：階段是稀疏且有意義的事件，
+            # 被節流吃掉會讓 UI 停在上一個階段名，那正是使用者要看的東西。
+            stage_changed = stage is not None and stage != last["stage"]
+            if not stage_changed and (
                 abs(progress - last["value"]) < 0.02 and now - last["t"] < 2.0
             ):
                 return
             with self._lock:
                 job.progress = progress
+                if stage is not None:
+                    job.stage = stage
                 self._jobs.save(job)
             last["value"] = progress
             last["t"] = now
+            last["stage"] = stage if stage is not None else last["stage"]
 
         return write
 

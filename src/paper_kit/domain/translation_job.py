@@ -63,6 +63,10 @@ class TranslationJob:
     result: JobResult | None = None
     error: str | None = None
     progress: float | None = None     # #72：翻譯進度 0.0–1.0（None＝無確定進度→UI 用 indeterminate）
+    # v0.2.2：目前階段名（「解析文件」「翻譯段落」…）。引擎逐頁進度拿不到
+    # （實測 rich 非 TTY 不即時重繪、--report-interval 不走 stdout），
+    # 改以階段標記回報——UI 顯示階段名，不用進度值反推假的頁數。
+    stage: str | None = None
 
     def transition(self, new_status: JobStatus) -> None:
         """依轉換表嘗試遷移；非法轉換丟 InvalidTransition 且狀態不變。"""
