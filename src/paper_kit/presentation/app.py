@@ -30,6 +30,7 @@ from starlette.background import BackgroundTask  # 票 18：zip 送完即刪
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
+from paper_kit.application.job_intake import EngineChoice, JobIntake  # 候選 1：任務建立規則
 from paper_kit.application.job_service import JobService
 from paper_kit.infrastructure.app_paths import app_data_dir  # v0.1.2：portable 資料目錄（單一權威）
 
@@ -274,98 +275,35 @@ def _start_job(
     settings: SettingsService,
     cost: CostService,
     glossaries: GlossaryService,
-    params: StartJobParams,  # P4：任務參數收斂物件（.tex/PDF 分支各自組裝）
+    params: StartJobParams,
 ) -> bool:
     """送暫存檔建立翻譯任務。成功（含引擎已啟動）回 True——呼叫方清理暫存。
 
-    #85 改版：暫存寫入從「選檔時」提前發生（auto_upload=True 暫存流程）——
-    本函只收已暫存的 file_path，不再碰 FileUpload。"""
-    # P4：參數解包（內部維持既有變數語意，改動面最小）
-    file_path, file_name, pages_text = params.file_path, params.file_name, params.pages_text
-    total_pages, pdf_pages = params.total_pages, params.pdf_pages
-    sensitive, ocr = params.sensitive, params.ocr
-    engine_id, target_lang = params.engine_id, params.target_lang
-    only_selected_pages = params.only_selected_pages
-    enhance_compatibility = params.enhance_compatibility
-    merge_alternating_line_numbers = params.merge_alternating_line_numbers
-    remove_non_formula_lines = params.remove_non_formula_lines
-    font_family = params.font_family
-    # 票 07：頁面範圍輸入驗證（空白=全部）；非法格式不建任務（驗證先於建任務）
+    候選 1（2026-08-19 架構深化）：十條應用層規則已搬進 application/job_intake。
+    這裡只剩兩件事——解析引擎（registry-bound，錯誤訊息要引擎 label），
+    以及把回傳的結果畫成 toast。規則不再與 ui.notify 交錯，因此可以不開 UI 就測。
+    """
     try:
-        pages = parse_pages(pages_text)
-    except ValueError as exc:
-        ui.notify(to_user_message(exc), type="negative")
-        return False
-    try:
-        engine_id, engine = _resolve_task_engine(settings, engine_id)
+        engine_id, engine = _resolve_task_engine(settings, params.engine_id)
     except EngineError as exc:
         ui.notify(to_user_message(exc), type="negative")
         return False
-    # 票 27：LaTeX 引擎僅適用 .tex 源碼（選錯卡／設定頁 global 設 latex＋上傳 PDF
-    # → 前置擋下；不悄悄 fallback 到別支引擎——#83 靜默誤動作教訓）
-    if engine_id == "latex" and not _is_tex_path(file_name):
-        ui.notify("LaTeX 引擎僅適用 .tex 源碼——PDF 請選上方三引擎", type="negative")
+    # 引擎能力以資料交給 application（票 10 慣例：application 不查 ENGINE_SPECS）。
+    # 卡③ fail-closed：未知引擎視為不允許機密——這條判定現在只算一次。
+    choice = EngineChoice(
+        engine_id=engine_id,
+        engine=engine,
+        allows_sensitive=not sensitive_blocked(engine_id, True, unknown_sensitive_ok=False),
+        tex_only=engine_id == "latex",
+    )
+    result = JobIntake(service, settings, cost, glossaries).submit(params, choice)
+    if not result.accepted:
+        ui.notify(result.rejection, type="negative")
         return False
-    # 票 10 紅線：機密文件＋視覺引擎 → 連任務都不建（UI 早攔，service.start 再兜底）。
-    # 卡③（2026-08-14）：fail-closed 語意收斂進 registry 單點（未知引擎視為
-    # 不支援機密——.get() 保守語意不再於 UI 內聯重算）
-    if sensitive_blocked(engine_id, sensitive, unknown_sensitive_ok=False):
-        ui.notify("機密文件只可使用 DeepSeek 純文字引擎（先到設定切換引擎）", type="negative")
-        return False
-    # 票 14 spec review：OCR 只適用 PDF——勾了但上傳非 PDF → 警告＋忽略旗標
-    # （ensure_text_layer 同層兜底安全跳過；視覺路徑不需要文字層）
-    if ocr and not is_pdf_path(file_name):
-        ui.notify("🔍 掃描件 OCR 僅適用 PDF——已忽略（PPT 走視覺翻譯）", type="warning")
-        ocr = False
-    job = service.create_job(
-        file_path,
-        target_lang=target_lang or settings.target_lang(),  # 票 19：下拉就地選覆寫
-        pages=pages,
-        total_pages=total_pages,  # #27：翻譯頁數
-        pdf_pages=pdf_pages,      # #27：PDF 總頁數
-        output_dir=settings.output_dir(),
-        sensitive=sensitive,
-        ocr=ocr,
-        only_selected_pages=only_selected_pages,  # #85：僅翻譯選中頁面
-        # #85 切片C：babeldoc 進階選項透傳（其他引擎忽略）
-        enhance_compatibility=enhance_compatibility,
-        merge_alternating_line_numbers=merge_alternating_line_numbers,
-        remove_non_formula_lines=remove_non_formula_lines,
-        font_family=font_family,
-    )
-    # 票 12 AC1：掃描件偵測——無文字層且未勾 OCR → 提示（照常建立，使用者可重試）。
-    # 票 14：只對 PDF 偵測（pptx 上傳不誤報掃描件——has_text_layer 對非 PDF 回 False）
-    if (
-        not ocr
-        and job.source_path
-        and is_pdf_path(job.source_path)
-        and not has_text_layer(job.source_path)
-    ):
-        ui.notify(
-            "⚠️ 偵測為掃描件（無文字層）——翻譯可能產出空白；建議勾選 🔍 OCR 重試",
-            type="warning",
-        )
-    # 票 05：挑選的術語表組合＋自動提取開關隨任務記錄（之後改設定不影響舊任務）
-    names = settings.selected_glossary_names(glossaries.list_glossaries())  # 預設全選
-    job.glossary_files = glossaries.paths_for(names)
-    job.auto_extract = settings.auto_extract()
-    # 票 07：指定頁面範圍時估價按範圍縮放（規格書 story 4「只為需要的部分付費」）
-    # 2026-08-13：挑選術語表 → 預估 tokens 依 ×1.57 倍率更新（research 實測值）
-    est = cost.estimate_for_pdf(
-        engine_id, file_path, pages=pages, glossary=bool(job.glossary_files)
-    )
-    if est is not None:
-        job.estimated_cost = est.cost  # 存下前置估算：完成後比對的是「使用者看到的」數字
-        job.estimated_tokens = est.total_tokens  # 2026-08-13：UI 預估顯示用（隨任務持久化）
-    _notify_estimate(cost, engine_id, est)
-    ui.notify(f"任務已建立：{file_name}", type="positive")
-    # 票 10：engine_allows_sensitive 由 UI 層查 registry 傳入（service 兜底防衛）。
-    # 卡③：機密允許值收斂 registry 單點（未知引擎 fail-closed 視為不允許）
-    service.start(
-        job.job_id, engine, engine_id=engine_id,
-        engine_allows_sensitive=not sensitive_blocked(
-            engine_id, True, unknown_sensitive_ok=False),
-    )
+    for warning in result.warnings:
+        ui.notify(warning, type="warning")
+    _notify_estimate(cost, engine_id, result.estimate)
+    ui.notify(f"任務已建立：{params.file_name}", type="positive")
     return True
 
 

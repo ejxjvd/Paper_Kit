@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from paper_kit.application.job_intake import IntakeRequest as StartJobParams  # 候選 1：
+# 任務參數隨規則一起搬進 application/job_intake；此別名維持既有 import 不變。
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
 
 STATUS_LABELS = {
@@ -18,31 +20,6 @@ STATUS_LABELS = {
     JobStatus.FAILED: "失敗",
     JobStatus.CANCELLED: "已取消",
 }
-
-
-@dataclass(frozen=True)
-class StartJobParams:
-    """P4（2026-08-13 架構重構）：開始翻譯的任務參數——_start_job 的收斂參數物件。
-
-    file_path/file_name 必填；其餘皆有預設——.tex 分支（票 27）與 PDF 分支各自
-    組裝、不再重複 15+ 具名參數。babeldoc 進階選項僅 babeldoc 引擎消費。
-    """
-
-    file_path: str | Path
-    file_name: str
-    pages_text: str = ""
-    total_pages: int | None = None  # #27：翻譯頁數（進度框「N/M 頁」的 N）
-    pdf_pages: int | None = None    # #27：PDF 總頁數（歷史頁「N/M 頁」的 M）
-    sensitive: bool = False
-    ocr: bool = False
-    engine_id: str | None = None    # 票 19：引擎卡點選（None=設定頁 global）
-    target_lang: str | None = None  # 票 19：語言下拉就地選（None=設定頁值）
-    only_selected_pages: bool = True  # #85：僅翻譯選中頁面 toggle
-    # #85 切片C：babeldoc 進階選項（僅 babeldoc 引擎消費；其他引擎忽略）
-    enhance_compatibility: bool = False
-    merge_alternating_line_numbers: bool = True
-    remove_non_formula_lines: bool = False
-    font_family: str = "serif"
 
 
 @dataclass(frozen=True)
