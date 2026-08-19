@@ -29,6 +29,13 @@ class StartTranslation:
 
     def run(self, job: TranslationJob) -> TranslationJob:
         job.transition(JobStatus.TRANSLATING)  # 非法起點（如已完成）在此被拒
+        # v0.1.9.6（2026-08-19 使用者回報「翻譯時只顯示排隊中，結束才跳完成」）：
+        # transition 只改記憶體物件，不存回 repo → UI 的 list_jobs 是從 repo 讀的
+        # （SQLite 那列仍是 QUEUED）→ 整段翻譯期間 UI 都顯示「排隊中」，直到終態
+        # 才 save。QUEUED/TRANSLATING 在 UI 上是刻意區分的兩種呈現（#72：排隊中
+        # 不顯示進度條），不持久化等於那個區分從未生效。
+        with self._finalize():
+            self._jobs.save(job)
         try:
             result = self._engine.translate(job)
         except EngineError as e:

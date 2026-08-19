@@ -842,3 +842,108 @@ def test_build_command_no_throttling_flags_by_default():
     cmd = build_command(make_job(), cfg)
     assert "--qps" not in cmd
     assert "--pool-max-workers" not in cmd
+
+
+def test_popen_pins_utf8_both_directions(monkeypatch, tmp_path):
+    """v0.1.9.6 迴歸（2026-08-19 使用者實測崩潰）：Popen 只給 text=True 而不指定
+    encoding → 回退系統地區編碼，繁中 Windows 即 cp950 → 引擎輸出的 UTF-8 讀到
+    0xC3 就 UnicodeDecodeError，reader thread 當場死亡。
+
+    契約鎖兩個方向：讀（encoding/errors）＋寫（PYTHONIOENCODING/PYTHONUTF8）。
+    現有測試全用 FakeRunner／FakeProc（stdout 直接 yield str）——解碼層根本沒被
+    執行過，所以 789 個測試全綠卻擋不住這個 bug。這裡改鎖 kwargs 契約。
+    """
+    from paper_kit.infrastructure.uv_bootstrap import uv_executable_name
+
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / ".local" / "bin" / uv_executable_name()).touch()
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
+                        lambda _: None)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    captured: dict = {}
+
+    class FakeProc:
+        returncode = 0
+
+        def __init__(self, cmd, **kwargs):
+            captured["kwargs"] = kwargs
+            self.stdout = _LineStream(LOG)
+
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", FakeProc
+    )
+    Pdf2zhNextAdapter(EngineConfig(api_key="KEY")).translate(make_job())
+
+    kwargs = captured["kwargs"]
+    assert kwargs["encoding"] == "utf-8", "不指定 encoding 會回退 cp950（繁中 Windows）"
+    assert kwargs["errors"] == "replace", "保險絲：壞位元組不得炸掉 reader thread"
+    assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert kwargs["env"]["PYTHONUTF8"] == "1"
+
+
+def test_reader_thread_crash_does_not_deadlock(monkeypatch, tmp_path):
+    """v0.1.9.6 迴歸：reader thread 死掉時**不能**讓 proc.wait() 無限等。
+
+    原碼的卡死鏈（cp950 崩潰的真正後果，比解碼錯誤本身更嚴重）：reader 死 →
+    主迴圈 `not reader.is_alive()` 誤判成 EOF 而 break → proc.wait() 無限等——
+    子程序寫滿 pipe 緩衝後阻塞在 write 永不退出，而 inactivity 看門狗已離開
+    迴圈救不了。使用者看到的就是「任務沒反應」，不是錯誤訊息。
+
+    修法：read() 就地接住例外並樹殺 → wait() 立刻回來 → rc≠0 走既有錯誤路徑。
+    """
+    from paper_kit.infrastructure.uv_bootstrap import uv_executable_name
+
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / ".local" / "bin" / uv_executable_name()).touch()
+    monkeypatch.setattr("paper_kit.infrastructure.cli_adapter_base.shutil.which",
+                        lambda _: None)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    killed: list = []
+
+    class ExplodingStream:
+        """模擬解碼失敗：迭代到一半丟 UnicodeDecodeError（真實崩潰的形狀）。"""
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise UnicodeDecodeError("cp950", b"\xc3\x89", 0, 1, "illegal multibyte sequence")
+
+    class HangingProc:
+        """未修正時的致命形狀：poll() 永遠 None（子程序阻塞在 write 不退出）。"""
+
+        returncode = 1
+
+        def __init__(self, cmd, **kwargs):
+            self.stdout = ExplodingStream()
+
+        def poll(self):
+            return 1 if killed else None
+
+        def wait(self):
+            if not killed:
+                raise AssertionError("reader 死亡後未樹殺 → proc.wait() 會無限等（死鎖）")
+            return 1
+
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", HangingProc
+    )
+    monkeypatch.setattr(
+        "paper_kit.infrastructure.cli_adapter_base._kill_tree",
+        lambda proc: killed.append(proc),
+    )
+
+    adapter = Pdf2zhNextAdapter(EngineConfig(api_key="KEY"))
+    started = time.monotonic()
+    with pytest.raises(EngineError):
+        adapter.translate(make_job())
+    assert killed, "reader thread 死亡必須觸發樹殺，否則主流程永遠等不到 EOF"
+    assert time.monotonic() - started < 30, "必須立即失敗，不得卡在 inactivity 逾時"

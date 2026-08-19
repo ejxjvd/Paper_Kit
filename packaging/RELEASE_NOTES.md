@@ -2,6 +2,82 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.6
+
+### 🐛 修復：繁中 Windows 翻譯任務一啟動就崩潰（cp950 解碼）
+
+**背景（2026-08-19 使用者實測，paper-kit-0.1.9.5-win-x64）**：三次任務
+（`0daa2e5c`／`5eac47aa`／`093b6ba2`）建立後立即中斷，log 皆為同一形狀：
+
+```
+Exception in thread Thread-3 (read):
+  File "paper_kit\infrastructure\cli_adapter_base.py", line 227, in read
+UnicodeDecodeError: 'cp950' codec can't decode byte 0xc3 in position 2: illegal multibyte sequence
+```
+
+**根因**：`cli_adapter_base` 的 `Popen` 只給了 `text=True` 而未指定 `encoding`
+→ Python 回退系統地區編碼，繁中 Windows 即 **cp950**；引擎（pdf2zh_next／
+babeldoc）輸出是 UTF-8，讀到 `0xC3` 前導位元組即拋 `UnicodeDecodeError`。
+
+- `0xC3` 在 UTF-8 是雙位元組前導（`C3 89` = `É`）。cp950 認得 `0xC3` 是合法
+  Big5 前導，於是去要第二位元組——但 Big5 合法後續是 `0x40–0x7E`／`0xA1–0xFE`，
+  而 UTF-8 續接位元組落在 `0x80–0xBF`，兩者在 `0x80–0xA0` 區間不相容 → 例外。
+- **這是潛伏已久的 bug，不是 v0.1.9.5 新引入**——觸發與否取決於引擎輸出當下
+  有沒有非 ASCII 字元，所以先前多數任務僥倖正常。
+- **更該警覺的是靜默面**：若續接位元組剛好落在 `0xA1–0xFE`（如 `C3 A9` = `é`），
+  cp950 會「成功」解碼成不相干的中文字——不拋例外，只產生亂碼 log，更難發現。
+
+**真正的卡死點（比解碼錯誤本身更嚴重）**：例外殺死的是 reader thread，主迴圈的
+`not reader.is_alive()` 會把它**誤判成 EOF** 而 break，接著 `proc.wait()` 無限等
+——子程序寫滿 pipe 緩衝後阻塞在 write 永不退出，而 inactivity 看門狗此時已離開
+迴圈救不了。使用者看到的是「任務沒反應」，不是錯誤訊息。
+
+**修法**（讀寫兩端一起釘死，外加保險絲）：
+
+1. `Popen` 明確指定 `encoding="utf-8", errors="replace"`——不吃地區設定；壞位元組
+   退化成 U+FFFD 而非炸掉執行緒
+2. 子程序環境補 `PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`——叫對方也寫 UTF-8
+3. `read()` 就地接住例外並樹殺子程序 → `wait()` 立刻回來，rc≠0 走既有錯誤路徑：
+   **吵著失敗，勝過靜默卡死**
+4. `process_utils.run_command` 同一 bug 一併修正（LaTeX／PPT 引擎走這條，xelatex
+   log 帶非 ASCII 時會直接炸掉整個編譯流程）
+
+### 🐛 修復：翻譯全程只顯示「排隊中」，結束才跳「完成」
+
+**背景（2026-08-19 使用者回報）**：翻譯進行中看不出任何進展，任務卡片整段時間
+停在「排隊中」，直到翻完才直接變「完成」。
+
+**根因**：`StartTranslation.run()` 的 `job.transition(TRANSLATING)` **只改記憶體
+物件、沒有 save 回 repo**。而 UI 的 `list_jobs` 是從 repo（SQLite）讀的——那一列
+整段翻譯期間都還是 `QUEUED`，直到終態才被寫入。
+
+`#72` 當初刻意把「排隊中（不顯示進度條）」與「翻譯中（顯示進度）」設計成兩種
+不同呈現；狀態不持久化，等於這個區分從未生效過。`_progress_writer` 的 save 也
+救不了——它要等引擎回報進度才觸發，而 `_on_line` 目前是 no-op（見下）。
+
+**修法**：transition 後立即 `save`（沿用 `_finalize()` 鎖，與其他終態轉換一致）。
+
+**已知限制（尚未完成）**：頁面級進度（「翻譯到第 N 頁」）仍未實作。
+`CliAdapterBase._on_line` 是 no-op 基線、無任何子類覆寫，引擎進度回調從未被觸發，
+因此進度條在翻譯期間為 indeterminate（不確定進度）。要做確定值需先取得
+pdf2zh_next／babeldoc 的真實 stdout 進度格式——目前 app 未將引擎輸出寫入 log，
+無從取樣。下一版處理。
+
+### ✅ 驗證
+
+- 新增 3 個迴歸測試，**皆先驗證紅燈**（還原修正後必失敗）：
+  - cp950 兩測：未修正版跑出的 traceback 與使用者實測 log 完全同形
+    （`line 227, in read` → `for line in proc.stdout` → cp950 0xc3），確認測試
+    真的重現了故障，而非只是斷言實作細節
+  - 狀態持久化一測：斷言「引擎執行當下 repo 裡的狀態」而非 job 物件本身——
+    記憶體物件是共用參考，測它永遠會過，測不到持久化這件事
+- 全套件 **787 passed**（+3）
+- **既有測試為何擋不住 cp950**：現有測試全部以 `FakeRunner`／`FakeProc` 注入，
+  `stdout` 直接 yield `str`——解碼層從未被執行過。789 個測試全綠卻對這個 bug
+  完全盲目。新測試改鎖 `Popen` kwargs 契約與 reader 死亡後的不死鎖行為
+- 既有失敗 `test_app_entry.py::test_main_calls_freeze_support_first` 在乾淨的
+  origin/main 上同樣為紅，與本次修改無關（未處理）
+
 ## v0.1.9.5
 
 ### ⚠️ 新增：LaTeX 數學密集 PDF 偵測＋行重疊風險標注

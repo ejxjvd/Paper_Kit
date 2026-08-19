@@ -212,10 +212,29 @@ class CliAdapterBase:
             # block 緩衝，NIM 120B 慢模型翻譯期間緩衝不滿 → reader 讀不到任何行 →
             # 300s inactivity 誤殺（使用者實測「翻譯超時」）。unbuffered 後每步
             # 即時輸出，活性信號連續（所有引擎受益）。
-            kwargs["env"] = {**os.environ, "COLUMNS": "1000", "PYTHONUNBUFFERED": "1"}
+            # cp950 崩潰（2026-08-19 使用者實測）：下方 Popen 原本只給 text=True 而
+            # 未指定 encoding → Python 回退到系統地區編碼，繁中 Windows 即 cp950；
+            # 引擎輸出是 UTF-8，讀到 0xC3 就 UnicodeDecodeError。兩端一起釘死才算
+            # 關掉：這裡叫子程序「寫 UTF-8」，Popen 那邊叫自己「讀 UTF-8」。
+            kwargs["env"] = {
+                **os.environ,
+                "COLUMNS": "1000",
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+            }
             kwargs.update(spawn_kwargs())  # 平台分離：POSIX 進程組長（樹殺前提）；win32 無操作
+            # encoding 明確指定（不吃地區設定）；errors="replace" 是保險絲——即使
+            # 某天真的混進非 UTF-8 位元組，最壞只是 log 出現 U+FFFD，不會讓 reader
+            # thread 整條陣亡（陣亡的後果見 read() 內註解：proc.wait() 死鎖）。
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                **kwargs,
             )
             adapter._proc = proc
             lines: list[str] = []
@@ -224,11 +243,20 @@ class CliAdapterBase:
             last_output = [time.monotonic()]  # 共享：reader thread 更新、主 thread 判定
 
             def read() -> None:
-                for line in proc.stdout:
-                    lines.append(line)
-                    last_output[0] = time.monotonic()
-                    if adapter._on_line is not None:
-                        adapter._on_line(line)
+                # 例外必須就地接住（2026-08-19）：reader 死掉時下方主迴圈的
+                # `not reader.is_alive()` 會誤判成 EOF 而 break，接著 proc.wait()
+                # 無限等——子程序寫滿 pipe 緩衝後阻塞在 write，永遠不會退出，而
+                # inactivity 看門狗此時已離開迴圈救不了（cp950 崩潰的真正卡死點）。
+                # 樹殺讓 wait() 立刻回來，rc≠0 走既有錯誤路徑：吵著失敗，勝過靜默卡死。
+                try:
+                    for line in proc.stdout:
+                        lines.append(line)
+                        last_output[0] = time.monotonic()
+                        if adapter._on_line is not None:
+                            adapter._on_line(line)
+                except Exception:
+                    logger.exception("讀取引擎輸出失敗——樹殺子程序避免 wait() 死鎖")
+                    _kill_tree(proc)
 
             reader = threading.Thread(target=read, daemon=True)
             reader.start()

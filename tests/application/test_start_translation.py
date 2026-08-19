@@ -100,3 +100,54 @@ def test_cannot_start_completed_job():
     with pytest.raises(Exception):
         StartTranslation(engine=engine, jobs=repo).run(job)
     assert engine.received == []  # 沒送出
+
+
+class RecordingRepo(InMemoryJobRepository):
+    """記錄每次 save 當下的狀態——UI 從 repo 讀，所以「存了什麼」才是使用者看到的。"""
+
+    def __init__(self):
+        super().__init__()
+        self.saved_statuses: list[JobStatus] = []
+
+    def save(self, job: TranslationJob) -> None:
+        self.saved_statuses.append(job.status)
+        super().save(job)
+
+
+class StatusProbeEngine(FakeEngine):
+    """翻譯進行中偷看 repo：模擬 UI 的 1s 輪詢那一刻讀到的持久化狀態。"""
+
+    def __init__(self, repo: RecordingRepo, result: JobResult):
+        super().__init__(result=result)
+        self._repo = repo
+        self.status_seen_by_ui: JobStatus | None = None
+
+    def translate(self, job: TranslationJob) -> JobResult:
+        self.status_seen_by_ui = (
+            self._repo.saved_statuses[-1] if self._repo.saved_statuses else None
+        )
+        return super().translate(job)
+
+
+def test_translating_status_is_persisted_before_engine_runs():
+    """v0.1.9.6 迴歸（2026-08-19 使用者回報）：翻譯全程 UI 只顯示「排隊中」，
+    結束才直接跳「完成」。
+
+    根因：run() 的 `job.transition(TRANSLATING)` 只改記憶體物件，沒有 save——
+    而 UI 的 list_jobs 是從 repo 讀的，SQLite 那列整段翻譯期間都還是 QUEUED。
+    #72 刻意區分「排隊中不顯示進度條 / 翻譯中顯示」，不持久化等於該區分沒生效。
+
+    斷言用「引擎執行當下 repo 裡的狀態」，不是 job 物件本身——記憶體物件是共用
+    參考，測它永遠會過，測不到持久化這件事。
+    """
+    job = TranslationJob(job_id="job-1")
+    repo = RecordingRepo()
+    repo.add(job)
+    engine = StatusProbeEngine(repo, JobResult(mono_path="/x.pdf"))
+
+    StartTranslation(engine=engine, jobs=repo).run(job)
+
+    assert engine.status_seen_by_ui is JobStatus.TRANSLATING, (
+        "引擎執行期間 repo 必須已是 TRANSLATING，否則 UI 全程顯示「排隊中」"
+    )
+    assert repo.saved_statuses[-1] is JobStatus.COMPLETED
