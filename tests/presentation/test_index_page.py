@@ -20,6 +20,7 @@ from nicegui import ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import user_simulation
 
+from paper_kit.presentation.engine_cards import UI_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_service import JobService
@@ -1359,8 +1360,7 @@ async def test_free_engine_section_dom_order(tmp_path):
 async def test_free_key_engine_section_renders(tmp_path):
     """免費 LLM 區渲染（2026-08-13 使用者要求「7 卡太多」改下拉）：header＋品質提示＋
     下拉選單（7 引擎選項＝registry 單點）＋單卡顯示所選引擎（ⓘ tooltip 隨引擎）。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
-
+    
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1509,8 +1509,7 @@ async def test_free_key_engine_section_dom_order(tmp_path):
 async def test_paid_key_engine_section_renders(tmp_path):
     """付費引擎區渲染（2026-08-13 使用者要求「卡片欄位太多」改下拉）：header＋品質
     提示＋下拉選單（6 引擎選項＝registry 單點）＋單卡顯示所選引擎（ⓘ tooltip 隨引擎）。"""
-    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
-
+    
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(

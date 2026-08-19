@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse  # 票 18：批量下�
 from nicegui import app, ui
 from starlette.background import BackgroundTask  # 票 18：zip 送完即刪
 
+from paper_kit.presentation.engine_cards import UI_ENGINE_IDS, UI_FREE_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
@@ -48,9 +49,6 @@ from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
 from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也收斂至 registry
     ENGINE_SPECS,
-    UI_ENGINE_IDS,
-    UI_FREE_ENGINE_IDS,  # 免費翻譯入口（2026-08-13）：免 key 引擎卡集合
-    UI_FREE_KEY_ENGINE_IDS,  # 免費 LLM（2026-08-13）：BYOK 免費 key 引擎卡集合
     build_engine,
     can_select,  # 架構健檢 #1+2+8：引擎挑選規則收斂 registry（灰化合併判定）
     resolve_key,  # 有效 key 值（latex 槽位沿用單點）

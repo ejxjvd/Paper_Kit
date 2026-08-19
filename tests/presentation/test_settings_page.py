@@ -10,6 +10,7 @@ import pytest
 from nicegui import ui
 from nicegui.testing import user_simulation
 
+from paper_kit.presentation.engine_cards import UI_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS
 from paper_kit.application.cost_service import CostService
 from paper_kit.infrastructure.builtin_glossary import BUILTIN_GLOSSARY_NAME
 from paper_kit.infrastructure.engine_registry import ENGINE_SPECS
@@ -434,8 +435,7 @@ async def test_engine_key_sections_separate_paid_and_free(tmp_path):
     """引擎 API keys 分兩區——付費六卡在前、免費 LLM 七卡在後，各有區標題
     （paid-keys-section → free-keys-section），卡不混雜。"""
     from test_index_page import _dom_markers
-    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
-
+    
     settings, cost, glossaries = _build_settings(tmp_path)
 
     async with user_simulation(
@@ -454,8 +454,7 @@ async def test_engine_key_sections_separate_paid_and_free(tmp_path):
                 f"付費卡 {eid} 應在免費區之前"
             )
         # 免費七卡全部落在付費區之後
-        from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
-
+        
         for eid in UI_FREE_KEY_ENGINE_IDS:
             assert order.index(f"engine-key-{eid}") > order.index("free-keys-section"), (
                 f"免費卡 {eid} 應在付費區之後"

@@ -4,7 +4,9 @@
 - needs_key：free 引擎（google/bing/siliconflowfree）不需 key
 - 票 13：BabelDocAdapter（OpenAI 相容雲端）第二支插頭——spec 分派不同 adapter 類
 - P3（2026-08-13 架構重構）：顯示知識收斂——card_desc/info（主頁卡副標題＋ⓘ tooltip）
-  併入 spec；UI_ENGINE_IDS 定義主頁卡集合與順序。加引擎＝改此檔單點。
+  併入 spec。**呈現決定不在此檔**（候選 3，2026-08-19）：主頁卡集合與順序移到
+  presentation/engine_cards——那是 UI 決定，不是基礎設施事實。
+  加引擎＝此檔登記 spec，再決定要不要上卡（兩處，不變式測試把關不脫節）。
 """
 
 from dataclasses import dataclass
@@ -52,7 +54,7 @@ class EngineSpec:
     # 免費引擎＝零；設定頁 repo 覆寫仍優先於此預設（2026-08-06 漲價教訓）。
     pricing: tuple[Decimal, Decimal, int]
     base_url: str = DEFAULT_BASE_URL
-    card_desc: str = ""   # P3：主頁卡副標題（僅 UI_ENGINE_IDS 內引擎填）
+    card_desc: str = ""   # P3：主頁卡副標題（僅上卡的引擎需要填，見 engine_cards）
     info: str = ""        # P3：主頁卡 ⓘ tooltip 長敘述（hover 顯示引擎差異）
     # v0.1.3（2026-08-14 NIM 限制情報）：免費層速率防火牆（40 RPM／並發 2-5 → 503）。
     # nvidia 內建節流（--qps/--pool-max-workers）；其他引擎 None＝不帶旗標。
@@ -171,7 +173,7 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
     ),
     # ── 付費 OpenAI 相容引擎（2026-08-13 使用者要求：增加 OpenAI 與 Gemini 付費 API）──
     # provider=openai（pdf2zh --openai 三旗標共用）；付費 API 層資料不用於訓練
-    # （與免費層不同）——sensitive_ok=True、機密文件可用。id 在 UI_ENGINE_IDS。
+    # （與免費層不同）——sensitive_ok=True、機密文件可用。已上主頁卡（engine_cards）。
     "openai": EngineSpec(
         id="openai",
         label="OpenAI（官方付費）",
@@ -356,29 +358,6 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
 # P3：主頁引擎卡集合與顯示順序（票 19 明定三支 PDF 主引擎；latex 票 27 第 4 卡；
 # openai/gemini-pro 2026-08-13 使用者要求新增付費 API；ppt-vision 走特化路線）。
 # app.py 只迭代此 tuple——加引擎單點。
-UI_ENGINE_IDS: tuple[str, ...] = (
-    "siliconflow", "deepseek", "babeldoc", "latex", "openai", "gemini-pro",
-)
-
-# 免費翻譯入口（2026-08-13）：主頁「免費翻譯（不需 API key）」區的卡集合與順序——
-# 三支 needs_key=False 引擎（不變式測試把關：未來 keyless 引擎必須登記於此）。
-# siliconflowfree 排首（上游預設、活躍）；google/bing 上游已棄用。app.py 只迭代此 tuple。
-UI_FREE_ENGINE_IDS: tuple[str, ...] = ("siliconflowfree", "google", "bing")
-
-# 免費 LLM key 引擎（2026-08-13，Free-LLM-Collection 查證後加入）：主頁「免費 LLM
-# （自備免費 key）」區的卡集合與順序＝品質優先序（docs/research/2026-08-13-
-# Free-LLM-Collection-查證與品質優先序.md §3）——NVIDIA NIM 居首（T1/T2 品質＋
-# 40RPM＋無日總量）、Gemini 殿後（免費層資料訓練紅線，非敏感才可用）。
-# 全走 provider=openai（pdf2zh --openai 三旗標）、BYOK（自申請免費 key 填入）。
-# app.py 只迭代此 tuple——加引擎單點。
-# v0.1.7（2026-08-14）：Z.AI 查證後回補（#78 補完）——智譜國際站
-# api.z.ai 實測：glm-4.7-flash（思考）/glm-4.5-flash（非思考）小寫 ID 免費可生成，
-# 真翻譯產出存在。zai 排第 2（GLM 中文品質 T1/T2，僅次 NVIDIA）。
-UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
-    "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
-)
-
-
 # 卡④（2026-08-14）：spec → EngineConfig 共用欄位對映清單（單一真相）——
 # 平行演化防呆：加引擎旗標＝入列＋建對映（spec_to_config），欄位清單測試鎖住。
 # 左＝EngineSpec 欄位名，右＝EngineConfig 對應欄位名（needs_key 以 requires_key 命名）。

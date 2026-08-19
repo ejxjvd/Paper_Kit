@@ -9,6 +9,7 @@ import dataclasses
 import pytest
 from decimal import Decimal
 
+from paper_kit.presentation.engine_cards import UI_ENGINE_IDS, UI_FREE_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS
 from paper_kit.application.ports import EngineError
 from paper_kit.infrastructure.engine_registry import (
     ENGINE_SPECS,
@@ -290,15 +291,13 @@ def test_build_engine_latex_missing_key_fails_at_translate():
 
 def test_ui_free_engine_ids_defined():
     """主頁免費卡集合：免 key 三支，順序＝品質/活躍度（siliconflowfree 上游預設排首）。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
-
+    
     assert UI_FREE_ENGINE_IDS == ("siliconflowfree", "google", "bing")
 
 
 def test_free_specs_have_card_desc_and_info():
     """免費卡顯示知識收斂 registry（P3 模式）：三支 free spec 的卡副標題與 ⓘ tooltip 齊備。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
-
+    
     for eid in UI_FREE_ENGINE_IDS:
         spec = ENGINE_SPECS[eid]
         assert spec.card_desc, f"{eid} 缺 card_desc"
@@ -309,8 +308,7 @@ def test_free_specs_have_card_desc_and_info():
 def test_all_keyless_specs_in_ui_free_ids():
     """不變式：所有 needs_key=False 的引擎必須在 UI_FREE_ENGINE_IDS——未來加
     keyless 引擎不上免費卡即紅（P3 單點模式的自動守衛）。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_ENGINE_IDS
-
+    
     keyless = {eid for eid, spec in ENGINE_SPECS.items() if not spec.needs_key}
     assert keyless <= set(UI_FREE_ENGINE_IDS), f"未上免費卡：{keyless - set(UI_FREE_ENGINE_IDS)}"
 
@@ -328,8 +326,7 @@ def test_ui_free_key_engine_ids_priority_order():
     （T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron 翻譯數據免費群
     最佳）＞ 阿里雲 Model Studio（Qwen 官方，1M tokens 一次性）＞ Gemini（T2 但
     免費層資料訓練，殿後）。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
-
+    
     assert UI_FREE_KEY_ENGINE_IDS == (
         "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
     )
@@ -377,8 +374,7 @@ def test_no_cn_endpoints_in_registry():
 
 def test_free_key_specs_openai_provider():
     """不變式：免費 LLM 全走 provider=openai（pdf2zh --openai 三旗標，不需新 adapter）。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
-
+    
     for eid in UI_FREE_KEY_ENGINE_IDS:
         spec = ENGINE_SPECS[eid]
         assert spec.provider == "openai", f"{eid} 應為 openai provider"
@@ -396,10 +392,6 @@ def test_all_openai_provider_specs_covered_by_ui_tuples():
     """不變式：所有 provider=openai 的引擎必須上卡（UI_FREE_KEY_ENGINE_IDS 免費 LLM
     ∪ UI_ENGINE_IDS 付費 OpenAI 相容）——2026-08-13 加入付費 openai/gemini-pro 後，
     免費區守衛改為全覆蓋守衛（漏登記任何 OpenAI 相容引擎即紅）。"""
-    from paper_kit.infrastructure.engine_registry import (
-        UI_ENGINE_IDS,
-        UI_FREE_KEY_ENGINE_IDS,
-    )
 
     openai_prov = {eid for eid, spec in ENGINE_SPECS.items() if spec.provider == "openai"}
     covered = set(UI_FREE_KEY_ENGINE_IDS) | set(UI_ENGINE_IDS)
@@ -411,8 +403,7 @@ def test_all_openai_provider_specs_covered_by_ui_tuples():
 
 def test_registry_has_openai_and_gemini_pro_paid_specs():
     """使用者要求（2026-08-13）：新增 OpenAI（Codex API 同 key）與 Gemini 付費引擎。"""
-    from paper_kit.infrastructure.engine_registry import UI_FREE_KEY_ENGINE_IDS
-
+    
     for eid in ("openai", "gemini-pro"):
         spec = ENGINE_SPECS[eid]
         assert spec.needs_key is True, f"{eid} 為付費引擎（需自備 key）"
@@ -435,8 +426,7 @@ def test_gemini_pro_model_has_models_prefix():
 
 def test_ui_engine_ids_include_new_paid_engines():
     """付費卡集合含新增兩引擎（順序＝既有四卡後尾加）。"""
-    from paper_kit.infrastructure.engine_registry import UI_ENGINE_IDS
-
+    
     assert UI_ENGINE_IDS == (
         "siliconflow", "deepseek", "babeldoc", "latex", "openai", "gemini-pro",
     )
@@ -444,10 +434,6 @@ def test_ui_engine_ids_include_new_paid_engines():
 
 def test_free_key_specs_distinct_from_keyless_free():
     """不變式：兩免費區不得重疊（零 key 區與 BYOK 免費 LLM 區語意不同）。"""
-    from paper_kit.infrastructure.engine_registry import (
-        UI_FREE_ENGINE_IDS,
-        UI_FREE_KEY_ENGINE_IDS,
-    )
 
     assert not set(UI_FREE_ENGINE_IDS) & set(UI_FREE_KEY_ENGINE_IDS)
 
@@ -481,7 +467,6 @@ def test_free_engines_pricing_is_zero():
     """免費引擎（免 key 三支＋免費 LLM 七支）定價全零——免費額度不該顯示費用。"""
     from paper_kit.infrastructure.engine_registry import (
         ENGINE_SPECS,
-        UI_FREE_KEY_ENGINE_IDS,
     )
 
     for eid, spec in ENGINE_SPECS.items():
