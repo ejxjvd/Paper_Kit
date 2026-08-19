@@ -1007,3 +1007,39 @@ def test_engine_output_is_logged_on_failure(monkeypatch, caplog):
     records = [r for r in caplog.records if getattr(r, "engine_output", None)]
     assert records, "失敗 log 必須帶 engine_output（完整引擎輸出）"
     assert "No solution found" in records[0].engine_output
+
+
+def test_tidy_strips_rich_column_padding():
+    """v0.2.1 迴歸（2026-08-19 使用者實測 log）：COLUMNS=1000 讓 rich 不折行（#23），
+    代價是它把每一行都補空白到 1000 字元——一次 74 次呼叫的翻譯產生 247,497 字，
+    九成是空白。留檔前必須剝掉，否則 log 體積與可讀性都被填充淹沒。
+    """
+    from paper_kit.infrastructure.cli_adapter_base import _tidy
+
+    padded = "INFO  Using translation engine: Google" + " " * 960 + "\n" + "x" * 5 + " " * 995
+    tidied = _tidy(padded)
+    assert "Google" in tidied and "xxxxx" in tidied, "內容不得被剝掉"
+    assert len(tidied) < len(padded) / 10, "填充應被剝除（體積降一個數量級）"
+    assert not any(line != line.rstrip() for line in tidied.splitlines())
+
+
+def test_engine_output_dumped_to_file(monkeypatch, tmp_path):
+    """v0.2.1：完整引擎輸出另存檔案——JSON log 的截斷是保頭保尾，
+    而進度行剛好在中間（使用者實測：拿到頭尾卻拿不到 progress_monitor 的格式）。"""
+    from paper_kit.infrastructure import cli_adapter_base as mod
+
+    monkeypatch.setattr(mod, "app_data_dir", lambda: tmp_path)
+    path = mod._dump_engine_output("job-abc", "第一行\n中間的進度行\n最後一行")
+    assert path is not None
+    assert "中間的進度行" in (tmp_path / "logs" / "engines" / "job-abc.log").read_text(encoding="utf-8")
+
+
+def test_dump_failure_never_breaks_translation(monkeypatch):
+    """留檔是附加價值，不是任務的一部分——寫檔失敗不得讓翻譯失敗。"""
+    from paper_kit.infrastructure import cli_adapter_base as mod
+
+    def boom():
+        raise OSError("磁碟滿了")
+
+    monkeypatch.setattr(mod, "app_data_dir", boom)
+    assert mod._dump_engine_output("job-abc", "內容") is None

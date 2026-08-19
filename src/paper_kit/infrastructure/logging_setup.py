@@ -26,7 +26,7 @@ class JsonFormatter(logging.Formatter):
         }
         # engine_output（v0.1.9.7）：引擎完整 stdout。舊版只留 _friendly_error 抽出的
         # 一行，實測不足以診斷——uv 的多行解析錯誤被砍到只剩無意義的續行殘片。
-        for key in ("job_id", "error_chain", "error", "engine_output"):  # error＝失敗最後訊息（debug 頁顯示）
+        for key in ("job_id", "error_chain", "error", "engine_output", "engine_output_file"):  # error＝失敗最後訊息（debug 頁顯示）
             value = getattr(record, key, None)
             if value is not None:
                 entry[key] = value

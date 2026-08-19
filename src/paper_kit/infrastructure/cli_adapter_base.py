@@ -16,6 +16,7 @@ from paper_kit.application.ports import EngineError, MISSING_API_KEY_MESSAGE
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
+from paper_kit.infrastructure.app_paths import app_data_dir  # v0.2.1：引擎輸出留檔位置
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
 from paper_kit.infrastructure.subprocess_exec import spawn, stream  # 候選 2：機制本體
 from paper_kit.infrastructure.uv_bootstrap import download_failures, resolve_uv
@@ -84,15 +85,45 @@ def _manual_install_hint() -> str:
 # 「        depends on pydantic (v2.11.10) which depends on pydantic-core」。
 _ERROR_MARKERS = ("×", "╰─▶", "No solution found", "Failed to build", "error:", "ERROR:")
 
-_ENGINE_OUTPUT_CLIP = 8000  # log 單筆上限：夠承載 uv 的完整錯誤樹，又不讓 log 失控
+_ENGINE_OUTPUT_CLIP = 8000  # JSON log 單筆上限；完整內容另存 logs/engines/<job_id>.log
+
+
+def _tidy(output: str) -> str:
+    """剝掉 rich 的行尾填充。
+
+    v0.2.1（2026-08-19 使用者實測 log）：COLUMNS=1000 是為了讓 rich 不折行（#23），
+    代價是它把**每一行都補空白到 1000 字元**——一次 74 次呼叫的翻譯產生 247,497 字，
+    九成是空白。留檔前先剝掉，體積降一個數量級。
+    """
+    return "\n".join(line.rstrip() for line in output.splitlines())
+
+
+def _dump_engine_output(job_id: str, output: str) -> str | None:
+    """完整引擎輸出另存獨立檔案，回傳路徑；失敗回 None。
+
+    v0.2.1：先前只把截斷後的內容塞進 JSON log，而截斷是保頭保尾——**進度行剛好
+    在中間被丟掉**（使用者實測：拿到頭尾卻拿不到 progress_monitor 的進度格式）。
+    完整內容存檔，JSON log 只留摘要與路徑。
+
+    留檔失敗絕不影響翻譯：診斷是附加價值，不是任務的一部分。
+    """
+    try:
+        directory = app_data_dir() / "logs" / "engines"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{job_id}.log"
+        path.write_text(output, encoding="utf-8")
+        return str(path)
+    except Exception:
+        logger.warning("引擎輸出留檔失敗（不影響翻譯）", exc_info=True)
+        return None
 
 
 def _clip(output: str) -> str:
-    """引擎輸出留檔用截斷——保頭也保尾（錯誤根在頭、結果行在尾，中間才是進度雜訊）。"""
+    """JSON log 內嵌用截斷——保頭也保尾（錯誤根在頭、結果行在尾）。完整內容見留檔。"""
     if len(output) <= _ENGINE_OUTPUT_CLIP:
         return output
     half = _ENGINE_OUTPUT_CLIP // 2
-    return f"{output[:half]}\n…（省略 {len(output) - _ENGINE_OUTPUT_CLIP} 字）…\n{output[-half:]}"
+    return f"{output[:half]}\n…（省略 {len(output) - _ENGINE_OUTPUT_CLIP} 字，完整內容見 engine_output_file）…\n{output[-half:]}"
 
 
 def _friendly_error(output: str) -> str:
@@ -301,11 +332,13 @@ class CliAdapterBase:
                 # v0.1.9.7：成功也記一次完整引擎輸出（遮罩後）。翻譯以分鐘計，
                 # 一個任務一筆不會洗版；而它是唯一能取得「引擎到底印了什麼」的
                 # 管道——頁面級進度解析（#72 待辦）就缺這份地面真相。
+                safe_output = _tidy(redact(output, [self._api_key()]))
                 logger.info(
                     "引擎輸出",
                     extra={
                         "job_id": job.job_id,
-                        "engine_output": _clip(redact(output, [self._api_key()])),
+                        "engine_output": _clip(safe_output),
+                        "engine_output_file": _dump_engine_output(job.job_id, safe_output),
                     },
                 )
                 return self._parse_output(output, job)
@@ -313,7 +346,7 @@ class CliAdapterBase:
             if not self._is_transient(output):
                 break
         # 票 09：失敗 log 記錯誤＋遮罩 key；toast 同樣 redact（review：不只有 log 要守）
-        safe_error = redact(last_error, [self._api_key()])
+        safe_error = _tidy(redact(last_error, [self._api_key()]))
         logger.error(
             "翻譯失敗",
             extra={
@@ -322,6 +355,7 @@ class CliAdapterBase:
                 # v0.1.9.7：完整輸出隨失敗一起留檔——只留 _friendly_error 那一行，
                 # 實測不足以診斷（uv 多行錯誤被砍剩無意義的續行）。
                 "engine_output": _clip(safe_error),
+                "engine_output_file": _dump_engine_output(job.job_id, safe_error),
                 "command": redact_command(cmd),
             },
         )
