@@ -30,6 +30,12 @@ _KNOWN_ERRORS = [
      "API key 無效或已過期（檢查 key 與端點：國際站用 .com）"),
     (("'source' and 'target'", "must contain"),
      "術語表 CSV 格式錯誤：標頭列必須含 source,target"),
+    # v0.1.9.7（2026-08-19 使用者個人筆電實測）：Python 版本過新 → 相依套件
+    # （pydantic-core）無預編譯輪子 → uv 退回原始碼編譯 → 需要 Rust 工具鏈 → 失敗。
+    # 已於 build_command 釘 --python ENGINE_PYTHON 根治；此訊息是萬一再現時的路標。
+    (("maturin.build_wheel", "Rust not found", "Failed to build `pydantic-core"),
+     "引擎相依套件需要從原始碼編譯（該 Python 版本缺預編譯輪子）——"
+     "本程式已釘定引擎 Python 版本，若仍出現請附 log 回報"),
 ]
 
 
@@ -66,12 +72,35 @@ def _manual_install_hint() -> str:
     )
 
 
+# v0.1.9.7（2026-08-19 使用者個人筆電實測）：多行錯誤的「最有資訊量的那一行」標記。
+# uv 的解析／建置失敗是一棵樹（× 開頭、╰─▶ 分支、續行縮排），真正的原因在**開頭**，
+# 而舊版取 lines[-1] 剛好拿到最沒用的續行殘片——實測使用者只看到
+# 「        depends on pydantic (v2.11.10) which depends on pydantic-core」。
+_ERROR_MARKERS = ("×", "╰─▶", "No solution found", "Failed to build", "error:", "ERROR:")
+
+_ENGINE_OUTPUT_CLIP = 8000  # log 單筆上限：夠承載 uv 的完整錯誤樹，又不讓 log 失控
+
+
+def _clip(output: str) -> str:
+    """引擎輸出留檔用截斷——保頭也保尾（錯誤根在頭、結果行在尾，中間才是進度雜訊）。"""
+    if len(output) <= _ENGINE_OUTPUT_CLIP:
+        return output
+    half = _ENGINE_OUTPUT_CLIP // 2
+    return f"{output[:half]}\n…（省略 {len(output) - _ENGINE_OUTPUT_CLIP} 字）…\n{output[-half:]}"
+
+
 def _friendly_error(output: str) -> str:
     for signatures, message in _KNOWN_ERRORS:
         if any(sig in output for sig in signatures):
             return message
     lines = [l for l in output.splitlines() if l.strip()]
-    return f"引擎執行失敗：{lines[-1][-200:] if lines else '(無輸出)'}"
+    if not lines:
+        return "引擎執行失敗：(無輸出)"
+    # 優先回報第一個帶錯誤標記的行（樹狀錯誤的根），找不到才退回最後一行
+    for line in lines:
+        if any(marker in line for marker in _ERROR_MARKERS):
+            return f"引擎執行失敗：{line.strip()[:200]}"
+    return f"引擎執行失敗：{lines[-1][-200:]}"
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -330,6 +359,16 @@ class CliAdapterBase:
             if self._cancelled:
                 raise EngineError("已取消")  # 子程序被 kill 後回傳的雜訊不算數
             if rc == 0:
+                # v0.1.9.7：成功也記一次完整引擎輸出（遮罩後）。翻譯以分鐘計，
+                # 一個任務一筆不會洗版；而它是唯一能取得「引擎到底印了什麼」的
+                # 管道——頁面級進度解析（#72 待辦）就缺這份地面真相。
+                logger.info(
+                    "引擎輸出",
+                    extra={
+                        "job_id": job.job_id,
+                        "engine_output": _clip(redact(output, [self._api_key()])),
+                    },
+                )
                 return self._parse_output(output, job)
             last_error = output
             if not self._is_transient(output):
@@ -341,6 +380,9 @@ class CliAdapterBase:
             extra={
                 "job_id": job.job_id,
                 "error": _friendly_error(safe_error),
+                # v0.1.9.7：完整輸出隨失敗一起留檔——只留 _friendly_error 那一行，
+                # 實測不足以診斷（uv 多行錯誤被砍剩無意義的續行）。
+                "engine_output": _clip(safe_error),
                 "command": redact_command(cmd),
             },
         )

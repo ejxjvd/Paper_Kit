@@ -139,7 +139,9 @@ class _LineStream:
 def test_build_command_siliconflow_flags():
     cfg = EngineConfig(api_key="KEY")
     cmd = build_command(make_job(), cfg)
-    assert cmd[0:4] == ["uv", "tool", "run", "pdf2zh_next"]
+    # v0.1.9.7：--python 釘死插在 tool run 與工具名之間（見 test_command_pins_engine_python）
+    assert cmd[0:3] == ["uv", "tool", "run"]
+    assert "pdf2zh_next" in cmd
     assert "/in/paper.pdf" in cmd
     assert "--siliconflow" in cmd
     assert cmd[cmd.index("--siliconflow-api-key") + 1] == "KEY"
@@ -947,3 +949,58 @@ def test_reader_thread_crash_does_not_deadlock(monkeypatch, tmp_path):
         adapter.translate(make_job())
     assert killed, "reader thread 死亡必須觸發樹殺，否則主流程永遠等不到 EOF"
     assert time.monotonic() - started < 30, "必須立即失敗，不得卡在 inactivity 逾時"
+
+
+def test_command_pins_engine_python():
+    """v0.1.9.7 迴歸（2026-08-19 使用者個人筆電實測）：`uv tool run` 未釘 --python
+    時，uv 會挑機器上最新的直譯器。實測 Python 3.14 上 pydantic-core 尚無 cp314
+    輪子 → uv 退回原始碼編譯 → 需要 Rust 工具鏈 → 整個翻譯任務失敗。
+
+    這是版本漂移型故障：開發機（3.12）正常、使用者機器（裝了新 Python）炸，
+    且 Python 每出新版就會復發。必須釘死，且要釘在 uv 子命令之前。
+    """
+    from paper_kit.infrastructure.uv_bootstrap import ENGINE_PYTHON
+
+    cmd = build_command(make_job(), EngineConfig(api_key="KEY"))
+    assert "--python" in cmd, "未釘 --python：uv 會挑到缺預編譯輪子的新 Python"
+    assert cmd[cmd.index("--python") + 1] == ENGINE_PYTHON
+    # 必須在 tool run 與工具名之間——放到工具名之後會被當成引擎自己的參數
+    assert cmd.index("--python") < cmd.index("pdf2zh_next")
+
+
+def test_friendly_error_reports_root_of_multiline_error():
+    """v0.1.9.7 迴歸：舊版 _friendly_error 取 lines[-1]，遇到 uv 的樹狀錯誤剛好
+    拿到最沒資訊量的續行殘片——使用者實測只看到
+    「depends on pydantic (v2.11.10) which depends on pydantic-core」，
+    完全看不出真因是「Python 版本太新、缺輪子、需要 Rust」。
+
+    錯誤樹的根在**開頭**，不在結尾。
+    """
+    from paper_kit.infrastructure.cli_adapter_base import _friendly_error
+
+    uv_error = (
+        "Resolved 42 packages in 1.2s\n"
+        "  × No solution found when resolving dependencies:\n"
+        "  ╰─▶ Because pdf2zh-next depends on pydantic-core\n"
+        "        depends on pydantic (v2.11.10) which depends on pydantic-core\n"
+    )
+    msg = _friendly_error(uv_error)
+    assert "No solution found" in msg, f"應回報錯誤樹的根，實得：{msg}"
+    assert not msg.rstrip().endswith("pydantic-core"), "不得只回報無意義的續行殘片"
+
+
+def test_engine_output_is_logged_on_failure(monkeypatch, caplog):
+    """v0.1.9.7 迴歸：失敗時只留 _friendly_error 抽出的一行，實測不足以診斷。
+    完整輸出必須進 log，否則使用者回報時我們拿不到真正的錯誤樹。"""
+    import logging
+
+    adapter = Pdf2zhNextAdapter(
+        EngineConfig(api_key="KEY"),
+        runner=FakeRunner((1, "  × No solution found\n  ╰─▶ Because pdf2zh-next…\n")),
+    )
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(EngineError):
+            adapter.translate(make_job())
+    records = [r for r in caplog.records if getattr(r, "engine_output", None)]
+    assert records, "失敗 log 必須帶 engine_output（完整引擎輸出）"
+    assert "No solution found" in records[0].engine_output

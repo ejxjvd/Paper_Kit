@@ -80,7 +80,9 @@ LOG = (
 def test_build_command_openai_flags():
     cfg = BabelDocConfig(api_key="KEY")
     cmd = build_babeldoc_command(make_job(), cfg)
-    assert cmd[0:4] == ["uv", "tool", "run", "babeldoc"]
+    # v0.1.9.7：--python 釘死插在 tool run 與工具名之間
+    assert cmd[0:3] == ["uv", "tool", "run"]
+    assert "babeldoc" in cmd
     assert "--files" in cmd and "/in/paper.pdf" in cmd
     assert "--openai" in cmd
     assert cmd[cmd.index("--openai-model") + 1] == DEFAULT_BABELDOC_MODEL
@@ -408,3 +410,12 @@ def test_translate_after_cancel_raises_without_running_engine():
     adapter.cancel()
     with pytest.raises(EngineError, match="已取消"):
         adapter.translate(make_job())
+
+
+def test_babeldoc_command_pins_engine_python():
+    """v0.1.9.7：與 pdf2zh_next 同一個版本漂移故障——babeldoc 也走 uv tool run。"""
+    from paper_kit.infrastructure.uv_bootstrap import ENGINE_PYTHON
+
+    cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
+    assert cmd[cmd.index("--python") + 1] == ENGINE_PYTHON
+    assert cmd.index("--python") < cmd.index("babeldoc")

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 from paper_kit.infrastructure.cli_adapter_base import CliAdapterBase
+from paper_kit.infrastructure.uv_bootstrap import ENGINE_PYTHON  # v0.1.9.7：引擎 Python 釘死
 
 DEFAULT_BABELDOC_MODEL = "deepseek-chat"  # README 推薦後端
 DEFAULT_BABELDOC_BASE_URL = "https://api.deepseek.com/v1"  # OpenAI 相容端點
@@ -64,7 +65,9 @@ class BabelDocConfig:
 
 def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str]:
     """組裝 babeldoc CLI 命令（純函式，測試直接斷言旗標）。"""
-    cmd = ["uv", "tool", "run", "babeldoc", "--files", job.source_path, "--openai"]
+    # --python 釘死（v0.1.9.7）：同 pdf2zh_next，避免 uv 挑到缺輪子的新 Python。
+    cmd = ["uv", "tool", "run", "--python", ENGINE_PYTHON,
+           "babeldoc", "--files", job.source_path, "--openai"]
     cmd += ["--openai-model", cfg.model]
     cmd += ["--openai-base-url", cfg.base_url]
     cmd += ["--openai-api-key", cfg.api_key]

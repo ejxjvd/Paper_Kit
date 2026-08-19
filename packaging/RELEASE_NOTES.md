@@ -2,6 +2,68 @@
 
 > CI 建 Release 時依 tag 提取對應區段作為 notes（見 `.github/workflows/release.yml`）。
 
+## v0.1.9.7
+
+### 🐛 修復：翻譯失敗「depends on pydantic … which depends on pydantic-core」
+
+**背景（2026-08-19 使用者個人筆電實測 0.1.9.6）**：任務 `ecb42f3b`（Google 免費引擎）
+建立後約 84 秒失敗，訊息只有殘缺的一句：
+
+```
+引擎執行失敗：        depends on pydantic (v2.11.10) which depends on pydantic-core
+```
+
+**根因（本機重現確認）**：`uv tool run pdf2zh_next` **未指定 `--python`**，uv 因此
+挑用機器上最新的直譯器。以 Python 3.14 重現，完整錯誤是：
+
+```
+Python reports SOABI: cp314-win_amd64
+   Building pydantic-core==2.33.2
+  × Failed to build `pydantic-core==2.33.2`
+  ╰─▶ Call to `maturin.build_wheel` failed (exit code: 1)
+      Rust not found, installing into a temporary directory
+```
+
+`pydantic-core` 尚無 cp314 預編譯輪子 → uv 退回**從原始碼編譯** → 需要 Rust 工具鏈
+（它甚至開始下載 rustup）→ 失敗。
+
+這是**版本漂移型故障**：開發機（3.12）永遠正常，只有裝了新 Python 的使用者機器會炸，
+而且 Python 每出一個新版就會再犯一次。
+
+**修法**：
+
+1. `pdf2zh_next` 與 `babeldoc` 的命令都插入 `--python 3.12`（常數 `ENGINE_PYTHON`
+   單一真相，與 `.python-version`／`requires-python` 對齊）
+2. 新增已知錯誤對映：萬一再現，訊息直說「相依套件需要從原始碼編譯」而非讓使用者猜
+
+### 🐛 修復：多行錯誤只顯示最沒用的那一行
+
+`_friendly_error` 取的是輸出的**最後一行**（`lines[-1]`）。uv 的錯誤是一棵樹——
+真正的原因在開頭（`× No solution found`），結尾只是縮排的續行殘片。於是使用者拿到
+的診斷剛好是整段訊息裡資訊量最低的部分。
+
+**修法**：改為優先回報第一個帶錯誤標記（`×`／`╰─▶`／`No solution found`／
+`Failed to build`／`error:`）的行；找不到才退回舊行為。
+
+### 🔍 改善：引擎完整輸出進 log
+
+先前引擎的 stdout **從未被記錄**，只有 `_friendly_error` 抽出的一行進 log。這正是
+上面那個 bug 難診斷的原因——完整的錯誤樹當場就被丟棄了。
+
+**修法**：任務結束時記一次完整引擎輸出（成功走 INFO、失敗走 ERROR，皆經 key 遮罩，
+單筆上限 8000 字、保頭保尾）。翻譯以分鐘計，一任務一筆不會洗版。
+
+順帶解除一個長期阻塞：頁面級進度（「翻譯到第 N 頁」）之所以遲遲沒做，是因為拿不到
+引擎真實的進度輸出格式。現在跑一次真實翻譯，log 裡就有完整樣本。
+
+### ✅ 驗證
+
+- 4 個新迴歸測試：兩支引擎的 `--python` 釘定（含旗標位置必須在工具名之前）、
+  多行錯誤回報根部而非續行、失敗 log 必帶 `engine_output`
+- 兩個既有命令形狀測試同步更新（命令前綴確實改變，紅燈正確）
+- 全套件 **793 passed**、零失敗
+- 根因以 `uv tool run --python 3.14` 在本機實際重現，非推測
+
 ## v0.1.9.6
 
 ### 🐛 修復：繁中 Windows 翻譯任務一啟動就崩潰（cp950 解碼）

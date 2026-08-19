@@ -49,6 +49,15 @@ _PYPI_MIRRORS = [
 ]
 _DOWNLOAD_TIMEOUT = 120  # 慢網下 60s 可能中斷大檔下載（v0.1.9.3 調高）
 
+# v0.1.9.7（2026-08-19 使用者個人筆電實測）：引擎工具鏈的 Python 版本必須釘死。
+# `uv tool run pdf2zh_next` 不帶 --python 時，uv 會挑機器上最新的直譯器——實測
+# Python 3.14 上 pydantic-core 尚無 cp314 輪子 → uv 退回原始碼編譯 → 需要 Rust
+# 工具鏈（實測它甚至開始下載 rustup）→ 失敗。使用者看到的是殘缺的
+# 「depends on pydantic (v2.11.10) which depends on pydantic-core」。
+# 這是版本漂移型故障：Python 每出新版就會復發，且只在裝了新 Python 的機器上發生
+# （所以開發機正常、使用者機器炸）。與 .python-version／requires-python 對齊。
+ENGINE_PYTHON = "3.12"
+
 _last_failures: list[str] = []  # 最近一次 download_uv 全敗的各源原因（呼叫方組訊息）
 _RETRY_DELAY = 2.0  # 源失敗後重試間隔（秒）——測試 monkeypatch 為 0
 _download_lock = threading.Lock()  # 2026-08-15：啟動背景安裝與翻譯並發時防重複下載/互踩
