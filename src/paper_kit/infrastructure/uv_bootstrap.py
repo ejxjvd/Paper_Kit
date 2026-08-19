@@ -49,13 +49,26 @@ _PYPI_MIRRORS = [
 ]
 _DOWNLOAD_TIMEOUT = 120  # 慢網下 60s 可能中斷大檔下載（v0.1.9.3 調高）
 
-# v0.1.9.7（2026-08-19 使用者個人筆電實測）：引擎工具鏈的 Python 版本必須釘死。
-# `uv tool run pdf2zh_next` 不帶 --python 時，uv 會挑機器上最新的直譯器——實測
-# Python 3.14 上 pydantic-core 尚無 cp314 輪子 → uv 退回原始碼編譯 → 需要 Rust
-# 工具鏈（實測它甚至開始下載 rustup）→ 失敗。使用者看到的是殘缺的
-# 「depends on pydantic (v2.11.10) which depends on pydantic-core」。
-# 這是版本漂移型故障：Python 每出新版就會復發，且只在裝了新 Python 的機器上發生
-# （所以開發機正常、使用者機器炸）。與 .python-version／requires-python 對齊。
+# v0.1.9.7（2026-08-19 使用者個人筆電實測＋本機重現）：引擎工具鏈的 Python 版本必須釘死。
+#
+# `uv tool run pdf2zh_next` 不帶 --python 時，uv 會挑機器上最新的直譯器。實測
+# Python 3.14：pydantic-core 無 cp314 輪子 → uv 退回原始碼編譯 → 拉 Rust 工具鏈
+# （實測它甚至自動下載 rustup）→ 編譯失敗於：
+#
+#   error: the configured Python interpreter version (3.14) is newer than
+#          PyO3's maximum supported version (3.13)   [pyo3 0.24.1]
+#
+# 關鍵：這不是「輪子還沒跟上」的暫時現象，而是 pydantic-core 2.33.2 內含的
+# PyO3 0.24.1 有 3.13 硬上限——裝了 Rust 也不可能成功。要等 pdf2zh_next 相依鏈
+# 整條升上去才會解，我們無法從這端修。
+#
+# 使用者看到的則是被 lines[-1] 砍剩的殘句「depends on pydantic (v2.11.10)
+# which depends on pydantic-core」（同版一併修，見 _friendly_error）。
+#
+# 版本漂移型故障：開發機（3.12）永遠正常，只有裝了新 Python 的使用者機器會炸，
+# 且 Python 每出新版就會再犯。與 .python-version／requires-python 對齊。
+# 驗證（使用者筆電，原本失敗的那台）：3.14 → 編譯失敗；3.12 → 133 套件 10.15s
+# 安裝完成、pdf2zh-next 2.9.0 正常回應。
 ENGINE_PYTHON = "3.12"
 
 _last_failures: list[str] = []  # 最近一次 download_uv 全敗的各源原因（呼叫方組訊息）

@@ -24,8 +24,17 @@ Python reports SOABI: cp314-win_amd64
       Rust not found, installing into a temporary directory
 ```
 
-`pydantic-core` 尚無 cp314 預編譯輪子 → uv 退回**從原始碼編譯** → 需要 Rust 工具鏈
-（它甚至開始下載 rustup）→ 失敗。
+`pydantic-core` 無 cp314 預編譯輪子 → uv 退回**從原始碼編譯** → 拉 Rust 工具鏈
+（它甚至自動下載 rustup）→ 編譯失敗於：
+
+```
+error: the configured Python interpreter version (3.14) is newer than
+       PyO3's maximum supported version (3.13)   [pyo3 0.24.1]
+```
+
+**關鍵**：這不是「輪子還沒跟上」的暫時現象。`pydantic-core 2.33.2` 內含的 PyO3 0.24.1
+有 3.13 **硬上限**——那台機器上就算裝了完整 Rust 工具鏈也不可能編譯成功。要等
+pdf2zh_next 整條相依鏈升級才會解，無法從我們這端修，只能避開。
 
 這是**版本漂移型故障**：開發機（3.12）永遠正常，只有裝了新 Python 的使用者機器會炸，
 而且 Python 每出一個新版就會再犯一次。
@@ -63,6 +72,8 @@ Python reports SOABI: cp314-win_amd64
 - 兩個既有命令形狀測試同步更新（命令前綴確實改變，紅燈正確）
 - 全套件 **793 passed**、零失敗
 - 根因以 `uv tool run --python 3.14` 在本機實際重現，非推測
+- **在原本失敗的那台使用者筆電上驗證修正**：`--python 3.14` → 編譯失敗（PyO3 上限）；
+  `--python 3.12` → 133 套件 10.15s 安裝完成、`pdf2zh-next version: 2.9.0` 正常回應
 
 ## v0.1.9.6
 
