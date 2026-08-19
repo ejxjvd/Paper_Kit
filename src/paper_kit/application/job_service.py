@@ -6,12 +6,12 @@ UI 薄層只依賴 JobService；引擎換插頭＝換 engine 參數（Ports & Ad
 import logging
 import shutil
 import threading
-import time
 import uuid
 from pathlib import Path
 
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.fingerprint import fingerprint
+from paper_kit.application.job_state import JobStateGate
 from paper_kit.application.ocr import OcrService
 from paper_kit.application.ports import EngineError, JobRepository, TranslationEnginePort
 from paper_kit.application.start_translation import StartTranslation
@@ -33,7 +33,9 @@ class JobService:
         self._outputs = Path(outputs_dir)
         self._threads: dict[str, threading.Thread] = {}
         self._engines: dict[str, TranslationEnginePort] = {}  # 票 08：cancel 要摸得到引擎
-        self._lock = threading.Lock()  # 票 08：cancel vs worker 終態判定互斥（review 修正）
+        # 候選 4（2026-08-19）：狀態寫入全部經守門人，鎖不再由本 class 持有——
+        # 先前這把鎖被借給 StartTranslation，並行不變式跨兩個 module 才看得完整。
+        self._gate = JobStateGate(jobs)
         self._ocr = ocr  # 票 12：掃描件 OCR（None＝未啟用；呼叫端組裝注入）
         self._cache = cache  # 票 24：翻譯快取（None＝未注入；快取是優化不是依賴）
         # 票 08：重啟後從 repo 載入歷史（SQLite 才有記憶；InMemory 回傳空）
@@ -130,6 +132,7 @@ class JobService:
         self._assert_sensitive_allowed(job, engine_allows_sensitive)
         job.engine_id = engine_id
         self._engines[job_id] = engine
+        self._gate.mark_active(job_id)  # delete 的原子判定：QUEUED 期間也動不得
         thread = threading.Thread(target=self._run, args=(job, engine), daemon=True)
         thread.start()
         self._threads[job_id] = thread
@@ -154,9 +157,7 @@ class JobService:
         if job is None:
             raise KeyError(job_id)
         self._assert_sensitive_allowed(job, engine_allows_sensitive)
-        job.transition(JobStatus.QUEUED)  # 非 FAILED → InvalidTransition
-        job.error = None
-        self._jobs.save(job)
+        self._gate.to(job, JobStatus.QUEUED, error=None)  # 非 FAILED → InvalidTransition
         self.start(
             job_id, engine,
             engine_id=engine_id if engine_id is not None else job.engine_id,
@@ -168,9 +169,7 @@ class JobService:
         job = self._jobs.get(job_id)
         if job is None:
             raise KeyError(job_id)
-        with self._lock:  # 與 worker 的終態判定互斥（review 修正：check-then-act race）
-            job.transition(JobStatus.CANCELLED)  # 僅 translating→cancelled 合法（領域狀態機）
-            self._jobs.save(job)
+        self._gate.cancel(job)  # 僅 translating/queued→cancelled 合法（領域狀態機）
         engine = self._engines.get(job_id)
         if engine is not None:
             engine.cancel()
@@ -179,22 +178,16 @@ class JobService:
     def delete(self, job_id: str) -> None:
         """票 18：永久刪除任務——執行中拒絕、移除 repo 記錄與輸出目錄。
 
-        執行中＝ live thread 存在 或 狀態為排隊/翻譯中（review 修正：start() 在
+        執行中＝ live worker 存在 或 狀態為排隊/翻譯中（review 修正：start() 在
         QUEUED 就 spawn thread、轉換發生在 StartTranslation.run 內——QUEUED 任務
-        也可能有活 thread 在寫）。判定與移除包在 _lock 內、對齊 cancel 的
-        check-then-act race 修正（worker 的狀態轉換持同一把鎖）。未知任務 KeyError。
+        也可能有活 thread 在寫）。判定與移除的原子性由 JobStateGate 內部保證
+        （候選 4：鎖不外借）。未知任務 KeyError。
         """
         job = self._jobs.get(job_id)
         if job is None:
             raise KeyError(job_id)
-        with self._lock:
-            if (
-                job_id in self._threads
-                or job.status in (JobStatus.QUEUED, JobStatus.TRANSLATING)
-            ):
-                raise ValueError("執行中的任務不可刪除")
-            self._jobs.remove(job_id)
-            self._order.remove(job_id)
+        self._gate.remove(job_id, job)  # 執行中判定與移除原子（守門人內部）
+        self._order.remove(job_id)
         self._threads.pop(job_id, None)
         self._engines.pop(job_id, None)
         out_dir = self._outputs / job_id
@@ -214,32 +207,8 @@ class JobService:
         """
         for job in jobs.list():
             if job.status in (JobStatus.QUEUED, JobStatus.TRANSLATING):
-                job.transition(JobStatus.FAILED)  # 領域：排隊/翻譯中可被系統中斷
-                job.error = "應用重啟，翻譯中斷（請重試）"
-                jobs.save(job)
-
-    def _progress_writer(self, job: TranslationJob):
-        """#72：引擎進度回調 → 寫回 DB（throttle：值變動≥0.02 或 ≥2s 才存）。
-
-        流式 runner 的 reader thread 每行輸出都會觸發；逐行寫 SQLite 太重，
-        值跳動也不值得——UI 1s 輪詢，throttle 到 0.02/2s 綽綽有餘。
-        """
-        last = {"value": -1.0, "t": 0.0}
-
-        def write(progress: float) -> None:
-            now = time.monotonic()
-            if (
-                progress is None
-                or (abs(progress - last["value"]) < 0.02 and now - last["t"] < 2.0)
-            ):
-                return
-            job.progress = progress
-            with self._lock:
-                self._jobs.save(job)
-            last["value"] = progress
-            last["t"] = now
-
-        return write
+                # 領域：排隊/翻譯中可被系統中斷。走守門人＝狀態寫入單一路徑
+                self._gate.to(job, JobStatus.FAILED, error="應用重啟，翻譯中斷（請重試）")
 
     def _prepare_ocr(self, job: TranslationJob) -> None:
         """票 12：掃描件執行前先本機 OCR——把無文字層 PDF 變成有文字層。
@@ -268,10 +237,8 @@ class JobService:
             # throttle 後寫回 DB（UI 輪詢才看得到進度條）。port 相容：無此方法
             # 的引擎（mock／未來插頭）走 hasattr 檢查，不強制。
             if hasattr(engine, "set_progress_callback"):
-                engine.set_progress_callback(self._progress_writer(job))
-            done = StartTranslation(
-                engine=engine, jobs=self._jobs, lock=self._lock
-            ).run(job)
+                engine.set_progress_callback(self._gate.progress_writer(job))
+            done = StartTranslation(engine=engine, gate=self._gate).run(job)
             if fp is not None and done.status is JobStatus.COMPLETED:
                 self._cache.put(  # type: ignore[union-attr]
                     fp, done.result.mono_path, done.result.dual_path
@@ -289,17 +256,17 @@ class JobService:
         except Exception as exc:
             # 票 09 spec review：非 EngineError 的意外例外（引擎 bug、記憶體…）
             # 不讓 daemon thread 連 traceback 直接死——job 標 FAILED＋log 錯誤鏈。
-            with self._lock:
-                if job.status is not JobStatus.CANCELLED:  # 取消後引擎才爆 → 維持 cancelled
-                    job.transition(JobStatus.FAILED)
-                    job.error = to_user_message(exc)  # 不吐原始 traceback
-                    self._jobs.save(job)
+            # 取消後引擎才爆 → 維持 cancelled（守門人內部原子判定）
+            self._gate.to_unless_cancelled(
+                job, JobStatus.FAILED, error=to_user_message(exc)  # 不吐原始 traceback
+            )
             logger.error(
                 "任務失敗（未預期例外）",
                 extra={"job_id": job.job_id, "error_chain": format_error_chain(exc)},
             )
         finally:
             # 票 08 review：thread/engine 引用收尾清理（歷史任務無界增長）
+            self._gate.mark_done(job.job_id)  # 候選 4：worker 結束 → delete 解禁
             self._threads.pop(job.job_id, None)
             self._engines.pop(job.job_id, None)
 
@@ -331,17 +298,15 @@ class JobService:
         stem = Path(job.source_path).stem
         mono = self._restore(hit.mono_path, dest_dir / f"{stem}.{job.target_lang}.mono")
         dual = self._restore(hit.dual_path, dest_dir / f"{stem}.{job.target_lang}.dual")
-        job.result = JobResult(
-            mono_path=str(mono) if mono else None,
-            dual_path=str(dual) if dual else None,
-            from_cache=True,
-        )
         # 2026-08-12 實測 bug：QUEUED→COMPLETED 是非法轉換（狀態機：QUEUED→
         # TRANSLATING→COMPLETED）——快取命中跳過引擎但不能跳過狀態機，
         # 先標 TRANSLATING（語意：進行中→完成，只是瞬間完成）再 COMPLETED。
-        job.transition(JobStatus.TRANSLATING)
-        job.transition(JobStatus.COMPLETED)
-        self._jobs.save(job)
+        self._gate.to(job, JobStatus.TRANSLATING)
+        self._gate.to(job, JobStatus.COMPLETED, result=JobResult(
+            mono_path=str(mono) if mono else None,
+            dual_path=str(dual) if dual else None,
+            from_cache=True,
+        ))
         logger.info("任務命中快取（引擎未呼叫）", extra={"job_id": job.job_id})
 
     @staticmethod

@@ -7,6 +7,7 @@
 import pytest
 
 from paper_kit.application.ports import EngineError, TranslationEnginePort
+from paper_kit.application.job_state import JobStateGate
 from paper_kit.application.start_translation import StartTranslation
 from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import JobStatus, TranslationJob
@@ -50,7 +51,7 @@ def run_success() -> tuple[TranslationJob, FakeEngine, InMemoryJobRepository]:
     engine = FakeEngine(
         result=JobResult(mono_path="/out/job-1.mono.pdf", dual_path="/out/job-1.dual.pdf")
     )
-    StartTranslation(engine=engine, jobs=repo).run(job)
+    StartTranslation(engine=engine, gate=JobStateGate(repo)).run(job)
     return job, engine, repo
 
 
@@ -72,7 +73,7 @@ def test_result_stored_back_with_tokens():
             output_tokens=2219,
         )
     )
-    StartTranslation(engine=engine, jobs=repo).run(job)
+    StartTranslation(engine=engine, gate=JobStateGate(repo)).run(job)
     stored = repo.get("job-1")
     assert stored.result.mono_path == "/out/job-1.mono.pdf"
     assert stored.result.dual_path == "/out/job-1.dual.pdf"
@@ -84,7 +85,7 @@ def test_engine_failure_marks_job_failed_with_error():
     repo = InMemoryJobRepository()
     repo.add(job)
     engine = FakeEngine(error="SiliconFlow 上游 500")
-    StartTranslation(engine=engine, jobs=repo).run(job)
+    StartTranslation(engine=engine, gate=JobStateGate(repo)).run(job)
     assert job.status == JobStatus.FAILED
     assert "SiliconFlow" in job.error
     assert repo.get("job-1").status == JobStatus.FAILED  # 失敗也存回
@@ -97,8 +98,12 @@ def test_cannot_start_completed_job():
     repo = InMemoryJobRepository()
     repo.add(job)
     engine = FakeEngine(result=JobResult(mono_path="/x.pdf"))
-    with pytest.raises(Exception):
-        StartTranslation(engine=engine, jobs=repo).run(job)
+    from paper_kit.domain.translation_job import InvalidTransition
+
+    # 明確指定例外型別（候選 4 重構時發現：原本 raises(Exception) 會被建構子的
+    # TypeError 蒙混過關——測試通過但理由是錯的）
+    with pytest.raises(InvalidTransition):
+        StartTranslation(engine=engine, gate=JobStateGate(repo)).run(job)
     assert engine.received == []  # 沒送出
 
 
@@ -145,7 +150,7 @@ def test_translating_status_is_persisted_before_engine_runs():
     repo.add(job)
     engine = StatusProbeEngine(repo, JobResult(mono_path="/x.pdf"))
 
-    StartTranslation(engine=engine, jobs=repo).run(job)
+    StartTranslation(engine=engine, gate=JobStateGate(repo)).run(job)
 
     assert engine.status_seen_by_ui is JobStatus.TRANSLATING, (
         "引擎執行期間 repo 必須已是 TRANSLATING，否則 UI 全程顯示「排隊中」"
