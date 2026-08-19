@@ -54,9 +54,16 @@ jobs:
     needs: tests
     steps:
       - uses: actions/checkout@v4
+      # enable-cache 關閉（2026-08-19 v0.2.0 實測）：setup-uv 的**收尾**快取清理
+      # 在 macOS runner 上撞到鎖競爭而失敗——
+      #   Cache is currently in-use, waiting for other uv processes to finish
+      #   error: Timeout (300s) when waiting for lock on setup-uv-cache
+      # 前面的測試、PyInstaller 打包、冒煙、artifact 上傳全部成功，卻因為一個純
+      # 清理步驟讓整個 job 標紅 → release job（needs 兩個 build）被跳過 → 明明兩包
+      # 都建好了卻沒有 Release。
+      # 打包 job 每次都是全新依賴解析，本來就不太受益於 uv 快取；用「少一個會失敗
+      # 的環節」換那點時間是划算的。調長 UV_LOCK_TIMEOUT 只是把偶發往後推。
       - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
       - name: 安裝依賴
         run: uv sync --frozen
       - name: 測試
