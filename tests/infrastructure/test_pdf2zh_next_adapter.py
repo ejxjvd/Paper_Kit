@@ -938,8 +938,11 @@ def test_reader_thread_crash_does_not_deadlock(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "paper_kit.infrastructure.cli_adapter_base.subprocess.Popen", HangingProc
     )
+    # 候選 2 重構後樹殺住在 subprocess_exec（機制搬家，攔截點跟著搬）——
+    # 同一個行為另有真實子程序測試把關：test_subprocess_exec.py::
+    # test_stream_kills_on_inactivity。
     monkeypatch.setattr(
-        "paper_kit.infrastructure.cli_adapter_base._kill_tree",
+        "paper_kit.infrastructure.subprocess_exec._platform_kill_tree",
         lambda proc: killed.append(proc),
     )
 

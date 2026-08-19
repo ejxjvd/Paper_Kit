@@ -6,11 +6,9 @@ Pdf2zhNextAdapter 與 BabelDocAdapter 共用同一 translate 循環——retry �
 """
 
 import logging
-import os
 import shutil
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -19,9 +17,17 @@ from paper_kit.domain.job_result import JobResult
 from paper_kit.domain.translation_job import TranslationJob
 import paper_kit.infrastructure.llm_probe as llm_probe  # 卡②：探測走單點（module 訪問，patch 單點才生效）
 from paper_kit.infrastructure.logging_setup import format_error_chain, redact, redact_command
+from paper_kit.infrastructure.subprocess_exec import spawn, stream  # 候選 2：機制本體
 from paper_kit.infrastructure.uv_bootstrap import download_failures, resolve_uv
 from paper_kit.platform import kill_tree as _platform_kill_tree  # 平台分離（2026-08-14）
-from paper_kit.platform import spawn_kwargs  # POSIX 進程組長／win32 無操作
+
+# CLI 引擎專屬的環境變數（不放進 subprocess_exec——那是通用機制，不該認得 rich／tqdm）。
+# #23（2026-08-13 實跑定案）：babeldoc（rich）非 TTY 輸出固定寬度折行，token 統計行
+# 數字被拆到次行 → parse 誤記 out=0。COLUMNS 放大 → rich 寬 console → 單行完整。
+# #76（2026-08-14 實測教訓）：PYTHONUNBUFFERED=1——pdf2zh 的 tqdm 進度在非 TTY 下
+# 不 flush，輸出卡在子程序 8KB block 緩衝 → reader 讀不到任何行 → 300s inactivity
+# 誤殺（使用者實測「翻譯超時」）。unbuffered 後活性信號連續。
+_ENGINE_ENV = {"COLUMNS": "1000", "PYTHONUNBUFFERED": "1"}
 
 logger = logging.getLogger("paper_kit.infrastructure.cli_adapter_base")
 
@@ -203,22 +209,24 @@ class CliAdapterBase:
 
     @staticmethod
     def _default_runner(adapter: "CliAdapterBase"):
-        """Popen 版 runner（#73 流式）：子程序 handle 掛回 adapter，cancel() 才能 kill。
+        """串流 runner：組出可執行命令 → spawn → stream。機制本體在 subprocess_exec。
 
-        舊版 `proc.communicate(timeout=600)` 是總牆鐘——CH4 實測（58 頁，265.8s
-        完成）證明：SiliconFlow 逐段 API 呼叫間隔 5–20s，翻譯中「段落 warning 行」
-        就是活性信號；死守總牆鐘會在翻譯進行到一半硬殺（真實 FAILED 案例）。
-        新版改以 **inactivity deadline** 判 hang：最後一行的時間超過
-        inactivity_seconds 才逾時；有輸出行就續命。總牆鐘只剩保險（拉高）。
+        架構深化（2026-08-19，候選 2）：這裡原本內嵌整套 Popen／reader thread／
+        看門狗／樹殺，且只能靠繼承取得——真正不同的兩支 adapter（latex、ppt_vision）
+        因此複用不了，各自重寫。機制搬進 subprocess_exec 之後，這裡只剩兩件
+        **引擎專屬**的事：把 "uv" 換成可執行的絕對路徑、傳入 rich/tqdm 需要的環境變數。
+
+        runner 簽名刻意不變（grilling Q2）：既有 30 處 FakeRunner 測試測的是
+        「命令組得對不對、輸出解析對不對」，與執行機制無關，不該因重構變紅。
         """
 
         def runner(cmd: list[str], timeout: int, cwd: str | None = None):
             if cmd[0] == "uv":
                 # v0.1.1：uv 自動安裝（uv_bootstrap）——偵測鏈 PATH →
                 # ~/.local/bin → ~/.paper_kit/bin（app 專屬自動落點）→
-                # 自動下載官方二進制。取代舊「which＋home fallback」兩層：
-                # 使用者不需要手動裝任何東西（2026-08-14 使用者要求）。
-                # 全鏈失敗才給可操作訊息（含手動安裝指令），不是裸 Errno。
+                # 自動下載官方二進制。使用者不需要手動裝任何東西。
+                # 留在 adapter 而非執行核心（grilling Q7）：uv 是引擎家族的部署
+                # 細節，不是所有子程序的共同問題——xelatex、soffice 都不經過它。
                 uv = resolve_uv()
                 if uv is None:
                     # v0.1.9.3：訊息帶各源失敗實因（取代「離線?」猜測——實測
@@ -231,86 +239,17 @@ class CliAdapterBase:
                         f"（各源原因：{detail}）。{_manual_install_hint()}"
                     )
                 cmd = [uv, *cmd[1:]]
-            kwargs = {"cwd": cwd}
-            # #23（2026-08-13 實跑定案）：babeldoc（rich）非 TTY 輸出固定寬度折行，
-            # token 統計行數字被拆到次行 → parse 誤記 out=0。COLUMNS 放大 → rich 寬
-            # console → token 行單行完整（實測 COLUMNS=1000 三行皆單行）。共用骨架
-            # 統一設——pdf2zh_next 同為 rich 輸出，一併受益；對非 rich 引擎無害。
-            # #76（2026-08-14 實測教訓）：PYTHONUNBUFFERED=1——pdf2zh 的 tqdm 進度
-            # 在非 TTY 下**不 flush**（tqdm flush=False 預設），輸出卡在子程序 8KB
-            # block 緩衝，NIM 120B 慢模型翻譯期間緩衝不滿 → reader 讀不到任何行 →
-            # 300s inactivity 誤殺（使用者實測「翻譯超時」）。unbuffered 後每步
-            # 即時輸出，活性信號連續（所有引擎受益）。
-            # cp950 崩潰（2026-08-19 使用者實測）：下方 Popen 原本只給 text=True 而
-            # 未指定 encoding → Python 回退到系統地區編碼，繁中 Windows 即 cp950；
-            # 引擎輸出是 UTF-8，讀到 0xC3 就 UnicodeDecodeError。兩端一起釘死才算
-            # 關掉：這裡叫子程序「寫 UTF-8」，Popen 那邊叫自己「讀 UTF-8」。
-            kwargs["env"] = {
-                **os.environ,
-                "COLUMNS": "1000",
-                "PYTHONUNBUFFERED": "1",
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONUTF8": "1",
-            }
-            kwargs.update(spawn_kwargs())  # 平台分離：POSIX 進程組長（樹殺前提）；win32 無操作
-            # encoding 明確指定（不吃地區設定）；errors="replace" 是保險絲——即使
-            # 某天真的混進非 UTF-8 位元組，最壞只是 log 出現 U+FFFD，不會讓 reader
-            # thread 整條陣亡（陣亡的後果見 read() 內註解：proc.wait() 死鎖）。
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                **kwargs,
-            )
-            adapter._proc = proc
-            lines: list[str] = []
-            # reader thread 讀 stdout（rich bar 佔住 pipe 時 readline 會 block，
-            # 主 thread 才能做 inactivity 輪詢——communicate 做不到的關鍵）。
-            last_output = [time.monotonic()]  # 共享：reader thread 更新、主 thread 判定
-
-            def read() -> None:
-                # 例外必須就地接住（2026-08-19）：reader 死掉時下方主迴圈的
-                # `not reader.is_alive()` 會誤判成 EOF 而 break，接著 proc.wait()
-                # 無限等——子程序寫滿 pipe 緩衝後阻塞在 write，永遠不會退出，而
-                # inactivity 看門狗此時已離開迴圈救不了（cp950 崩潰的真正卡死點）。
-                # 樹殺讓 wait() 立刻回來，rc≠0 走既有錯誤路徑：吵著失敗，勝過靜默卡死。
-                try:
-                    for line in proc.stdout:
-                        lines.append(line)
-                        last_output[0] = time.monotonic()
-                        if adapter._on_line is not None:
-                            adapter._on_line(line)
-                except Exception:
-                    logger.exception("讀取引擎輸出失敗——樹殺子程序避免 wait() 死鎖")
-                    _kill_tree(proc)
-
-            reader = threading.Thread(target=read, daemon=True)
-            reader.start()
-            deadline = time.monotonic() + timeout
+            handle = spawn(cmd, cwd=cwd, env_extra=_ENGINE_ENV)
+            adapter._proc = handle.proc  # 票 08：cancel() 要殺得掉正在跑的子程序
             try:
-                while True:
-                    reader.join(0.25)
-                    if not reader.is_alive():
-                        break  # EOF：子程序關閉 stdout（正常結束或已被 kill）
-                    if proc.poll() is not None:
-                        reader.join(5.0)  # 已退出，給 reader 排空剩餘緩衝
-                        break
-                    now = time.monotonic()
-                    if now - last_output[0] > adapter._inactivity_seconds:
-                        _kill_tree(proc)
-                        reader.join(2.0)
-                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
-                    if now > deadline:
-                        _kill_tree(proc)
-                        reader.join(2.0)
-                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+                return stream(
+                    handle,
+                    on_line=adapter._on_line,
+                    inactivity_seconds=adapter._inactivity_seconds,
+                    timeout_seconds=timeout,
+                )
             finally:
                 adapter._proc = None
-            rc = proc.wait()
-            return rc, "".join(lines)
 
         return runner
 

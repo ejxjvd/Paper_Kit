@@ -8,6 +8,8 @@ Windows 程式（soffice.exe / xelatex.exe）在 WSL 下收不到 /mnt/c/... 路
 import shutil
 import subprocess
 
+from paper_kit.infrastructure.subprocess_exec import collect, spawn
+
 
 def windowsify(path: str) -> str:
     """WSL 內把 Linux 路徑轉成 Windows 形式（wslpath -w）；失敗回原樣。"""
@@ -33,20 +35,13 @@ def run_command(
     cwd：工作目錄（TeX 慣例 = 源碼目錄——多檔論文的 sty/Figures 在
     cwd 的第一順位搜尋；WSL interop 執行 .exe 時自動轉換路徑）。
     """
-    # encoding 明確指定（2026-08-19，同 cli_adapter_base 的 cp950 崩潰）：text=True
-    # 不帶 encoding 會回退系統地區編碼，繁中 Windows 即 cp950。xelatex 的 log 帶
-    # 非 ASCII（檔名、套件訊息）時就會 UnicodeDecodeError——這裡是 subprocess.run，
-    # 例外會直接往上炸掉整個編譯流程。errors="replace" 讓壞位元組退化成 U+FFFD。
+    # 走共用執行核心（架構深化候選 2，2026-08-19）：解碼契約與樹殺只有一份實作。
+    # 先前這裡是獨立的 subprocess.run，於是同一個 cp950 解碼 bug 同時住在兩處
+    # （使用者實測崩潰時兩邊都要修）。現在編碼由 subprocess_exec.spawn 釘死，
+    # 逾時也改為樹殺——舊版 subprocess.run 逾時只殺直接子程序，soffice／xelatex
+    # 的孫程序會留下來。
     try:
-        done = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            cwd=cwd,
-        )
+        rc, output = collect(spawn(cmd, cwd=cwd), timeout_seconds=timeout)
     except subprocess.TimeoutExpired:
         return 124, f"{label} 逾時（超過 {timeout} 秒無回應）"
-    return done.returncode, done.stdout + done.stderr
+    return rc, output
