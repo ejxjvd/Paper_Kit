@@ -63,7 +63,13 @@ jobs:
       # 都建好了卻沒有 Release。
       # 打包 job 每次都是全新依賴解析，本來就不太受益於 uv 快取；用「少一個會失敗
       # 的環節」換那點時間是划算的。調長 UV_LOCK_TIMEOUT 只是把偶發往後推。
+      #
+      # ⚠️ 必須顯式寫 false（v0.2.1 實測教訓）：enable-cache 的預設是 `auto`，
+      # 在 GitHub 託管 runner 上**自動啟用**。第一次修正只把 `enable-cache: true`
+      # 那行刪掉，等於什麼都沒改——v0.2.1 又在同一步失敗一次。
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
       - name: 安裝依賴
         run: uv sync --frozen
       - name: 測試
