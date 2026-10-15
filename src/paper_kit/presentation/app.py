@@ -1940,7 +1940,10 @@ def _index_page(
             ui.label("零成本翻譯（上游代理轉發）——品質低於付費引擎；機密文件請選 DeepSeek").classes(
                 "text-xs text-grey-6"
             ).mark("free-engine-hint")
-            with ui.row().classes("gap-2 w-full"):
+            # items-stretch（2026-10-16 D4）：另兩區（付費／免費 LLM）早有此 class，
+            # 唯獨本區漏了——這正是「三卡不等高」最早的來源之一。補上後與其他兩列一致，
+            # 卡片高度改由 flex stretch 決定，不再靠 CSS 硬鎖＋截斷。
+            with ui.row().classes("gap-2 w-full items-stretch"):
                 for eid in UI_FREE_ENGINE_IDS:
                     spec = ENGINE_SPECS[eid]
                     card = ui.card().mark(f"engine-card-{eid}").classes(

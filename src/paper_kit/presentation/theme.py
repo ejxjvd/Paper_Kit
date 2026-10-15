@@ -43,13 +43,19 @@ body { background: var(--pk-bg); color: var(--pk-text); }
 .pk-meta, .pk-cost { color: var(--pk-text-muted); }
 .pk-error { color: var(--pk-error); }
 .pk-progress { color: var(--pk-progress); }
-/* 2026-08-13 引擎三卡等高統一（使用者兩次回報「3 個按鍵大小不統一」）：
-   第 1 次修復（9edfe9f）用 min-height 保底——只設下界，desc 行數不同
-   （窄視窗/zoom 下 siliconflow 描述較長易換行）時內容把卡撐高，依然不等高。
-   第 2 次回報後改**固定 height**（min-height 只保底不鎖死）＋desc 兩行封頂
-   （max-height 2.4em＋overflow hidden）——卡高永不隨內容變化、三卡絕對等高。 */
+/* 引擎卡等高（2026-10-16 D4 重做，取代 2026-08-13 的固定高度補丁）。
+
+   病史：使用者兩次回報「3 個按鍵大小不統一」。第 1 修（9edfe9f）用 min-height
+   保底——只設下界、內容仍會撐高，依然不等高。第 2 修改**固定 height 104px**
+   ＋desc 兩行封頂，卡高確實不變了——但代價是**把字切掉**：siliconflow 描述
+   較長，窄視窗下先犧牲，三卡之所以「看起來等高」是因為裡面的文字被裁了。
+
+   現行做法：不限高，交給三列 `ui.row(...items-stretch)` 的 flex stretch——
+   同列卡片自動等高，且文字完整。失敗模式比較：卡片變高＝視覺節奏問題，
+   文字被截斷＝資訊損失。
+
+   紅線不變：所有色值走 var(--pk-*) token，不得寫死。 */
 .pk-engine-card {
-  height: 104px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -62,11 +68,9 @@ body { background: var(--pk-bg); color: var(--pk-text); }
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* desc 不封頂、不截斷——長的卡自然變高，同列其餘卡 stretch 跟上。 */
 .pk-engine-card .pk-engine-desc {
-  min-height: 2.4em;
-  max-height: 2.4em;
   line-height: 1.2em;
-  overflow: hidden;
 }
 """
 
