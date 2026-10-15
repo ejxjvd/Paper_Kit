@@ -549,3 +549,60 @@ async def test_settings_page_renders_engine_model_select(tmp_path):
         )
         assert select.options == [ENGINE_SPECS["nvidia"].model]  # 預設值即 registry 預設
         assert select.value == ENGINE_SPECS["nvidia"].model
+
+
+# ── 雙模型術語抽取（2026-10-16 Phase 2）────────────────────────
+
+
+def _term_model_input(user, eid: str):
+    return next(iter(user.find(kind=ui.input, marker=f"term-model-input-{eid}").elements))
+
+
+def _term_base_url_input(user, eid: str):
+    return next(iter(user.find(kind=ui.input, marker=f"term-base-url-input-{eid}").elements))
+
+
+@pytest.mark.asyncio
+async def test_settings_page_babeldoc_term_model_fields_render(tmp_path):
+    """babeldoc 卡有「術語模型」與「術語端點」兩欄——雙模型的 UI 入口。
+
+    仿沉浸式翻譯「Kimi 抽術語 + DeepSeek 翻正文」：這兩個欄位是 opt-in，
+    留空即沿用主模型（向後相容）。
+    """
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        _term_model_input(user, "babeldoc")     # 不存在會 raise
+        _term_base_url_input(user, "babeldoc")
+        await user.should_see("術語模型")
+
+
+@pytest.mark.asyncio
+async def test_save_term_model_stores_and_clears(tmp_path):
+    """儲存／清除術語模型 → 寫入設定；清空回空字串＝沿用主模型。"""
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        inp = _term_model_input(user, "babeldoc")
+        inp.value = "glm-4.7-flash"
+        user.find(kind=ui.button, marker="term-model-save-babeldoc").click()
+        await user.should_see("已儲存術語模型")
+        assert settings.term_model("babeldoc") == "glm-4.7-flash"
+
+    # 重啟驗證持久化＋清除
+    settings2 = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    assert settings2.term_model("babeldoc") == "glm-4.7-flash"
+    settings2.set_term_model("babeldoc", "")
+    assert settings2.term_model("babeldoc") == "", "清空＝沿用主模型（空字串語意）"

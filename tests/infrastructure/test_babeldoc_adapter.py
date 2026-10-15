@@ -443,3 +443,79 @@ def test_build_command_bitstring_pin_precedes_tool_name():
     否則會被當成 babeldoc 的引數。"""
     cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
     assert cmd.index("--with") < cmd.index("babeldoc")
+
+
+# ── 雙模型（術語抽取模型與正文模型分離，2026-10-16 Phase 2）──
+# 仿沉浸式翻譯「Kimi + DeepSeek」：BabelDOC 原生支援
+# --openai-term-extraction-* 四旗標。Paper_Kit 早已送出這四個旗標，但三個值
+# 全取自同一個 cfg.model——「雙模型」＝把值分開，不是新功能。
+# 來源：babeldoc main.py:526-540（一手源碼）；未設時 fallback 主 --openai-model。
+
+
+def test_term_model_defaults_to_main_model():
+    """向後相容：未設 term_model（空）時，術語旗標沿用主模型／端點／key。
+
+    這是關鍵契約——既有使用者升級後行為不得改變。雙模型是 opt-in。
+    """
+    cfg = BabelDocConfig(api_key="KEY")
+    job = make_job(auto_extract=True)
+    cmd = build_babeldoc_command(job, cfg)
+    assert cmd[cmd.index("--openai-term-extraction-model") + 1] == cfg.model
+    assert cmd[cmd.index("--openai-term-extraction-base-url") + 1] == cfg.base_url
+    assert cmd[cmd.index("--openai-term-extraction-api-key") + 1] == "KEY"
+
+
+def test_term_model_overrides_main_model():
+    """雙模型：term 三欄獨立設定時，術語旗標用術語值、正文旗標用正文值。
+
+    這正是「Kimi 抽術語 + DeepSeek 翻正文」的機制——兩個模型、
+    可以是兩個不同端點與兩把不同 key。
+    """
+    cfg = BabelDocConfig(
+        model="deepseek-chat",
+        api_key="MAINKEY",
+        base_url="https://api.deepseek.com/v1",
+        term_model="glm-4.7-flash",
+        term_api_key="TERMKEY",
+        term_base_url="https://api.z.ai/api/paas/v4",
+    )
+    job = make_job(auto_extract=True)
+    cmd = build_babeldoc_command(job, cfg)
+    # 正文用正文值
+    assert cmd[cmd.index("--openai-model") + 1] == "deepseek-chat"
+    assert cmd[cmd.index("--openai-api-key") + 1] == "MAINKEY"
+    assert cmd[cmd.index("--openai-base-url") + 1] == "https://api.deepseek.com/v1"
+    # 術語用術語值（兩個模型、兩個端點、兩把 key）
+    assert cmd[cmd.index("--openai-term-extraction-model") + 1] == "glm-4.7-flash"
+    assert cmd[cmd.index("--openai-term-extraction-api-key") + 1] == "TERMKEY"
+    assert cmd[cmd.index("--openai-term-extraction-base-url") + 1] == "https://api.z.ai/api/paas/v4"
+    # 交叉污染防呆：正文值不得出現在術語旗標
+    assert "deepseek-chat" != cmd[cmd.index("--openai-term-extraction-model") + 1]
+
+
+def test_term_fields_absent_when_auto_extract_off():
+    """auto_extract 關閉時完全不送術語旗標——與既有行為一致（單一模型不必付
+    術語抽取的成本與雲端暴露）。"""
+    cfg = BabelDocConfig(model="deepseek-chat", api_key="K", term_model="glm-4.7-flash")
+    cmd = build_babeldoc_command(make_job(auto_extract=False), cfg)
+    assert "--openai-term-extraction-model" not in cmd
+    assert "--openai-term-extraction-base-url" not in cmd
+    assert "--openai-term-extraction-api-key" not in cmd
+
+
+def test_term_base_url_falls_back_independently():
+    """部分覆寫：只設 term_model 不設 term_base_url／key → 後兩者各自沿用主值。
+
+    三欄獨立 fallback（不是「設了一個就全用術語組」）——讓使用者可以同一端點
+    跑兩個模型，也可以完全分開。
+    """
+    cfg = BabelDocConfig(
+        model="deepseek-chat",
+        api_key="MAINKEY",
+        base_url="https://api.deepseek.com/v1",
+        term_model="deepseek-reasoner",  # 只換模型，端點與 key 沿用
+    )
+    cmd = build_babeldoc_command(make_job(auto_extract=True), cfg)
+    assert cmd[cmd.index("--openai-term-extraction-model") + 1] == "deepseek-reasoner"
+    assert cmd[cmd.index("--openai-term-extraction-base-url") + 1] == "https://api.deepseek.com/v1"
+    assert cmd[cmd.index("--openai-term-extraction-api-key") + 1] == "MAINKEY"

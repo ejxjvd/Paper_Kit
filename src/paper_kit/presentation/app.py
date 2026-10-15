@@ -215,10 +215,14 @@ def _resolve_task_engine(
     if not spec_has_key(spec.id, settings.api_key):
         raise EngineError(f"尚未設定 {spec.label} 的 API key（設定頁填入後再翻譯）")
     # v0.1.3：model 覆寫（設定頁挑選）一併套用——主頁選引擎與設定頁 global 同源
+    # 2026-10-16 Phase 2：雙模型三欄一併帶入（否則設定頁存了、主頁翻譯收不到——plumbing 缺口）
     return spec.id, build_engine(
         spec,
         api_key=settings.api_key(spec.id),
         model_override=settings.engine_model(spec.id) or None,
+        term_api_key=settings.term_api_key(spec.id),
+        term_model=settings.term_model(spec.id),
+        term_base_url=settings.term_base_url(spec.id),
     )
 
 
@@ -751,6 +755,50 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                     "清除",
                     on_click=clear_term,
                 ).props("outline flat color=negative").mark(f"term-key-clear-{eid}")
+        if spec.provider == "babeldoc":
+            # 雙模型（2026-10-16 Phase 2，仿沉浸式翻譯「Kimi 抽術語 + DeepSeek 翻正文」）：
+            # BabelDOC 原生支援 --openai-term-extraction-*——術語抽取可以走另一個
+            # 模型／端點／key。**三欄各自獨立留空＝沿用主模型**（向後相容、opt-in）。
+            # 未開啟自動術語提取時這些設定不會被使用（UI 不隱藏，避免使用者困惑
+            # 「為什麼找不到」——N/A 由 tooltip 說明）。
+            ui.label(
+                "雙模型（術語抽取獨立；空白 = 沿用主模型與端點）"
+            ).classes("text-xs text-grey-7").mark(f"term-model-label-{eid}")
+            term_model_input = ui.input(
+                "術語模型",
+                value=settings.term_model(eid),
+            ).classes("w-full").mark(f"term-model-input-{eid}")
+            save_tm, clear_tm = _key_handlers(
+                settings, eid, term_model_input,
+                getter=settings.term_model,
+                setter=settings.set_term_model,
+                save_msg="已儲存術語模型",
+                clear_msg="已清除術語模型（沿用主模型）",
+            )
+            term_base_url_input = ui.input(
+                "術語端點",
+                value=settings.term_base_url(eid),
+            ).classes("w-full").mark(f"term-base-url-input-{eid}")
+            save_tb, clear_tb = _key_handlers(
+                settings, eid, term_base_url_input,
+                getter=settings.term_base_url,
+                setter=settings.set_term_base_url,
+                save_msg="已儲存術語端點",
+                clear_msg="已清除術語端點（沿用主端點）",
+            )
+            with ui.row().classes("gap-2"):
+                ui.button("儲存術語模型", on_click=save_tm).props(
+                    "outline"
+                ).mark(f"term-model-save-{eid}")
+                ui.button("清除術語模型", on_click=clear_tm).props(
+                    "outline flat color=negative"
+                ).mark(f"term-model-clear-{eid}")
+                ui.button("儲存術語端點", on_click=save_tb).props(
+                    "outline"
+                ).mark(f"term-base-url-save-{eid}")
+                ui.button("清除術語端點", on_click=clear_tb).props(
+                    "outline flat color=negative"
+                ).mark(f"term-base-url-clear-{eid}")
         if spec.provider == "openai":
             # v0.1.3：模型挑選（NVIDIA EOL 410 教訓——2026-08-14 使用者實測
             # deepseek-v4-flash 於 08-07 下線：registry 寫死的 model 會過期）——

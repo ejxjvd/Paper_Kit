@@ -57,6 +57,16 @@ class BabelDocConfig:
     model: str = DEFAULT_BABELDOC_MODEL
     api_key: str = ""
     base_url: str = DEFAULT_BABELDOC_BASE_URL
+    # 雙模型（2026-10-16 Phase 2）：術語抽取模型與正文模型分離——仿沉浸式翻譯
+    # 「Kimi 抽術語 + DeepSeek 翻正文」。BabelDOC 原生支援
+    # --openai-term-extraction-model/-base-url/-api-key（main.py:526-540），
+    # 未設時 fallback 主 --openai-model。
+    #
+    # 三欄**各自獨立** fallback（不是「設一個就全用術語組」）：可只換模型沿用
+    # 同端點，也可整個換到另一家。全空＝現行行為（向後相容，雙模型是 opt-in）。
+    term_model: str = ""
+    term_api_key: str = ""
+    term_base_url: str = ""
     retries: int = 2          # 暫時性錯誤重試次數
     # #73：總牆鐘只是保險（拉高）；inactivity_seconds 判 hang（無輸出行才逾時）
     timeout_seconds: int = 3600
@@ -84,11 +94,12 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
             # 自動提取開啟時不禁用（與既有術語表並存，UI 兩開關可同開）
             cmd += ["--no-auto-extract-glossary"]
     if job.auto_extract:
-        # 票 05 慣例：自動術語提取 → 同 key 的術語提取後端
+        # 自動術語提取（票 05 慣例）。雙模型（2026-10-16 Phase 2）：三欄各自
+        # fallback 主值——全空時等同舊行為（四旗標值＝主模型組）。
         cmd += [
-            "--openai-term-extraction-model", cfg.model,
-            "--openai-term-extraction-base-url", cfg.base_url,
-            "--openai-term-extraction-api-key", cfg.api_key,
+            "--openai-term-extraction-model", cfg.term_model or cfg.model,
+            "--openai-term-extraction-base-url", cfg.term_base_url or cfg.base_url,
+            "--openai-term-extraction-api-key", cfg.term_api_key or cfg.api_key,
         ]
     # #85 切片C：進階選項（babeldoc CLI 源碼實證——預設值不送旗標，引擎行為即預設）
     if job.enhance_compatibility:

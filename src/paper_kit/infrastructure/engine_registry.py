@@ -431,6 +431,7 @@ def spec_to_config(
 def build_engine(
     spec: EngineSpec, api_key: str = "", term_api_key: str = "",
     model_override: str | None = None,  # v0.1.3：設定頁挑選的模型覆寫（NVIDIA EOL 教訓）
+    term_model: str = "", term_base_url: str = "",  # 2026-10-16 Phase 2：雙模型
 ) -> Pdf2zhNextAdapter | BabelDocAdapter | PptVisionAdapter | LatexAdapter:
     """spec → adapter（引擎旗標對映在 adapter 內部，UI 不知情）。票 13/14：換插頭＝分派。
 
@@ -438,6 +439,8 @@ def build_engine(
     Pdf2zhNextAdapter 有意義（term 旗標僅 siliconflow provider 發送，#83）。
     v0.1.3：model_override 非空時取代 spec.model（設定頁下拉/自訂挑選——
     2026-08-14 NVIDIA deepseek-v4-flash EOL 410 實測教訓）。
+    Phase 2（2026-10-16）：term_model／term_base_url＝雙模型術語抽取端設定，
+    空＝沿用主模型（只對 BabelDocAdapter 有意義）。
     卡④：pdf2zh 系欄位對映收進 spec_to_config 單點（含 LatexAdapter 型別註記補齊）。"""
     model = model_override or spec.model
     if spec.provider == "babeldoc":
@@ -445,6 +448,9 @@ def build_engine(
             model=model,
             api_key=api_key,
             base_url=spec.base_url,
+            term_model=term_model,
+            term_api_key=term_api_key,
+            term_base_url=term_base_url,
         )
         return BabelDocAdapter(cfg)
     if spec.provider == "ppt-vision":

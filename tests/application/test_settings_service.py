@@ -207,3 +207,55 @@ def test_cache_enabled_toggle_roundtrip(tmp_path):
 
     restarted = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))  # 重啟
     assert restarted.cache_enabled() is False
+
+
+# ── 雙模型術語設定（2026-10-16 Phase 2）──
+
+
+def test_term_model_defaults_blank_and_roundtrip(tmp_path):
+    """術語模型三欄（model／base_url／api_key）：預設空＝沿用主模型（向後相容）。
+
+    空字串是關鍵語意——不是「沒有設定」，而是「用主模型的值」。
+    """
+    svc = make_service(tmp_path)
+    assert svc.term_model("babeldoc") == ""
+    assert svc.term_base_url("babeldoc") == ""
+    svc.set_term_model("babeldoc", "glm-4.7-flash")
+    svc.set_term_base_url("babeldoc", "https://api.z.ai/api/paas/v4")
+    assert svc.term_model("babeldoc") == "glm-4.7-flash"
+    assert svc.term_base_url("babeldoc") == "https://api.z.ai/api/paas/v4"
+
+
+def test_term_model_clear_restores_main_fallback(tmp_path):
+    """清空（空字串）＝回到沿用主模型——不是殘留上次設定。"""
+    svc = make_service(tmp_path)
+    svc.set_term_model("babeldoc", "glm-4.7-flash")
+    svc.set_term_model("babeldoc", "")
+    assert svc.term_model("babeldoc") == ""
+
+
+def test_build_engine_threads_term_config_to_babeldoc(tmp_path):
+    """設定 → 引擎：雙模型三欄必須確實傳進 BabelDocConfig（不是只存在 DB）。
+
+    這是 plumbing 測試——防止「設定頁存了、引擎沒收到」的靜默失效。
+    """
+    from paper_kit.infrastructure.engine_registry import ENGINE_SPECS, build_engine
+
+    svc = make_service(tmp_path)
+    svc.set_api_key("deepseek", "MAINKEY")
+    svc.set_term_model("babeldoc", "glm-4.7-flash")
+    svc.set_term_base_url("babeldoc", "https://api.z.ai/api/paas/v4")
+    svc.set_term_api_key("babeldoc", "TERMKEY")
+
+    adapter = build_engine(
+        ENGINE_SPECS["babeldoc"],
+        api_key="MAINKEY",
+        term_api_key="TERMKEY",
+        term_model="glm-4.7-flash",
+        term_base_url="https://api.z.ai/api/paas/v4",
+    )
+    cfg = adapter._config
+    assert cfg.model == ENGINE_SPECS["babeldoc"].model, "正文模型不應被術語設定污染"
+    assert cfg.term_model == "glm-4.7-flash"
+    assert cfg.term_base_url == "https://api.z.ai/api/paas/v4"
+    assert cfg.term_api_key == "TERMKEY"

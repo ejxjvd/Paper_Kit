@@ -49,6 +49,25 @@ class SettingsService:
     def set_term_api_key(self, engine_id: str, api_key: str) -> None:
         self._repo.set(f"term_api_key_{engine_id}", api_key)
 
+    # ── 雙模型：術語抽取模型分離（2026-10-16 Phase 2）────────────
+
+    def term_model(self, engine_id: str) -> str:
+        """術語抽取模型覆寫；空＝沿用主模型（build_babeldoc_command fallback）。
+
+        空字串是語意值不是缺值——雙模型是 opt-in，既有使用者升級後行為不變。
+        """
+        return self._repo.get(f"term_model_{engine_id}", "") or ""
+
+    def set_term_model(self, engine_id: str, model: str) -> None:
+        self._repo.set(f"term_model_{engine_id}", model)
+
+    def term_base_url(self, engine_id: str) -> str:
+        """術語抽取端點覆寫；空＝沿用主端點（可只換模型、共用同端點）。"""
+        return self._repo.get(f"term_base_url_{engine_id}", "") or ""
+
+    def set_term_base_url(self, engine_id: str, base_url: str) -> None:
+        self._repo.set(f"term_base_url_{engine_id}", base_url)
+
     # ── v0.1.3：引擎模型覆寫（設定頁下拉/自訂挑選）────────────────────
 
     def engine_model(self, engine_id: str) -> str:
@@ -81,6 +100,8 @@ class SettingsService:
             api_key=key,
             term_api_key=self.term_api_key(spec.id),
             model_override=self.engine_model(spec.id) or None,
+            term_model=self.term_model(spec.id),
+            term_base_url=self.term_base_url(spec.id),
         )
 
     # ── 語言／輸出目錄 ──────────────────────────────────────
