@@ -157,6 +157,40 @@ def test_build_command_auto_extract_uses_term_extraction_flags():
     assert "--no-auto-extract-glossary" not in cmd
 
 
+def test_build_command_omits_api_key_flag_when_blank():
+    """#216：空 api_key 不得送空值旗標，也不得留下**沒有值的裸旗標**。
+
+    病灶：原本無條件 `cmd += ["--openai-api-key", cfg.api_key]`——空字串時
+    babeldoc 收到 `--openai-api-key ""`，而 `_preflight` 的 `if self._config.api_key:`
+    會跳過探針，於是沒有早期診斷、最終以上游 401 收場。
+
+    兩種壞法都要擋：①旗標存在但值為空字串 ②旗標存在但後面沒東西（`cmd[-1]`
+    是旗標本身）——後者會讓 babeldoc 把下一個旗標吃成 key 的值。
+    """
+    cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key=""))
+    assert "--openai-api-key" not in cmd, "空 key 不得送旗標"
+    assert cmd[-1] != "--openai-api-key", "不得留下無值的裸旗標"
+
+    # 對照：有 key 時照送（避免修過頭把正常路徑也關掉）
+    cmd2 = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
+    assert cmd2[cmd2.index("--openai-api-key") + 1] == "KEY"
+
+
+def test_build_command_term_key_falls_back_to_main_even_when_main_blank():
+    """#216 邊界：術語 key 為空且主 key 也為空 → 術語旗標同樣不得送空值。
+
+    雙模型的三欄各自 `or` 回退主值；主值本身為空時回退結果仍是空——
+    若照樣送出即重現空值旗標病灶。
+    """
+    cmd = build_babeldoc_command(
+        make_job(auto_extract=True), BabelDocConfig(api_key="")
+    )
+    if "--openai-term-extraction-api-key" in cmd:
+        assert cmd[cmd.index("--openai-term-extraction-api-key") + 1] != "", (
+            "術語 key 回退後仍為空時不得送出空值"
+        )
+
+
 # ── #85 切片C：babeldoc 進階旗標（僅 babeldoc 引擎，一手 CLI 源碼實證） ──
 
 

@@ -80,7 +80,10 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
     cmd = engine_tool_run("babeldoc") + ["--files", job.source_path, "--openai"]
     cmd += ["--openai-model", cfg.model]
     cmd += ["--openai-base-url", cfg.base_url]
-    cmd += ["--openai-api-key", cfg.api_key]
+    if cfg.api_key:
+        # 無 key 時不送空值旗標（#216）：空字串會讓 babeldoc 收到空 key 且
+        # _preflight 略過探針，最終以上游 401 收場、沒有早期診斷。同 term 側寫法。
+        cmd += ["--openai-api-key", cfg.api_key]
     cmd += ["--lang-out", job.target_lang]
     if job.pages:
         cmd += ["--pages", job.pages]
@@ -96,11 +99,14 @@ def build_babeldoc_command(job: TranslationJob, cfg: BabelDocConfig) -> list[str
     if job.auto_extract:
         # 自動術語提取（票 05 慣例）。雙模型（2026-10-16 Phase 2）：三欄各自
         # fallback 主值——全空時等同舊行為（四旗標值＝主模型組）。
-        cmd += [
-            "--openai-term-extraction-model", cfg.term_model or cfg.model,
-            "--openai-term-extraction-base-url", cfg.term_base_url or cfg.base_url,
-            "--openai-term-extraction-api-key", cfg.term_api_key or cfg.api_key,
-        ]
+        # #216：key 解析後若仍為空則整組不送（空值旗標＝babeldoc 收到空 key）。
+        term_key = cfg.term_api_key or cfg.api_key
+        if term_key:
+            cmd += [
+                "--openai-term-extraction-model", cfg.term_model or cfg.model,
+                "--openai-term-extraction-base-url", cfg.term_base_url or cfg.base_url,
+                "--openai-term-extraction-api-key", term_key,
+            ]
     # #85 切片C：進階選項（babeldoc CLI 源碼實證——預設值不送旗標，引擎行為即預設）
     if job.enhance_compatibility:
         cmd += ["--enhance-compatibility"]
