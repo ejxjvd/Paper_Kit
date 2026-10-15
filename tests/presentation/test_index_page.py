@@ -1735,3 +1735,37 @@ async def test_local_gateway_hint_warns_not_local_inference(tmp_path):
     ) as user:
         await _open_twice(user)
         await user.should_see("不是本機推論", retries=10)
+
+
+# ── D4 渲染驗證（2026-10-16）：不是斷言 CSS 字串，而是檢查實際落地的 DOM ──
+
+
+@pytest.mark.asyncio
+async def test_engine_rows_render_with_items_stretch(tmp_path):
+    """D4 視覺契約（渲染層）：四個引擎列的 row 都帶 items-stretch。
+
+    與 test_theme.py 的原始碼掃描互補——那支掃 app.py 字串，這支檢查
+    **渲染後的元素樹真的套用了 class**（防止 class 寫了但沒落到 UI）。
+    走元素樹（_walk）而非 HTML 字串：user_simulation 的 client.content
+    是 Element 樹不是字串（既有 _dom_markers 同款做法）。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        rows = []
+
+        def _walk(node):
+            cls = " ".join(getattr(node, "classes", []) or [])
+            if "gap-2" in cls and "w-full" in cls:
+                rows.append(cls)
+            slot = getattr(node, "default_slot", None)
+            for child in (slot.children if slot else []):
+                _walk(child)
+
+        _walk(user.client.content)
+        assert len(rows) >= 3, f"引擎列數異常：{len(rows)}"
+        for cls in rows:
+            assert "items-stretch" in cls, f"引擎列未套用 items-stretch：{cls}"
