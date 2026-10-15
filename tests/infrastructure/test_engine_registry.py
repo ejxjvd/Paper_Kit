@@ -306,11 +306,21 @@ def test_free_specs_have_card_desc_and_info():
 
 
 def test_all_keyless_specs_in_ui_free_ids():
-    """不變式：所有 needs_key=False 的引擎必須在 UI_FREE_ENGINE_IDS——未來加
-    keyless 引擎不上免費卡即紅（P3 單點模式的自動守衛）。"""
-    
+    """不變式：所有 needs_key=False 的引擎必須上卡——免費翻譯區或本機代理區。
+
+    契約變更記錄（§13② 護欄改裝，2026-10-16 D2）：
+      舊契約：keyless ⊆ UI_FREE_ENGINE_IDS
+      新契約：keyless ⊆ UI_FREE_ENGINE_IDS ∪ UI_LOCAL_GATEWAY_ENGINE_IDS
+      為什麼：opencode-local 是 loopback 且 keyless，但 loopback 進不了
+        UI_FREE_ENGINE_IDS（該區要求 https://）。若不放寬，一支合法引擎
+        會因「上不了免費卡」而被誤判為違規。原始意圖（keyless 引擎不得
+        成為無卡孤兒）不變，故以兩區聯集表達而非刪除斷言。
+    """
+    from paper_kit.presentation.engine_cards import UI_LOCAL_GATEWAY_ENGINE_IDS
+
     keyless = {eid for eid, spec in ENGINE_SPECS.items() if not spec.needs_key}
-    assert keyless <= set(UI_FREE_ENGINE_IDS), f"未上免費卡：{keyless - set(UI_FREE_ENGINE_IDS)}"
+    covered = set(UI_FREE_ENGINE_IDS) | set(UI_LOCAL_GATEWAY_ENGINE_IDS)
+    assert keyless <= covered, f"未上任何卡區的 keyless 引擎：{keyless - covered}"
 
 
 # ── 免費 LLM key 引擎（2026-08-13，Free-LLM-Collection 查證後加入）──
@@ -325,10 +335,18 @@ def test_ui_free_key_engine_ids_priority_order():
     ＞ Z.AI（v0.1.7 回補：GLM 中文 T1/T2，api.z.ai 國際站實測免費）＞ ModelScope
     （T1 品質天花板）＞ Groq（T2、RPD 充裕）＞ OpenRouter（nemotron 翻譯數據免費群
     最佳）＞ 阿里雲 Model Studio（Qwen 官方，1M tokens 一次性）＞ Gemini（T2 但
-    免費層資料訓練，殿後）。"""
-    
+    免費層資料訓練，殿後）＞ OpenCode Console（2026-10-16 D2 加入；殿後）。
+
+    契約變更記錄（§13②，2026-10-16）：末位新增 "opencode"。
+    舊：…, "gemini")；新：…, "gemini", "opencode")。
+    為什麼：OpenCode Console 是 https＋BYOK＋免費層訓練條款的同質成員；
+    其優先序未經實測評比（Paper_Kit 側尚無品質數據），故置於已知排序之後，
+    不併入既有名次——待實測再決定是否前移。
+    """
+
     assert UI_FREE_KEY_ENGINE_IDS == (
         "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
+        "opencode",
     )
 
 
@@ -389,12 +407,21 @@ def test_free_key_specs_openai_provider():
 
 
 def test_all_openai_provider_specs_covered_by_ui_tuples():
-    """不變式：所有 provider=openai 的引擎必須上卡（UI_FREE_KEY_ENGINE_IDS 免費 LLM
-    ∪ UI_ENGINE_IDS 付費 OpenAI 相容）——2026-08-13 加入付費 openai/gemini-pro 後，
-    免費區守衛改為全覆蓋守衛（漏登記任何 OpenAI 相容引擎即紅）。"""
+    """不變式：所有 provider=openai 的引擎必須上卡（免費 LLM ∪ 付費 ∪ 本機代理）。
+
+    契約變更記錄（§13② 護欄改裝，2026-10-16 D2）：
+      舊契約：openai_prov ⊆ UI_FREE_KEY_ENGINE_IDS ∪ UI_ENGINE_IDS
+      新契約：再加入 UI_LOCAL_GATEWAY_ENGINE_IDS
+      為什麼：opencode-local 是 loopback（http://127.0.0.1），**不能**放進
+        UI_FREE_KEY_ENGINE_IDS——該區另一條不變式要求 base_url 為 https://。
+        若不放寬，本機閘道就成了「登記了 spec 卻上不了任何卡」的孤兒，
+        而本條不變式的原始意圖（不漏登記→不漏上卡）仍然成立。
+        放寬的方式是「三區聯集」，不是刪掉斷言。
+    """
+    from paper_kit.presentation.engine_cards import UI_LOCAL_GATEWAY_ENGINE_IDS
 
     openai_prov = {eid for eid, spec in ENGINE_SPECS.items() if spec.provider == "openai"}
-    covered = set(UI_FREE_KEY_ENGINE_IDS) | set(UI_ENGINE_IDS)
+    covered = set(UI_FREE_KEY_ENGINE_IDS) | set(UI_ENGINE_IDS) | set(UI_LOCAL_GATEWAY_ENGINE_IDS)
     assert openai_prov <= covered, f"未上任何卡：{openai_prov - covered}"
 
 
@@ -600,3 +627,78 @@ def test_can_select_combines_sensitive_and_key():
     # 一般檔：siliconflow 有 key 可選、無 key 不可選
     assert can_select("siliconflow", False, keys.get) is True
     assert can_select("siliconflow", False, {}.get) is False
+
+
+# ── OpenCode 引擎（2026-10-16 D2 裁決：A 案＋本機閘道另立第四區）──
+# 官方 Console 走既有 --openai 四旗標（零新 adapter）；本機閘道為 loopback，
+# 不入 UI_FREE_KEY_ENGINE_IDS（該區不變式要求 https://）。
+
+
+def test_opencode_official_spec():
+    """opencode：官方 Console 端點，BYOK，免費層有資料訓練條款。"""
+    spec = ENGINE_SPECS["opencode"]
+    assert spec.provider == "openai", "走 pdf2zh --openai 旗標，不需新 adapter"
+    assert spec.needs_key is True, "官方 Console 需自備 key"
+    assert spec.sensitive_ok is False, "免費層可能用於訓練——機密文件不可用（票 10 紅線）"
+    assert spec.base_url.startswith("https://")
+    assert spec.model and spec.card_desc and spec.info
+
+
+def test_opencode_local_spec_is_loopback():
+    """opencode-local：本機閘道，loopback，免 key（憑證由閘道自行解析）。
+
+    刻意**不**進 UI_FREE_KEY_ENGINE_IDS——該區不變式要求 base_url 為 https://，
+    而 loopback 是 http://。故另立卡區（UI_LOCAL_GATEWAY_ENGINE_IDS）。
+    """
+    spec = ENGINE_SPECS["opencode-local"]
+    assert spec.provider == "openai"
+    assert spec.needs_key is False, "憑證由閘道解析，App 不要求使用者填 key"
+    assert spec.sensitive_ok is False, "流量仍上行至同一批免費上游——fail-closed"
+    assert spec.base_url.startswith("http://127.0.0.1"), (
+        f"必須是 loopback（本機閘道）——得到 {spec.base_url}"
+    )
+    assert "15728" in spec.base_url, "預設埠須與閘道一致"
+    assert spec.card_desc and spec.info
+
+
+def test_opencode_specs_not_in_free_key_zone():
+    """只有**本機閘道**不得進 UI_FREE_KEY_ENGINE_IDS——該區不變式要求 https://，
+    loopback 會撞它。
+
+    官方 Console（opencode）**應該**在該區：它是 https 雲端端點、BYOK、
+    免費層有資料訓練條款——與 nvidia／zai／gemini 同性質。
+    """
+    assert "opencode-local" not in UI_FREE_KEY_ENGINE_IDS, "loopback 不得進免費 LLM 區"
+
+
+def test_local_gateway_zone_all_loopback_and_keyless():
+    """本機代理卡區不變式：全部 loopback、全部 needs_key=False。
+
+    與 UI_FREE_ENGINE_IDS 的 keyless 不變式互補——兩區的判準不同：
+    免費翻譯區＝零 key 且非 loopback；本機代理區＝loopback 且零 key。
+    """
+    from paper_kit.presentation.engine_cards import UI_LOCAL_GATEWAY_ENGINE_IDS
+
+    assert UI_LOCAL_GATEWAY_ENGINE_IDS, "本機代理區不得為空"
+    for eid in UI_LOCAL_GATEWAY_ENGINE_IDS:
+        spec = ENGINE_SPECS[eid]
+        assert spec.needs_key is False, f"{eid} 本機閘道不應要求 key"
+        assert "127.0.0.1" in spec.base_url or "localhost" in spec.base_url, (
+            f"{eid} 非 loopback——本機代理區只放本機端點"
+        )
+
+
+def test_keyless_invariants_accommodate_local_gateway_zone():
+    """不變式擴充（#209 同族的守門缺口預防）：needs_key=False 的引擎必須落在
+    「免費翻譯區」或「本機代理區」其中之一，不得兩者皆無。
+
+    舊不變式要求 keyless ⊆ UI_FREE_ENGINE_IDS——加入 loopback 引擎後必須放寬，
+    否則本機閘道無法上卡。放寬的方式是「兩區聯集」，不是刪掉斷言。
+    """
+    from paper_kit.presentation.engine_cards import (
+        UI_FREE_ENGINE_IDS, UI_LOCAL_GATEWAY_ENGINE_IDS,
+    )
+
+    keyless = {eid for eid, spec in ENGINE_SPECS.items() if not spec.needs_key}
+    covered = set(UI_FREE_ENGINE_IDS) | set(UI_LOCAL_GATEWAY_ENGINE_IDS)
+    assert keyless <= covered, f"未上任何卡區的 keyless 引擎：{keyless - covered}"

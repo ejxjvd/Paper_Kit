@@ -1043,3 +1043,19 @@ def test_dump_failure_never_breaks_translation(monkeypatch):
 
     monkeypatch.setattr(mod, "app_data_dir", boom)
     assert mod._dump_engine_output("job-abc", "內容") is None
+
+
+def test_command_pins_bitstring_below_5():
+    """v0.2.3 迴歸（2026-10-16 #205）：pdf2zh_next 路徑同樣必須釘 bitstring<5。
+
+    pdf2zh_next 只釘 `babeldoc<0.7.0,>=0.6.2`；babeldoc（0.6.2 與 0.6.4 **皆**）
+    宣告無上限的 `bitstring>=4.3.0`——整條鏈無人釘 bitstring。實測
+    `uv pip compile pdf2zh-next` 全新解析得 bitstring==5.0.0，而 5.0.0 移除了
+    BitStream（babeldoc ImportError）。現裝 4.4.0 純因環境建立時 4.4.0 還是
+    最新版——重建工具環境即壞。與 test_command_pins_engine_python 同族的
+    版本漂移型故障。
+    """
+    cmd = build_command(make_job(), EngineConfig(api_key="KEY"))
+    assert "--with" in cmd, "未釘 bitstring——重建 uv 環境後引擎會 ImportError"
+    assert cmd[cmd.index("--with") + 1] == "bitstring<5"
+    assert cmd.index("--with") < cmd.index("pdf2zh_next")

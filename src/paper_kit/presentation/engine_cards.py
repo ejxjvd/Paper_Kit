@@ -33,4 +33,16 @@ UI_FREE_ENGINE_IDS: tuple[str, ...] = ("siliconflowfree", "google", "bing")
 # 真翻譯產出存在。zai 排第 2（GLM 中文品質 T1/T2，僅次 NVIDIA）。
 UI_FREE_KEY_ENGINE_IDS: tuple[str, ...] = (
     "nvidia", "zai", "modelscope", "groq", "openrouter", "dashscope", "gemini",
+    # 2026-10-16 D2：OpenCode Console 免費層（BYOK）——與其他免費 LLM 同性質
+    # （https 雲端端點、需自備 key、免費層有資料訓練條款），殿後。
+    "opencode",
 )
+
+# 本機代理區（2026-10-16 D2 裁決：A 案＋本機閘道另立第四區）：loopback 端點，
+# 免填 key（憑證由閘道自行解析）。**不得併入 UI_FREE_KEY_ENGINE_IDS**——
+# 該區的不變式測試要求 base_url 為 https://，loopback 會撞它；且語意不同：
+# 免費 LLM 區＝「你自備免費 key 的雲端供應者」，本機代理區＝「本機轉發閘道」。
+#
+# ⚠️ 命名誠實：opencode-local 的 local 指**閘道在本機**，不是本機推論——
+# 流量仍上行至同一批免費上游。卡面文案必須寫明（sensitive_ok=False，fail-closed）。
+UI_LOCAL_GATEWAY_ENGINE_IDS: tuple[str, ...] = ("opencode-local",)

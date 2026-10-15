@@ -451,3 +451,26 @@ def test_download_uv_reuses_install_done_by_other_thread(monkeypatch):
     p = ub.download_uv()
     assert p == existing, "已裝時直接回傳既有 uv"
     assert calls == [], "已裝時不得觸網下載"
+
+
+def test_engine_tool_run_pins_python_and_deps():
+    """v0.2.3：引擎啟動前綴單一真相——engine_tool_run 同時釘 Python 與傳遞依賴。
+
+    兩個 adapter（babeldoc／pdf2zh_next）都不自拼 uv 命令，改走此函式——
+    未來新增引擎自動繼承釘定，不會漏（引擎啟動前綴只有一處）。
+    """
+    from paper_kit.infrastructure.uv_bootstrap import (
+        ENGINE_DEP_PINS, ENGINE_PYTHON, engine_tool_run,
+    )
+
+    cmd = engine_tool_run("babeldoc")
+    assert cmd[:3] == ["uv", "tool", "run"]
+    assert cmd[cmd.index("--python") + 1] == ENGINE_PYTHON
+    for pin in ENGINE_DEP_PINS:
+        assert pin in cmd, f"釘定 {pin} 未進入命令"
+    # 所有 --with 必須在工具名之前——放到工具名之後會被當成引擎自己的參數
+    assert cmd[-1] == "babeldoc"
+    assert all(
+        i < cmd.index("babeldoc")
+        for i, tok in enumerate(cmd) if tok == "--with"
+    )

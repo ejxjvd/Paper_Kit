@@ -71,6 +71,35 @@ _DOWNLOAD_TIMEOUT = 120  # 慢網下 60s 可能中斷大檔下載（v0.1.9.3 調
 # 安裝完成、pdf2zh-next 2.9.0 正常回應。
 ENGINE_PYTHON = "3.12"
 
+# v0.2.3（2026-10-16 #205）：引擎工具鏈的傳遞依賴必須釘定——與 ENGINE_PYTHON 同族的病。
+#
+# bitstring 5.0.0（2026-10-11 發布）移除 BitStream；而 babeldoc 0.6.2 與 0.6.4 都宣告
+# 無上限的 `bitstring>=4.3.0`，pdf2zh-next 只釘 `babeldoc<0.7.0,>=0.6.2`——整條鏈
+# 沒有任何一層釘 bitstring。實測：`uv tool run babeldoc --help` 在快取環境內
+# ImportError（site-packages 已是 5.0.0）；`uv pip compile` 全新解析亦得 5.0.0
+# ＝主路徑 pdf2zh_next 目前裝 4.4.0 純因環境建立時 4.4.0 還是最新版，重建即壞。
+#
+# 修法：`--with` 在 uv tool run 的**環境解析**階段約束傳遞依賴（釘 babeldoc 自身
+# 版本無效——兩版宣告相同）。實測 `uv tool run --python 3.12 --with 'bitstring<5'
+# babeldoc --help` 正常。
+#
+# 這是承載式設計：新增引擎時靠 uv 自動解依賴很方便，但代價是上游放寬限制時
+# 無人擋——故把已知的破口逐條釘在此處，與 ENGINE_PYTHON 同一個單一真相。
+ENGINE_DEP_PINS = ("bitstring<5",)
+
+
+def engine_tool_run(tool: str) -> list[str]:
+    """引擎工具啟動前綴（單一真相）：uv tool run ＋ 釘死的 Python 與傳遞依賴。
+
+    引擎 adapter 一律以此組前綴，不自行拼 `uv tool run`——新引擎自動繼承釘定，
+    不會漏。
+    """
+    cmd = ["uv", "tool", "run", "--python", ENGINE_PYTHON]
+    for pin in ENGINE_DEP_PINS:
+        cmd += ["--with", pin]
+    return cmd + [tool]
+
+
 _last_failures: list[str] = []  # 最近一次 download_uv 全敗的各源原因（呼叫方組訊息）
 _RETRY_DELAY = 2.0  # 源失敗後重試間隔（秒）——測試 monkeypatch 為 0
 _download_lock = threading.Lock()  # 2026-08-15：啟動背景安裝與翻譯並發時防重複下載/互踩

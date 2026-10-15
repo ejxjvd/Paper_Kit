@@ -353,8 +353,42 @@ ENGINE_SPECS: dict[str, EngineSpec] = {
         "「改進產品」＝資料訓練——未發表論文禁用（紅線）；額度政策近年頻繁緊縮。"
         "檔案上 Google 雲端——機密文件不可用。",
     ),
+    # ── OpenCode（2026-10-16 D2 裁決：A 案＋本機閘道另立第四區）──
+    # 兩支都走既有 provider=openai（--openai 四旗標）——零新 adapter。
+    "opencode": EngineSpec(
+        id="opencode",
+        label="OpenCode Console（免費層）",
+        provider="openai",
+        model="deepseek-v4.1-flash",
+        needs_key=True,
+        sensitive_ok=False,  # 免費層資料可能用於改進模型（票 10 紅線）
+        pricing=(Decimal("0"), Decimal("0"), 5000),  # 免費層
+        base_url="https://opencode.ai/inference/openai/v1",
+        card_desc="OpenCode Console 免費層（BYOK）",
+        info="OpenCode 官方 Console（opencode.ai）：免費層模型含 deepseek-v4.1-flash 等，"
+        "需自備 Console key。⚠️ 免費層部分模型明載資料可能用於改進模型"
+        "（nemotron 系列標『Trial use only——不得提交個人或機密資料』），"
+        "且免費模型標示限時——機密文件不可用。設定頁可下拉挑選模型。",
+    ),
+    "opencode-local": EngineSpec(
+        id="opencode-local",
+        label="OpenCode 本機閘道（127.0.0.1）",
+        provider="openai",
+        model="deepseek-v4.1-flash",
+        # 憑證由閘道自行解析（環境變數／本機 auth.json）——App 不要求使用者填 key。
+        needs_key=False,
+        # ⚠️ 名為「本機」但**不是本機推論**——流量仍上行至同一批免費上游（fail-closed）。
+        sensitive_ok=False,
+        pricing=(Decimal("0"), Decimal("0"), 5000),
+        base_url="http://127.0.0.1:15728/v1",
+        card_desc="本機閘道（非本機推論；需先啟動閘道）",
+        info="本機 OpenCode 閘道（opencode_local_gateway.py，預設 127.0.0.1:15728）。"
+        "⚠️ 名稱易誤解：這是**代理**，不是本機推論——你的內容仍會上行至 OpenCode 上游"
+        "（資料訓練條款同上）。憑證由閘道從環境變數或本機 auth.json 解析，App 不收 key。"
+        "使用前需先啟動閘道；未啟動時翻譯會失敗。機密文件不可用。",
+    ),
 }
-
+# openai/gemini-pro 2026-08-13 使用者要求新增付費 API；ppt-vision 走特化路線）。
 # P3：主頁引擎卡集合與顯示順序（票 19 明定三支 PDF 主引擎；latex 票 27 第 4 卡；
 # openai/gemini-pro 2026-08-13 使用者要求新增付費 API；ppt-vision 走特化路線）。
 # app.py 只迭代此 tuple——加引擎單點。

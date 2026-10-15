@@ -419,3 +419,27 @@ def test_babeldoc_command_pins_engine_python():
     cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
     assert cmd[cmd.index("--python") + 1] == ENGINE_PYTHON
     assert cmd.index("--python") < cmd.index("babeldoc")
+
+
+# ── 依賴釘定（2026-10-16 #205）：bitstring 5.0.0 移除 BitStream，babeldoc 宣告
+#    bitstring>=4.3.0 無上限 → 未釘定即 ImportError。--with 於 uv tool run 內
+#    約束傳遞依賴（babeldoc 自身版本無關——0.6.2/0.6.4 宣告相同）。
+
+
+def test_build_command_pins_bitstring_below_5():
+    """#205：uv tool run 必須以 --with 釘 bitstring<5。
+
+    bitstring 5.0.0（2026-10-11）移除 BitStream；babeldoc 0.6.4 宣告
+    `bitstring>=4.3.0`（無上限）→ uv 解析出 5.0.0 → 引擎啟動即
+    ImportError。實測 `uv tool run --with 'bitstring<5' babeldoc --help` 可跑。
+    """
+    cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
+    assert "--with" in cmd, "未釘 bitstring——引擎會在 bitstring>=5.0.0 環境崩潰"
+    assert cmd[cmd.index("--with") + 1] == "bitstring<5"
+
+
+def test_build_command_bitstring_pin_precedes_tool_name():
+    """--with 是 uv tool run 的旗標，必須置於工具名 'babeldoc' 之前，
+    否則會被當成 babeldoc 的引數。"""
+    cmd = build_babeldoc_command(make_job(), BabelDocConfig(api_key="KEY"))
+    assert cmd.index("--with") < cmd.index("babeldoc")

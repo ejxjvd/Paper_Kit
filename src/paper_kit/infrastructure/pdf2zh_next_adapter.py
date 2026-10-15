@@ -21,7 +21,7 @@ from paper_kit.infrastructure.cli_adapter_base import (
     _kill_tree as _base_kill_tree,
     CliAdapterBase,
 )
-from paper_kit.infrastructure.uv_bootstrap import ENGINE_PYTHON  # v0.1.9.7：引擎 Python 釘死
+from paper_kit.infrastructure.uv_bootstrap import engine_tool_run  # v0.1.9.7／v0.2.3 引擎啟動前綴單一真相
 from paper_kit.infrastructure.llm_probe import diagnose  # 卡①：探測單點（preflight 走基底 _preflight_openai，卡②）
 
 DEFAULT_BASE_URL = "https://api.siliconflow.com/v1"
@@ -63,9 +63,8 @@ class EngineConfig:
 
 def build_command(job: TranslationJob, cfg: EngineConfig) -> list[str]:
     """組裝 pdf2zh_next CLI 命令（純函式，測試直接斷言旗標）。"""
-    # --python 釘死（v0.1.9.7）：不帶此旗標時 uv 挑機器上最新直譯器，新 Python
-    # 缺預編譯輪子會退回原始碼編譯並要求 Rust 工具鏈。詳見 ENGINE_PYTHON 註解。
-    cmd = ["uv", "tool", "run", "--python", ENGINE_PYTHON, "pdf2zh_next", job.source_path]
+    # 引擎啟動前綴：uv_bootstrap.engine_tool_run（釘 Python＋傳遞依賴，單一真相）。
+    cmd = engine_tool_run("pdf2zh_next") + [job.source_path]
     if job.pages:
         cmd += ["--pages", job.pages]
     if job.only_selected_pages:

@@ -1672,3 +1672,66 @@ async def test_free_key_card_unlocks_after_key_set(tmp_path):
         await _open_twice(user)
         card = next(iter(user.find(kind=ui.card, marker="free-key-engine-card").elements))
         assert "pk-engine-card--disabled" not in card.classes, "免費 LLM 填 key 後應解禁"
+
+
+# ── 本機代理區（2026-10-16 D2：A 案＋本機閘道另立第四區）──
+
+
+@pytest.mark.asyncio
+async def test_local_gateway_section_renders(tmp_path):
+    """本機代理區上卡：header／hint／卡片齊備，且位於免費 LLM 區之後。
+
+    這是 D2 的驗收核心——Page 渲染（loopback 引擎能否實際上卡），不只是
+    registry 有 spec。純 registry 測試擋不住「登記了但 UI 沒迭代到」。
+    """
+    from paper_kit.presentation.engine_cards import UI_LOCAL_GATEWAY_ENGINE_IDS
+
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        order = [m for _, m in _dom_markers(user.client.content)]
+        assert "local-gateway-section" in order, "本機代理區 header 未渲染"
+        assert "local-gateway-hint" in order, "本機代理區 hint 未渲染"
+        for eid in UI_LOCAL_GATEWAY_ENGINE_IDS:
+            assert f"engine-card-{eid}" in order, f"{eid} 卡片未渲染"
+            user.find(kind=ui.card, marker=f"engine-card-{eid}")
+        # 位置：免費 LLM 區之後（語意分層：零key → 免費LLM → 本機代理）
+        assert order.index("free-key-engine-card") < order.index("local-gateway-section")
+
+
+@pytest.mark.asyncio
+async def test_local_gateway_card_not_disabled_without_key(tmp_path):
+    """本機閘道卡不得因「沒有 key」而被灰化——needs_key=False（憑證由閘道解析）。
+
+    防迴歸：若日後有人把它改成 needs_key=True，使用者會看到一張永遠灰掉的卡，
+    而真正的原因（閘道沒開）卻不會顯示。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        card = next(iter(user.find(kind=ui.card, marker="engine-card-opencode-local").elements))
+        assert "pk-engine-card--disabled" not in card.classes, (
+            "本機閘道為 keyless——不應因缺 key 灰化（真正原因應是閘道未啟動）"
+        )
+
+
+@pytest.mark.asyncio
+async def test_local_gateway_hint_warns_not_local_inference(tmp_path):
+    """命名誠實（D2 裁決明訂）：卡面文案必須寫明「不是本機推論」。
+
+    opencode-local 的名字會讓人以為是本機推論（隱私、離線、不外流），
+    實際流量仍上行至上游。文案是安全屬性，不是行銷——必須有測試鎖住。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        await user.should_see("不是本機推論", retries=10)

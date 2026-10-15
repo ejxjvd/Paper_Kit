@@ -27,7 +27,10 @@ from fastapi.responses import FileResponse, JSONResponse  # 票 18：批量下�
 from nicegui import app, ui
 from starlette.background import BackgroundTask  # 票 18：zip 送完即刪
 
-from paper_kit.presentation.engine_cards import UI_ENGINE_IDS, UI_FREE_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS
+from paper_kit.presentation.engine_cards import (
+    UI_ENGINE_IDS, UI_FREE_ENGINE_IDS, UI_FREE_KEY_ENGINE_IDS,
+    UI_LOCAL_GATEWAY_ENGINE_IDS,
+)
 from paper_kit.application.cost_service import CostService
 from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
@@ -1959,6 +1962,35 @@ def _index_page(
                     free_key_eid = eid
 
                 free_key_select.on_value_change(_on_free_key_select)
+
+            # 本機代理區（2026-10-16 D2 裁決：A 案＋本機閘道另立第四區）。
+            # 與免費 LLM 區分開的原因：loopback 端點（http://127.0.0.1）不符合
+            # 免費 LLM 區的 https 不變式；語意也不同——這裡是「本機轉發閘道」。
+            # ⚠️ 卡面文案必須寫明「不是本機推論」：流量仍上行至上游（命名誠實）。
+            if UI_LOCAL_GATEWAY_ENGINE_IDS:
+                ui.label("本機代理（需自行啟動閘道）").classes(
+                    "text-sm font-semibold text-grey-7 mt-2"
+                ).mark("local-gateway-section")
+                ui.label(
+                    "本機轉發閘道——⚠️ 不是本機推論，內容仍會上行至上游；"
+                    "使用前請先啟動閘道，機密文件不可用"
+                ).classes("text-xs text-grey-6").mark("local-gateway-hint")
+                with ui.row().classes("gap-2 w-full items-stretch"):
+                    for eid in UI_LOCAL_GATEWAY_ENGINE_IDS:
+                        spec = ENGINE_SPECS[eid]
+                        card = ui.card().mark(f"engine-card-{eid}").classes(
+                            "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                            + (" ring-2 ring-primary" if eid == selected_engine else "")
+                        )
+                        with card:
+                            with ui.row().classes("items-center justify-between w-full"):
+                                ui.label(spec.label).classes("font-semibold text-sm")
+                                ui.icon("help_outline").props("size=16px").classes(
+                                    "text-grey-5"
+                                ).mark(f"info-engine-{eid}").tooltip(spec.info)
+                            ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+                        engine_cards[eid] = card
+                        card.on("click", _engine_picker(_pick_engine, eid))
 
             # 2026-08-13（使用者回報「為何不用勾選也能開始翻譯」）：
             # 勾「🔒 機密文件」→ 引擎自動切 DeepSeek＋視覺卡禁用（灰化）。
