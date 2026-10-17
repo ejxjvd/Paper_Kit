@@ -77,7 +77,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
     # 2026-08-13（使用者二次回報「框框大小不一致」）：子卡套 .pk-card
     # 主題 token——與主頁引擎卡同一 border/radius/shadow 來源，不留在
     # Quasar 默認樣式造成跨頁視覺分歧
-    with ui.card().mark(f"engine-key-{eid}").classes("pk-card w-full gap-2"):
+    with ui.card().mark(f"engine-key-{eid}").classes("pk-card w-full pk-gap-2"):
         with ui.row().classes("items-center justify-between w-full"):
             ui.label(spec.label).classes("font-semibold")
             ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
@@ -95,7 +95,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
             save_msg=f"已儲存 {ENGINE_SPECS[eid].label} 的 API key",
             clear_msg=f"已清除 {ENGINE_SPECS[eid].label} 的 API key",
         )
-        with ui.row().classes("gap-2"):
+        with ui.row().classes("pk-gap-2 items-center"):
             ui.button(
                 "儲存 key",
                 on_click=save_key,
@@ -108,16 +108,26 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
             # 是否成功啟用。GET /models（零成本）驗 key ＋ POST /chat/completions
             # （max_tokens=1）驗模型可生成（#78：gemini-3-pro-latest 在清單但
             # generateContent 404 的盲區）。
+            # 相位 6 狀態承載：探測是網路往返（最長 20 秒），先前這段是空白——
+            # 使用者不知道按了有沒有反應。改為就地顯示「測試中…」，完成即清除。
+            probe_status = ui.label("").classes("pk-text-xs pk-muted").mark(
+                f"engine-key-status-{eid}"
+            )
+
             async def _test_api(eid=eid, spec=spec, settings=settings) -> None:
                 key = settings.api_key(eid)
                 if not key:
                     ui.notify(f"{spec.label}：尚未設定 key", type="warning")
                     return
-                # 卡①：探測收斂 llm_probe.probe_model（單點——UA/診斷文案與
-                # preflight 同源；v0.1.7 Groq 403 誤擋修復全端生效）
-                code, body = await asyncio.to_thread(
-                    probe_model, spec.base_url, key, spec.model
-                )
+                probe_status.set_text("測試中…")
+                try:
+                    # 卡①：探測收斂 llm_probe.probe_model（單點——UA/診斷文案與
+                    # preflight 同源；v0.1.7 Groq 403 誤擋修復全端生效）
+                    code, body = await asyncio.to_thread(
+                        probe_model, spec.base_url, key, spec.model
+                    )
+                finally:
+                    probe_status.set_text("")
                 if code == 200:
                     ui.notify(
                         f"✅ {spec.label} 連線成功（HTTP 200）",
@@ -156,7 +166,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                 save_msg="已儲存術語提取 key",
                 clear_msg="已清除術語提取 key",
             )
-            with ui.row().classes("gap-2"):
+            with ui.row().classes("pk-gap-2"):
                 ui.button(
                     "儲存術語 key",
                     on_click=save_term,
@@ -196,7 +206,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                 save_msg="已儲存術語端點",
                 clear_msg="已清除術語端點（沿用主端點）",
             )
-            with ui.row().classes("gap-2"):
+            with ui.row().classes("pk-gap-2"):
                 ui.button("儲存術語模型", on_click=save_tm).props(
                     "outline"
                 ).mark(f"term-model-save-{eid}")
@@ -269,7 +279,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
                     type="positive",
                 )
 
-            with ui.row().classes("gap-2"):
+            with ui.row().classes("pk-gap-2"):
                 ui.button(
                     "🔄 載入模型清單",
                     on_click=_load_models,
@@ -297,7 +307,7 @@ def _settings_page(
         ui.page_title("Paper_Kit 設定")
         # 票 16：統一頁框——側欄（設定 active）；主題切換收進 frame
         nav = [(l, p, _nav_active(p, "/settings")) for l, p in SIDEBAR_NAV]
-        app_frame("⚙️ Paper_Kit 設定", settings, nav)
+        app_frame("Paper_Kit 設定", settings, nav, icon="settings")
         # 2026-08-12 bug 修復：bind_value_to(locals(), ...) 寫入的是 locals() dict，
         # Python 名稱解析（LOAD_GLOBAL）看不見它——函數內讀取的變數必須顯式
         # 初始化，否則首次渲染（pricing_for(engine_id)）與「不修改直接儲存」
@@ -311,7 +321,7 @@ def _settings_page(
         per_page = str(base.per_page_tokens)
         rate = str(cost.usd_twd_rate())  # 2026-08-13：匯率顯示用（default 32，可改）
         # 票 16 spec review：殘留的原 header 已刪（app_frame 統一頂部標題）
-        with ui.column().classes("w-full max-w-2xl mx-auto p-6 gap-4"):
+        with ui.column().classes("w-full pk-container-narrow p-6 pk-gap-4"):
             with ui.card().classes("w-full"):
                 ui.label("翻譯引擎").classes("font-bold")
                 ui.select(
@@ -432,7 +442,7 @@ def _settings_page(
                     lambda e: _render_entries(glossaries, entries_box, e.value)
                 )
                 rename_to_input = ui.input("改名為（選定後填入再按）").classes("w-full")
-                with ui.row().classes("w-full items-center gap-2"):
+                with ui.row().classes("w-full items-center pk-gap-2"):
                     ui.button(
                         "改名",
                         on_click=lambda: _rename_glossary(
@@ -447,8 +457,8 @@ def _settings_page(
                             edit_select.value, entries_box,
                         ),
                     ).props("outline flat color=red")
-                entries_box = ui.column().classes("w-full gap-1")
-                with ui.row().classes("w-full items-center gap-2"):
+                entries_box = ui.column().classes("w-full pk-gap-1")
+                with ui.row().classes("w-full items-center pk-gap-2"):
                     src_input = ui.input("source").props("dense").classes("flex-1")
                     tgt_input = ui.input("target").props("dense").classes("flex-1")
                     ui.button(
@@ -675,7 +685,7 @@ def _render_entries(glossaries: GlossaryService, entries_box, name) -> None:
     with entries_box:
         shown = entries[:_DISPLAY_LIMIT]
         for i, (source, target) in enumerate(shown):
-            with ui.row().classes("items-center w-full gap-2"):
+            with ui.row().classes("items-center w-full pk-gap-2"):
                 ui.label(f"{source} → {target}").classes("flex-1 pk-text-sm")
                 ui.button(
                     "✕",

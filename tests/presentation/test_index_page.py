@@ -224,7 +224,7 @@ async def test_engine_cards_select_task_engine(tmp_path, monkeypatch, make_blank
     settings.set_api_key("deepseek", "sk-test")  # override 路徑建引擎前查 key
     monkeypatch.setattr(
         "paper_kit.presentation.index_page.build_engine",
-        lambda spec, api_key="": FileWritingFakeEngine(),
+        lambda spec, api_key="", **kw: FileWritingFakeEngine(),
     )
 
     async with user_simulation(
@@ -268,7 +268,7 @@ async def test_target_lang_select_defaults_to_settings_value(tmp_path, monkeypat
     settings.set_api_key("deepseek", "sk-test")  # _pick_and_upload 點 DeepSeek 卡
     monkeypatch.setattr(
         "paper_kit.presentation.index_page.build_engine",
-        lambda spec, api_key="": FileWritingFakeEngine(),
+        lambda spec, api_key="", **kw: FileWritingFakeEngine(),
     )
 
     async with user_simulation(
@@ -907,12 +907,17 @@ async def test_engine_cards_after_checks_before_output_area(tmp_path):
 
 
 def _find_cards_container(el):
-    """DFS 找「任務卡容器」——ui.column、classes 恰為 w-full gap-4（app.py 1751）。
+    """DFS 找「任務卡容器」——ui.column、classes 恰為 w-full pk-gap-4。
 
-    #22：卡片容器掉出 max-w-4xl 欄位時，此 DFS 在 root slot 直屬處也找得到——
-    測的是「容器的 parent 是誰」，不是「存不存在」。
+    #22：卡片容器掉出表單寬度欄位時，此 DFS 在 root slot 直屬處也找得到——
+    測的是「容器的 parent 是誰」，不是「存不存在」。相位 6 起寬度與間距
+    走語意 class（pk-container-form／pk-gap-4），不再用 Quasar 數值 utility。
     """
-    if isinstance(el, ui.column) and "gap-4" in el._classes and "max-w-4xl" not in el._classes:
+    if (
+        isinstance(el, ui.column)
+        and "pk-gap-4" in el._classes
+        and "pk-container-form" not in el._classes
+    ):
         return el
     for child in getattr(el, "default_slot", None) and el.default_slot.children or []:
         found = _find_cards_container(child)
@@ -942,8 +947,8 @@ async def test_job_cards_container_inside_maxw_column(tmp_path):
         assert parent is not None and isinstance(parent, ui.column), (
             "任務卡容器必須在 ui.column 內（不可是 root slot 直屬）"
         )
-        assert "max-w-4xl" in parent._classes, (
-            "任務卡容器的父層必須是 max-w-4xl 欄位（卡片與上方內容同寬）"
+        assert "pk-container-form" in parent._classes, (
+            "任務卡容器的父層必須是 pk-container-form 欄位（卡片與上方內容同寬）"
         )
 
 

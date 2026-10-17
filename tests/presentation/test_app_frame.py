@@ -113,3 +113,32 @@ async def test_settings_page_has_sidebar_with_three_nav_items(tmp_path):
         await user.should_see("翻譯")
         await user.should_see("歷史")
         await user.should_see("設定")
+
+
+@pytest.mark.asyncio
+async def test_theme_toggle_uses_material_icons(tmp_path):
+    """相位 6 圖示系統：主題切換鈕用 Material 圖示（不是 emoji），且切換後更新。
+
+    狀態語意 emoji（🔒 機密／🔍 掃描件等）依計畫保留——既有測試以文字 marker
+    定位；裝飾性圖示（主題切換）改走 UI 內建圖示集，不引入外部資源。
+    """
+    service, settings, cost, glossaries = _build(tmp_path)
+
+    async with user_simulation(
+        root=lambda: _index_page(service, settings, cost, glossaries)
+    ) as user:
+        await _open_twice(user)
+        icons = {
+            b._props.get("icon")
+            for b in user.find(marker="theme-toggle").elements
+        }
+        assert "dark_mode" in icons, "預設深色 → 顯示 dark_mode（Material 圖示）"
+        assert settings.dark_mode() is True
+        user.find(marker="theme-toggle").click()
+        assert settings.dark_mode() is False, "點擊後偏好應切到淺色"
+        await user.open("/")  # 重繪一次，確認新頁面反映新狀態
+        icons = {
+            b._props.get("icon")
+            for b in user.find(marker="theme-toggle").elements
+        }
+        assert "light_mode" in icons, "切到淺色後圖示同步更新"

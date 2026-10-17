@@ -182,6 +182,40 @@ body {{
 .pk-engine-card .pk-engine-desc {{
   line-height: var(--pk-line-height-tight);
 }}
+.pk-empty-state {{
+  padding: var(--pk-space-5);
+  border: 1px dashed var(--pk-color-border);
+  border-radius: var(--pk-radius-md);
+  color: var(--pk-color-text-muted);
+}}
+.pk-empty-icon {{ color: var(--pk-color-text-muted); font-size: var(--pk-font-size-2xl); }}
+.pk-skeleton-row {{ align-items: center; }}
+.pk-skeleton {{
+  height: var(--pk-font-size-sm);
+  background: var(--pk-color-border);
+  border-radius: var(--pk-radius-sm);
+  animation: pk-pulse var(--pk-motion-slow) var(--pk-ease-standard) infinite alternate;
+}}
+.pk-skeleton-title {{ width: 38%; }}
+.pk-skeleton-meta {{ width: 22%; }}
+@keyframes pk-pulse {{ from {{ opacity: 0.35; }} to {{ opacity: 0.7; }} }}
+.pk-inline-error {{
+  border-left: 3px solid var(--pk-color-error);
+  background: var(--pk-color-surface);
+  padding: var(--pk-space-2) var(--pk-space-3);
+  border-radius: var(--pk-radius-sm);
+}}
+.pk-gap-0 {{ gap: 0; }}
+.pk-gap-1 {{ gap: var(--pk-space-1); }}
+.pk-gap-2 {{ gap: var(--pk-space-2); }}
+.pk-gap-3 {{ gap: var(--pk-space-3); }}
+.pk-gap-4 {{ gap: var(--pk-space-4); }}
+.pk-container-wide {{ width: 100%; }}
+.pk-container-form {{ width: 100%; max-width: 56rem; margin-inline: auto; }}
+.pk-container-narrow {{ width: 100%; max-width: 42rem; margin-inline: auto; }}
+.q-linear-progress__bar {{
+  transition: transform var(--pk-motion-base) var(--pk-ease-standard) !important;
+}}
 @media (prefers-reduced-motion: reduce) {{
   :root {{
     --pk-motion-fast: 0ms;

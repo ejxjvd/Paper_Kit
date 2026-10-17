@@ -55,7 +55,9 @@ def _toggle_theme(settings: SettingsService, dark: ui.dark_mode, btn) -> None:
         dark.enable()
     else:
         dark.disable()
-    btn.set_text("☀️" if on else "🌙")
+    # 相位 6 圖示系統：狀態語意 emoji 換成 Material 圖示（UI 內建圖示集，
+    # 不引入外部資源）。圖示反映「目前模式」——深色時顯示月亮。
+    btn.props(f"icon={'light_mode' if on else 'dark_mode'}")
 
 
 def app_frame(
@@ -63,6 +65,7 @@ def app_frame(
     settings: SettingsService,
     nav: list[tuple[str, str, bool]],
     badge: str | None = None,
+    icon: str | None = None,
 ) -> None:
     """票 16：統一頁框——頂部標題＋左側導覽欄＋主題切換＋Debug 頁尾。
 
@@ -72,17 +75,20 @@ def app_frame(
     """
     dark = _enter_theme(settings)
     with ui.header().classes("items-center justify-between"):
-        with ui.row().classes("items-center gap-3"):
+        with ui.row().classes("items-center pk-gap-3"):
+            if icon:
+                # 相位 6 圖示系統：裝飾性 emoji 換成 Material 圖示（UI 內建集）
+                ui.icon(icon).classes("pk-text-2xl pk-muted")
             ui.label(title).classes("pk-text-2xl font-bold")
             if badge:
                 ui.badge(badge).props("outline")
-        with ui.row().classes("items-center gap-3"):
+        with ui.row().classes("items-center pk-gap-3"):
             theme_btn = ui.button(
-                "🌙" if settings.dark_mode() else "☀️",
+                icon="dark_mode" if settings.dark_mode() else "light_mode",
                 on_click=lambda: _toggle_theme(settings, dark, theme_btn),
-            ).props("flat round")
+            ).props("flat round").mark("theme-toggle")
     with ui.left_drawer(value=True).classes("pk-sidebar"):
-        with ui.column().classes("w-full gap-1 p-2"):
+        with ui.column().classes("w-full pk-gap-1 p-2"):
             for label, path, active in nav:
                 # ui.link（真實 <a href>）：點擊即導航，不需手寫 on_click
                 link = ui.link(label, path).classes("w-full px-3 py-2 rounded")

@@ -20,11 +20,11 @@ def _debug_page(log_path: Path, settings: SettingsService) -> None:
         ui.page_title("Paper_Kit Debug")
         # 票 16：統一頁框——側欄導覽；Debug 頁也進框架
         nav = [(l, p, _nav_active(p, "/debug")) for l, p in SIDEBAR_NAV]
-        app_frame("🔍 Paper_Kit Debug Log", settings, nav)
-        with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
+        app_frame("Paper_Kit Debug Log", settings, nav, icon="bug_report")
+        with ui.column().classes("w-full pk-container-form p-6 pk-gap-4"):
             ui.label(f"log 檔：{log_path}").classes("pk-text-xs pk-muted")
             job_filter = ui.input("過濾任務 id（空白 = 全部）").classes("w-full")
-            box = ui.column().classes("w-full gap-1")
+            box = ui.column().classes("w-full pk-gap-1")
 
             def render():
                 box.clear()

@@ -11,6 +11,7 @@ from paper_kit.application.cost_service import CostService
 from paper_kit.application.job_service import JobService
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.domain.translation_job import TranslationJob
+from paper_kit.presentation.components import empty_state
 from paper_kit.presentation.handlers import JobCardView, build_batch_zip, build_job_card
 from paper_kit.presentation.job_actions import (
     _batch_cancel,
@@ -50,15 +51,19 @@ def _history_page(
         ui.page_title("Paper_Kit 歷史")
         # 票 16：統一頁框——側欄（歷史 active）
         nav = [(l, p, _nav_active(p, "/history")) for l, p in SIDEBAR_NAV]
-        app_frame("📚 翻譯歷史", settings, nav)
+        app_frame("翻譯歷史", settings, nav, icon="history")
         # #24：歷史頁寬度填滿左右（使用者明定「歷史頁的文件才應該填滿左右，
         # 而不是用左右橫向條」）——max-w-5xl 造成 1920 螢幕左右大留白、表格被擠
-        with ui.column().classes("w-full p-6 gap-4"):
+        with ui.column().classes("w-full pk-container-wide p-6 pk-gap-4"):
             jobs = service.list_jobs()
             if not jobs:
                 # 票 17 AC：空歷史提示＋「翻譯新文件」快捷入口（→ 主頁）
-                ui.label("尚無翻譯任務").classes("pk-text-xl pk-text")
-                ui.link("翻譯新文件", "/").classes("pk-link")
+                # 相位 6：改用共用空狀態容器（虛線框＋圖示），分得出「沒有資料」
+                # 與「還在載入」。
+                with empty_state(icon="history"):
+                    ui.label("尚無翻譯任務").classes("pk-text-xl")
+                    ui.label("翻譯完成後，任務會出現在這裡。").classes("pk-text-sm pk-muted")
+                    ui.link("翻譯新文件", "/").classes("pk-link")
                 return
             engine_map = engine_labels or _engine_label_map()
             columns = [
@@ -98,7 +103,7 @@ def _history_page(
             # 單列重試／取消併入票 18 批量操作列（批量按鈕在表格下方，Python handler 可直綁）。
             table.add_slot(
                 "body-cell-actions",
-                """<q-td><div class="flex gap-1">
+                """<q-td><div class="flex pk-gap-1">
                 <q-btn v-if="props.row.mono_url" size="sm" flat color="primary" type="a"
                        :href="props.row.mono_url" download label="下載 mono" />
                 <q-btn v-if="props.row.dual_url" size="sm" flat color="teal" type="a"
@@ -127,10 +132,10 @@ def _history_page(
                 if ids is None:
                     return
                 # 二次確認 dialog（破壞性操作——規格書 Further Notes 必做）
-                with ui.dialog() as dialog, ui.card().classes("p-4 gap-2"):
+                with ui.dialog() as dialog, ui.card().classes("p-4 pk-gap-2"):
                     ui.label(f"確定刪除 {len(ids)} 筆任務（含輸出檔）？").classes("pk-text-lg")
                     ui.label("此操作無法復原").classes("pk-text-xs pk-muted")
-                    with ui.row().classes("gap-2"):
+                    with ui.row().classes("pk-gap-2"):
                         ui.button("取消", on_click=dialog.close).props("outline")
                         ui.button(
                             "確認刪除",
@@ -168,7 +173,7 @@ def _history_page(
                 # 跳到 /download-batch 路由：伺服端 zip 打包、附件回傳（送完刪暫存）
                 ui.navigate.to(f"/download-batch?ids={','.join(ids)}&kind={kind}")
 
-            with ui.row().classes("items-center gap-2"):
+            with ui.row().classes("items-center pk-gap-2"):
                 ui.button("批量刪除", on_click=_batch_delete).props("outline color=negative")
                 ui.button(
                     "↻ 批量重試", on_click=lambda: _batch_action("retry")

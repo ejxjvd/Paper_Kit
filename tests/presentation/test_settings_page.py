@@ -607,3 +607,37 @@ async def test_save_term_model_stores_and_clears(tmp_path):
     assert settings2.term_model("babeldoc") == "glm-4.7-flash"
     settings2.set_term_model("babeldoc", "")
     assert settings2.term_model("babeldoc") == "", "清空＝沿用主模型（空字串語意）"
+
+
+@pytest.mark.asyncio
+async def test_test_api_button_shows_probing_status(tmp_path, monkeypatch):
+    """相位 6 狀態承載：探測期間就地顯示「測試中…」，完成即清除。
+
+    探測是網路往返（最長 20 秒）；先前這段完全空白，使用者不知道按了有沒有
+    反應。以 threading.Event 卡住探測，確定狀態文字在等待期間可見。
+    """
+    import threading
+
+    settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    settings.set_api_key("deepseek", "sk-test")
+    cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
+    glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
+
+    gate = threading.Event()
+
+    def slow_probe(base, key, model=None):
+        gate.wait(timeout=5)
+        return 200, "{}"
+
+    monkeypatch.setattr(settings_page, "probe_model", slow_probe)
+
+    async with user_simulation(
+        root=lambda: _settings_page(settings, cost, glossaries)
+    ) as user:
+        await user.open("/settings")
+        await user.open("/settings")
+        user.find(marker="engine-key-test-deepseek").click()
+        await user.should_see("測試中…", retries=20)
+        gate.set()
+        await user.should_see("連線成功", retries=20)
+        await user.should_not_see("測試中…", retries=20)

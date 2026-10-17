@@ -31,6 +31,7 @@ from paper_kit.presentation.engine_cards import (
     UI_FREE_KEY_ENGINE_IDS,
     UI_LOCAL_GATEWAY_ENGINE_IDS,
 )
+from paper_kit.presentation.components import inline_error
 from paper_kit.presentation.file_ops import _download_output, _open_folder
 from paper_kit.presentation.handlers import (
     JobCardView,
@@ -223,8 +224,8 @@ def _render_card(
     # 純 content 匹配會假陽性（被引擎卡自身滿足），任務卡必須可獨立定位
     with ui.card().mark("job-card").classes("w-full pk-card"):  # 票 11：卡片主題 class（圓角/陰影/背景變數）
         with ui.row().classes("items-center justify-between w-full"):
-            with ui.column().classes("gap-0"):
-                with ui.row().classes("items-center gap-2"):
+            with ui.column().classes("pk-gap-0"):
+                with ui.row().classes("items-center pk-gap-2"):
                     ui.label(view.file_name).classes("pk-text-lg font-semibold")
                     if view.sensitive:  # 票 10：機密標記顯示
                         ui.badge("🔒 機密").props("outline color=orange")
@@ -268,7 +269,9 @@ def _render_card(
             ui.linear_progress(value=1.0, show_value=False).classes("w-full pk-progress")
             ui.label(progress_label(view)).classes("pk-text-xs pk-meta")
         if view.error:
-            ui.label(f"錯誤：{view.error}").classes("pk-error")  # 票 11：錯誤語意色走主題變數
+            # 相位 6：錯誤留在卡片內（不再只靠一閃即逝的 toast）；有 traceback
+            # 類細節時可展開，文字仍以「錯誤：」開頭（既有契約）。
+            inline_error(view.error)
         # 票 08 review：完成任務顯示「估算 vs 實際」，未完成顯示上傳時估價
         cost_label = view.usage_label or view.estimated_label
         if cost_label:
@@ -409,9 +412,9 @@ def _index_page(
         # 票 16：統一頁框——側欄（翻譯 active）＋頂部標題；主題切換收進 frame
         nav = [(l, p, _nav_active(p, "/")) for l, p in SIDEBAR_NAV]
         app_frame(
-            "📄 Paper_Kit 論文翻譯器", settings, nav, badge="自建 UI · 免除線上工具綁架"
+            "Paper_Kit 論文翻譯器", settings, nav, badge="自建 UI · 免除線上工具綁架", icon="translate"
         )
-        with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
+        with ui.column().classes("w-full pk-container-form p-6 pk-gap-4"):
             ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("pk-text")
             # #85 切片D：免費額度資訊條（BabelDOC 風格；聚合已完成任務 tokens，1s 輪詢更新）
             quota_label = ui.label(_quota_label(0)).classes("pk-text-xs pk-muted")
@@ -420,7 +423,7 @@ def _index_page(
                 "⚠️ 上傳即代表同意：檔案內容將送雲端 API 翻譯。"
                 "機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理"
             ).classes("pk-text-xs pk-warning")
-            with ui.row().classes("items-center gap-2"):
+            with ui.row().classes("items-center pk-gap-2"):
                 sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
                 # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示機密紅線細節
                 ui.icon("help_outline").props("size=18px").classes(
@@ -430,7 +433,7 @@ def _index_page(
                     "勾選後引擎自動切 DeepSeek，視覺卡灰化禁用"
                 )
             # 票 12：掃描件 OCR（本機 onnxruntime，不上雲——機密文件相容）
-            with ui.row().classes("items-center gap-2"):
+            with ui.row().classes("items-center pk-gap-2"):
                 ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
                 ui.icon("help_outline").props("size=18px").classes(
                     "pk-muted cursor-pointer"
@@ -512,18 +515,18 @@ def _index_page(
                 selected_engine if selected_engine in UI_ENGINE_IDS
                 else UI_ENGINE_IDS[0]
             )
-            with ui.row().classes("gap-2 w-full items-stretch"):
+            with ui.row().classes("pk-gap-2 w-full items-stretch"):
                 paid_key_select = ui.select(
                     {eid: ENGINE_SPECS[eid].label for eid in UI_ENGINE_IDS},
                     value=paid_key_eid,
                     label="付費引擎",
                 ).classes("w-64").mark("paid-key-engine-select")
                 with ui.card().mark("paid-key-engine-card").classes(
-                    "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                    "pk-engine-card flex-1 cursor-pointer pk-gap-1 p-3"
                     + (" ring-2 ring-primary" if selected_engine == paid_key_eid else "")
                     + (" pk-engine-card--disabled" if _card_disabled(paid_key_eid) else "")
                 ) as paid_key_card:
-                    paid_key_body = ui.column().classes("gap-1 w-full")
+                    paid_key_body = ui.column().classes("pk-gap-1 w-full")
 
                 _render_single_engine_card(paid_key_body, paid_key_eid)
                 engine_cards[paid_key_eid] = paid_key_card
@@ -579,11 +582,11 @@ def _index_page(
             # items-stretch（2026-10-16 D4）：另兩區（付費／免費 LLM）早有此 class，
             # 唯獨本區漏了——這正是「三卡不等高」最早的來源之一。補上後與其他兩列一致，
             # 卡片高度改由 flex stretch 決定，不再靠 CSS 硬鎖＋截斷。
-            with ui.row().classes("gap-2 w-full items-stretch"):
+            with ui.row().classes("pk-gap-2 w-full items-stretch"):
                 for eid in UI_FREE_ENGINE_IDS:
                     spec = ENGINE_SPECS[eid]
                     card = ui.card().mark(f"engine-card-{eid}").classes(
-                        "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                        "pk-engine-card flex-1 cursor-pointer pk-gap-1 p-3"
                         + (" ring-2 ring-primary" if eid == selected_engine else "")
                     )
                     with card:
@@ -614,18 +617,18 @@ def _index_page(
                 selected_engine if selected_engine in UI_FREE_KEY_ENGINE_IDS
                 else UI_FREE_KEY_ENGINE_IDS[0]
             )
-            with ui.row().classes("gap-2 w-full items-stretch"):
+            with ui.row().classes("pk-gap-2 w-full items-stretch"):
                 free_key_select = ui.select(
                     {eid: ENGINE_SPECS[eid].label for eid in UI_FREE_KEY_ENGINE_IDS},
                     value=free_key_eid,
                     label="免費 LLM 引擎",
                 ).classes("w-64").mark("free-key-engine-select")
                 with ui.card().mark("free-key-engine-card").classes(
-                    "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                    "pk-engine-card flex-1 cursor-pointer pk-gap-1 p-3"
                     + (" ring-2 ring-primary" if selected_engine == free_key_eid else "")
                     + (" pk-engine-card--disabled" if _card_disabled(free_key_eid) else "")
                 ) as free_key_card:
-                    free_key_body = ui.column().classes("gap-1 w-full")
+                    free_key_body = ui.column().classes("pk-gap-1 w-full")
 
                 _render_single_engine_card(free_key_body, free_key_eid)
                 engine_cards[free_key_eid] = free_key_card
@@ -662,11 +665,11 @@ def _index_page(
                     "本機轉發閘道——⚠️ 不是本機推論，內容仍會上行至上游；"
                     "使用前請先啟動閘道，機密文件不可用"
                 ).classes("pk-text-xs pk-muted").mark("local-gateway-hint")
-                with ui.row().classes("gap-2 w-full items-stretch"):
+                with ui.row().classes("pk-gap-2 w-full items-stretch"):
                     for eid in UI_LOCAL_GATEWAY_ENGINE_IDS:
                         spec = ENGINE_SPECS[eid]
                         card = ui.card().mark(f"engine-card-{eid}").classes(
-                            "pk-engine-card flex-1 cursor-pointer gap-1 p-3"
+                            "pk-engine-card flex-1 cursor-pointer pk-gap-1 p-3"
                             + (" ring-2 ring-primary" if eid == selected_engine else "")
                         )
                         with card:
@@ -707,10 +710,10 @@ def _index_page(
             # slot，1s 輪詢 cards.clear() 連坐 dialog.delete()（「不到 2 秒消失」）。
             # state 承接「哪一筆任務」：按確認才刪（非開啟當下快照，防競態）。
             delete_state: dict = {"job_id": None}
-            with ui.dialog() as delete_dialog, ui.card().classes("p-4 gap-2"):
+            with ui.dialog() as delete_dialog, ui.card().classes("p-4 pk-gap-2"):
                 ui.label("確定刪除此任務（含輸出檔）？").classes("pk-text-lg")
                 ui.label("此操作無法復原").classes("pk-text-xs pk-muted")
-                with ui.row().classes("gap-2"):
+                with ui.row().classes("pk-gap-2"):
                     ui.button("取消", on_click=delete_dialog.close).props("outline")
                     ui.button(
                         "確認刪除",
@@ -874,7 +877,7 @@ def _index_page(
                     on_upload=_on_file_uploaded,
                 ).classes("w-full")
                 staged_label = ui.label("尚未選取檔案").classes("pk-text-sm pk-text")
-                with ui.row().classes("items-center gap-3 w-full"):
+                with ui.row().classes("items-center pk-gap-3 w-full"):
                     page_select = ui.select(
                         [], multiple=True, value=[],
                         label="頁面範圍（上傳後可選）",
@@ -883,13 +886,13 @@ def _index_page(
                 only_selected_input = ui.checkbox("僅翻譯選中頁面（未選頁原樣保留）", value=True)
                 # #85 切片C：babeldoc 進階選項——僅 babeldoc 引擎消費（點卡才顯示；
                 # 設定頁 global 引擎＝babeldoc 時初始即顯示）
-                advanced_box = ui.column().mark("babeldoc-advanced").classes("gap-1 w-full")
+                advanced_box = ui.column().mark("babeldoc-advanced").classes("pk-gap-1 w-full")
                 advanced_box.set_visibility(selected_engine == "babeldoc")
                 with advanced_box:
                     ui.label("BabelDOC 進階選項").classes("pk-text-sm font-semibold pk-text")
                     # 2026-08-13（使用者要求「開啟 babeldoc 多了一堆選項，差別在哪」）：
                     # 每個選項旁 ⓘ 說明——hover 即看用途，不用猜
-                    with ui.row().classes("items-center gap-1"):
+                    with ui.row().classes("items-center pk-gap-1"):
                         enhance_compat_input = ui.checkbox("☑ 相容模式（版式較保守、錯位較少）", value=False)
                         ui.icon("help_outline").props("size=16px").classes(
                             "pk-muted cursor-pointer"
@@ -897,7 +900,7 @@ def _index_page(
                             "版面重排較保守：保留更多原始版式、減少文字錯位，"
                             "但段落重排效果較弱。適合數學／表格密集的 PDF。"
                         )
-                    with ui.row().classes("items-center gap-1"):
+                    with ui.row().classes("items-center pk-gap-1"):
                         merge_lines_input = ui.checkbox("☑ 行號增強（合併交錯行號）", value=True)
                         ui.icon("help_outline").props("size=16px").classes(
                             "pk-muted cursor-pointer"
@@ -905,7 +908,7 @@ def _index_page(
                             "把因欄位排版被拆成多行的「行號」合併回原行——"
                             "期刊／論文雙欄版面的行號不再散落成孤兒行。"
                         )
-                    with ui.row().classes("items-center gap-1"):
+                    with ui.row().classes("items-center pk-gap-1"):
                         remove_lines_input = ui.checkbox(
                             "☑ 移除段落中的非公式線條", value=False
                         )
@@ -915,7 +918,7 @@ def _index_page(
                             "刪除圖表框線、分隔線等不屬於公式的直線物件——"
                             "版面雜訊較多的掃描文件建議開啟。"
                         )
-                    with ui.row().classes("items-center gap-1"):
+                    with ui.row().classes("items-center pk-gap-1"):
                         font_select = ui.select(
                             ["serif", "sans-serif", "script"],
                             value="serif",
@@ -946,14 +949,14 @@ def _index_page(
                     target = out_dir_input.value.strip()
                     _open_folder(Path(target) if target else OUTPUTS_DIR)
 
-                with ui.row().classes("items-center gap-3 w-full"):
+                with ui.row().classes("items-center pk-gap-3 w-full"):
                     ui.button("套用輸出目錄", on_click=_apply_output_dir).props("outline")
                     ui.button(
                         "📂 瀏覽資料夾",
                         on_click=_browse_output_dir,
                     ).props("outline").mark("browse-output-dir")
                     ui.label("輸出目錄為產出 mono/dual PDF 的位置（設定頁同步）").classes("pk-text-xs pk-muted")
-                with ui.row().classes("items-center gap-3 w-full"):
+                with ui.row().classes("items-center pk-gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",
                         on_click=_start_staged,
@@ -967,7 +970,7 @@ def _index_page(
             # CDP 實測 L=316 R=1889 vs 欄位 L=655 R=1551 定案）。
             memo: dict[str, str | None] = {}
             latex_memo: dict[str, bool] = {}  # v0.1.9.5：LaTeX 密集偵測 memo（完成任務只算一次）
-            cards = ui.column().classes("w-full gap-4")
+            cards = ui.column().classes("w-full pk-gap-4")
             ui.timer(
                 1.0,
                 lambda: _refresh(
