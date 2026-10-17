@@ -12,6 +12,7 @@
 
 import asyncio
 import shutil
+import subprocess
 import types
 from pathlib import Path
 
@@ -28,7 +29,9 @@ from paper_kit.application.settings_service import SettingsService
 from paper_kit.infrastructure.glossary_repo import GlossaryRepository
 from paper_kit.infrastructure.memory_repo import InMemoryJobRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
-import paper_kit.presentation.app as app_module  # 同 module 物件（見下註）
+
+import paper_kit.presentation.app as app_module
+import paper_kit.presentation.index_page as index_page  # monkeypatch 目標＝呼叫方解析名稱的模組
 from paper_kit.presentation.app import _index_page
 from paper_kit.presentation.handlers import _translated_pages  # P2：純函式已收斂至 handlers
 
@@ -220,7 +223,7 @@ async def test_engine_cards_select_task_engine(tmp_path, monkeypatch, make_blank
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-test")  # override 路徑建引擎前查 key
     monkeypatch.setattr(
-        "paper_kit.presentation.app.build_engine",
+        "paper_kit.presentation.index_page.build_engine",
         lambda spec, api_key="": FileWritingFakeEngine(),
     )
 
@@ -264,7 +267,7 @@ async def test_target_lang_select_defaults_to_settings_value(tmp_path, monkeypat
     settings.set_target_lang("zh-TW")
     settings.set_api_key("deepseek", "sk-test")  # _pick_and_upload 點 DeepSeek 卡
     monkeypatch.setattr(
-        "paper_kit.presentation.app.build_engine",
+        "paper_kit.presentation.index_page.build_engine",
         lambda spec, api_key="": FileWritingFakeEngine(),
     )
 
@@ -320,7 +323,7 @@ async def test_upload_with_missing_key_is_blocked(tmp_path, monkeypatch, make_bl
 
     service, settings, cost, glossaries = _build(tmp_path)
     # 物件式 patch：分裂免疫（conftest unload 後 dotted-path 會 patch 到別 module）
-    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    monkeypatch.setattr(index_page, "build_engine", spy_build_engine)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -736,7 +739,7 @@ def test_open_folder_darwin_uses_open(tmp_path, monkeypatch):
     """v0.1.1：macOS 平台用 open（Finder）開資料夾＋先建目錄。"""
     monkeypatch.setattr(app_module.sys, "platform", "darwin")
     calls: list = []
-    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(app_module.ui, "notify", lambda *a, **k: None)
     target = tmp_path / "outputs"
     app_module._open_folder(target)
@@ -748,7 +751,7 @@ def test_open_folder_linux_uses_xdg_open(tmp_path, monkeypatch):
     """v0.1.1：Linux 平台用 xdg-open。"""
     monkeypatch.setattr(app_module.sys, "platform", "linux")
     calls: list = []
-    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(app_module.ui, "notify", lambda *a, **k: None)
     app_module._open_folder(tmp_path / "outputs")
     assert calls[0][0] == "xdg-open"
@@ -762,9 +765,9 @@ def test_open_folder_win32_uses_explorer(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(app_module.sys, "platform", "win32")
     calls: list = []
-    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(
-        app_module.subprocess,
+        subprocess,
         "run",
         lambda *a, **k: types.SimpleNamespace(
             returncode=0, stdout="\\\\wsl.localhost\\Ubuntu\\tmp\\x\n"
@@ -1002,7 +1005,7 @@ async def test_browse_output_dir_button_calls_open_folder(tmp_path, monkeypatch)
     _index_page closure 查的是舊 module 的 _open_folder（未 patch）→ 靜默失效。
     """
     called: list = []
-    monkeypatch.setattr(app_module, "_open_folder", lambda p: called.append(p))
+    monkeypatch.setattr(index_page, "_open_folder", lambda p: called.append(p))
     service, settings, cost, glossaries = _build(tmp_path)
 
     async with user_simulation(
@@ -1084,7 +1087,7 @@ async def test_tex_upload_auto_selects_latex_engine(tmp_path, monkeypatch):
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-ds-test")  # latex 共用 deepseek key
     monkeypatch.setattr(
-        "paper_kit.presentation.app.build_engine",
+        "paper_kit.presentation.index_page.build_engine",
         lambda spec, api_key="", **kw: FileWritingFakeEngine(),
     )
 
@@ -1122,7 +1125,7 @@ async def test_latex_engine_rejects_pdf_upload(tmp_path, monkeypatch, make_blank
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("deepseek", "sk-ds-test")
     monkeypatch.setattr(
-        "paper_kit.presentation.app.build_engine",
+        "paper_kit.presentation.index_page.build_engine",
         lambda spec, api_key="", **kw: FileWritingFakeEngine(),
     )
 
@@ -1158,7 +1161,7 @@ def test_resolve_latex_engine_falls_back_to_deepseek_key(tmp_path, monkeypatch):
         seen["key"] = api_key
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr(app_module, "build_engine", spy)
+    monkeypatch.setattr(index_page, "build_engine", spy)
     # 分裂免疫：unload 後函式內 from-import 會拿新 module（patch 舊 module 無效）——
     # 直接經 app_module 物件取屬性（同一 globals 字典）
     _resolve_task_engine = app_module._resolve_task_engine
@@ -1216,7 +1219,7 @@ async def test_free_engine_selection_creates_job_without_key(tmp_path, monkeypat
     # unload paper_kit.* module——dotted-path monkeypatch 會 re-import 出第二個
     # module，而本檔頂部 import 的 app_module／_index_page 仍引用舊 globals，
     # spy 永遠不被呼叫（2026-08-13 免費卡測試踩中：真 adapter 建出 → 缺 key 失敗）。
-    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    monkeypatch.setattr(index_page, "build_engine", spy_build_engine)
     service, settings, cost, glossaries = _build(tmp_path)  # 全程不設任何 key
 
     async with user_simulation(
@@ -1270,7 +1273,7 @@ def test_resolve_free_engine_requires_no_key(tmp_path, monkeypatch):
         seen["key"] = api_key
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr(app_module, "build_engine", spy)
+    monkeypatch.setattr(index_page, "build_engine", spy)
     # 分裂免疫：unload 後函式內 from-import 會拿新 module（patch 舊 module 無效）——
     # 直接經 app_module 物件取屬性（同一 globals 字典）
     _resolve_task_engine = app_module._resolve_task_engine
@@ -1392,7 +1395,7 @@ async def test_free_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
         calls.append((spec.id, api_key))
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    monkeypatch.setattr(index_page, "build_engine", spy_build_engine)
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("groq", "gr-test-free-key")
 
@@ -1442,7 +1445,7 @@ def test_resolve_free_key_engine_requires_key(tmp_path, monkeypatch):
         seen["key"] = api_key
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr(app_module, "build_engine", spy)
+    monkeypatch.setattr(index_page, "build_engine", spy)
     from paper_kit.application.ports import EngineError
 
     _resolve_task_engine = app_module._resolve_task_engine
@@ -1538,7 +1541,7 @@ async def test_paid_key_engine_selection_passes_key(tmp_path, monkeypatch, make_
         calls.append((spec.id, api_key))
         return FileWritingFakeEngine()
 
-    monkeypatch.setattr(app_module, "build_engine", spy_build_engine)
+    monkeypatch.setattr(index_page, "build_engine", spy_build_engine)
     service, settings, cost, glossaries = _build(tmp_path)
     settings.set_api_key("openai", "sk-proj-test")
 

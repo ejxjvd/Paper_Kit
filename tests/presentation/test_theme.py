@@ -102,7 +102,7 @@ def test_all_engine_rows_use_items_stretch(tmp_path):
     from pathlib import Path
 
     src = (Path(__file__).resolve().parents[2]
-           / "src" / "paper_kit" / "presentation" / "app.py").read_text(encoding="utf-8")
+           / "src" / "paper_kit" / "presentation" / "index_page.py").read_text(encoding="utf-8")
     # 三區的 row：付費／免費翻譯／免費 LLM（本機代理區亦同款）
     rows = [ln for ln in src.splitlines() if 'ui.row().classes("gap-2 w-full' in ln]
     assert len(rows) >= 3, f"引擎卡列數異常（預期≥3）：{len(rows)}"

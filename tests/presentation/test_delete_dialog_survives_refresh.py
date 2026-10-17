@@ -201,7 +201,8 @@ async def test_preview_dialog_survives_refresh_cycle(tmp_path):
 
 # ── Phase 3 假說檢驗：誰殺 dialog？一次一變數（monkeypatch _refresh） ──
 
-import paper_kit.presentation.app as app_mod  # noqa: E402
+import paper_kit.presentation.app as app_mod
+import paper_kit.presentation.index_page as index_page  # noqa: E402
 
 
 async def _open_with_job_card(user, service, settings, cost, glossaries) -> None:
@@ -238,7 +239,7 @@ async def test_refresh_without_clear_keeps_dialog(tmp_path, monkeypatch):
                     settings_svc,
                 )
 
-    monkeypatch.setattr(app_mod, "_refresh", _no_clear_refresh)
+    monkeypatch.setattr(index_page, "_refresh", _no_clear_refresh)
 
     async with user_simulation(
         root=lambda: _index_page(service, settings, cost, glossaries)
@@ -267,7 +268,7 @@ async def test_refresh_clear_without_redraw_keeps_dialog(tmp_path, monkeypatch):
         # 先以真實 _refresh 暖身：卡片＋刪除按鈕出現後才切 clear-only
         #（setup 假陰性：patch 先行 → 按鈕永不渲染 → should_see 失敗）
         await _open_with_job_card(user, service, settings, cost, glossaries)
-        monkeypatch.setattr(app_mod, "_refresh", _clear_only_refresh)
+        monkeypatch.setattr(index_page, "_refresh", _clear_only_refresh)
         await _click_delete_and_wait(user)
         await asyncio.sleep(2.5)
         assert _dialog_elements(user), "只 clear 版 _refresh 下 dialog 必須存活"

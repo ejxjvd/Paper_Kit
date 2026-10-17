@@ -18,7 +18,8 @@ from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.settings_service import SettingsService
 from paper_kit.infrastructure.glossary_repo import GlossaryRepository
 from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
-import paper_kit.presentation.app as app_module  # 分裂免疫（同 test_index_page）
+import paper_kit.presentation.app as app_module
+import paper_kit.presentation.settings_page as settings_page  # monkeypatch 目標＝呼叫方解析名稱的模組
 from paper_kit.presentation.app import _settings_page
 
 
@@ -335,7 +336,7 @@ async def test_test_api_button_shows_success(tmp_path, monkeypatch):
         calls.append((base_url, api_key, model))
         return 200, '{"ok":true}'
 
-    monkeypatch.setattr(app_module, "probe_model", fake_probe)
+    monkeypatch.setattr(settings_page, "probe_model", fake_probe)
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
     glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))
@@ -361,7 +362,7 @@ async def test_test_api_button_rejects_bad_key(tmp_path, monkeypatch):
     """key 無效（401）→ 警告通知（提示 key 有問題，不報連線失敗）。"""
 
     monkeypatch.setattr(
-        app_module, "probe_model", lambda base, key, model=None: (401, '{"error":"bad"}')
+        settings_page, "probe_model", lambda base, key, model=None: (401, '{"error":"bad"}')
     )
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
@@ -387,7 +388,7 @@ async def test_test_api_button_without_key_warns(tmp_path, monkeypatch):
         called.append(True)
         return 200, ""
 
-    monkeypatch.setattr(app_module, "probe_model", fake_probe)
+    monkeypatch.setattr(settings_page, "probe_model", fake_probe)
     settings = SettingsService(SqliteSettingsRepository(tmp_path / "pk.db"))
     cost = CostService(SqliteSettingsRepository(tmp_path / "pk.db"))
     glossaries = GlossaryService(GlossaryRepository(tmp_path / "glossaries"))

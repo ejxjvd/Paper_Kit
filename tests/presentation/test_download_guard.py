@@ -9,11 +9,12 @@ ui.download(缺檔路徑) → NiceGUI helpers.is_file=False → fallback from_ur
 import pytest
 
 import paper_kit.presentation.app as app
+import paper_kit.presentation.file_ops as file_ops
 
 
 def test_download_output_missing_file_notifies_and_skips_download(monkeypatch, tmp_path):
     """#83（紅）：ghost COMPLETED 任務的檔案在磁碟不存在 → 不下載。"""
-    monkeypatch.setattr(app, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(file_ops, "OUTPUTS_DIR", tmp_path)
     notified, downloaded = [], []
 
     monkeypatch.setattr(app.ui, "notify", lambda msg, **kw: notified.append((msg, kw)))
@@ -32,7 +33,7 @@ def test_download_output_existing_file_downloads_real_path(monkeypatch, tmp_path
     real = tmp_path / "job-x" / "seed.zh-TW.mono.pdf"  # /files/<job_id>/<name>
     real.parent.mkdir()
     real.write_bytes(b"%PDF-1.4 ok")
-    monkeypatch.setattr(app, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(file_ops, "OUTPUTS_DIR", tmp_path)
     notified, downloaded = [], []
 
     monkeypatch.setattr(app.ui, "notify", lambda msg, **kw: notified.append((msg, kw)))
