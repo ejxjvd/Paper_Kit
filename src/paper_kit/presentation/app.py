@@ -36,7 +36,6 @@ from paper_kit.application.errors import to_user_message
 from paper_kit.application.glossary_service import GlossaryService
 from paper_kit.application.job_intake import EngineChoice, JobIntake  # 候選 1：任務建立規則
 from paper_kit.application.job_service import JobService
-from paper_kit.infrastructure.app_paths import app_data_dir  # v0.1.2：portable 資料目錄（單一權威）
 
 from paper_kit.application.ocr import (  # 票 12：掃描件 OCR
     OcrService,
@@ -50,26 +49,29 @@ from paper_kit.application.translation_cache import TranslationCache  # 票 25�
 from paper_kit.domain.translation_job import InvalidTransition, JobStatus, TranslationJob
 from paper_kit.domain.cost_calculator import CostEstimate
 from paper_kit.domain.glossary import GlossaryFormatError
-from paper_kit.infrastructure.engine_registry import (  # P3：顯示知識也收斂至 registry
+# Phase 3 seam（v0.3）：presentation 只透過組合根認識 infrastructure。
+from paper_kit.presentation.composition import (  # noqa: F401
     ENGINE_SPECS,
+    GlossaryNameError,
+    GlossaryRepository,
+    RapidOcrAdapter,
+    SqliteJobRepository,
+    SqliteSettingsRepository,
+    app_data_dir,
     build_engine,
-    can_select,  # 架構健檢 #1+2+8：引擎挑選規則收斂 registry（灰化合併判定）
-    resolve_key,  # 有效 key 值（latex 槽位沿用單點）
-    sensitive_blocked,  # 機密紅線（票 10）
-    spec_has_key,  # key 存在判定（latex 特例內含）
-)
-from paper_kit.infrastructure.glossary_repo import GlossaryNameError, GlossaryRepository
-from paper_kit.infrastructure.latex_detector import detect_latex_dense  # v0.1.9.5：LaTeX 密集標注
-from paper_kit.infrastructure.job_repo import SqliteJobRepository
-from paper_kit.infrastructure.llm_probe import (  # 卡①：端點探測單點（測試 API／模型清單／preflight 共用）
+    can_select,
+    detect_latex_dense,
     diagnose,
+    format_log_line,
     list_models,
     probe_key,
     probe_model,
+    recent_log_entries,
+    resolve_key,
+    sensitive_blocked,
+    setup_logging,
+    spec_has_key,
 )
-from paper_kit.infrastructure.logging_setup import format_log_line, recent_log_entries, setup_logging
-from paper_kit.infrastructure.rapidocr_adapter import RapidOcrAdapter  # 票 12：本機 OCR
-from paper_kit.infrastructure.settings_repo import SqliteSettingsRepository
 from paper_kit.presentation.handlers import (  # P2：純函式統一在 handlers（零 nicegui import）
     FREE_TOKEN_QUOTA,
     JobCardView,
@@ -1677,7 +1679,7 @@ def _uv_startup_status() -> threading.Thread | None:
     download_uv 鎖（uv_bootstrap._download_lock），已完成或另一執行緒
     在裝都會正確處理。回傳背景執行緒（測試 join）。
     """
-    from paper_kit.infrastructure import uv_bootstrap as uv_boot
+    from paper_kit.presentation.composition import uv_bootstrap as uv_boot
 
     existing = uv_boot.installed_uv()
     if existing is not None:
