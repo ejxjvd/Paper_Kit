@@ -82,6 +82,8 @@ uv run paper-kit       # 啟動（預設 http://localhost:8080）
 規格書（PRD）、20 張開發票（GitHub issues #2–#22 同步）、研究與問題修復紀錄
 已移至開發知識庫管理——專案文件不入 repo，repo 只留程式碼。
 
+例外：**架構決策紀錄（ADR）留在 repo**，見 [`docs/adr/`](docs/adr/README.md)——13 項架構裁決的結論與理由。ADR 必須與程式碼同版控，否則換一次分支就查不到「為什麼這樣寫」。
+
 ## 📊 狀態
 
 票 01–20 全部完成＋快取三票（24–26）＋票 27 LaTeX 主 UI 整合＋架構健檢 #1–9＋v0.1.3–v0.1.9.1（NVIDIA EOL 修復、引擎模型挑選、NIM 節流、免費引擎守衛、術語庫擴充、macOS 嚴重問題修復、平台分離）——**761 tests passed**
