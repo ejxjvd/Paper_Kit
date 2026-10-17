@@ -56,7 +56,9 @@ async def test_index_page_has_sidebar_with_three_nav_items(tmp_path):
         nav_links = [l for l in user.find(ui.link).elements if l.text in {"翻譯", "歷史", "設定"}]
         assert len(nav_links) == 3, f"側欄應有 3 個導覽連結，實際 {len(nav_links)}"
         active = next(l for l in nav_links if l.text == "翻譯")
-        assert "bg-primary" in active._classes, "當前頁導覽項應有 bg-primary 高亮"
+        assert "pk-nav-active" in active._classes, (
+        "當前頁導覽項應有 pk-nav-active 高亮（相位 5：顏色走語意 class，禁用 Quasar 色票）"
+    )
         inactive = [l for l in nav_links if l.text != "翻譯"]
         assert all("bg-primary" not in l._classes for l in inactive)
 

@@ -57,8 +57,8 @@ def _history_page(
             jobs = service.list_jobs()
             if not jobs:
                 # 票 17 AC：空歷史提示＋「翻譯新文件」快捷入口（→ 主頁）
-                ui.label("尚無翻譯任務").classes("text-xl text-grey-8")
-                ui.link("翻譯新文件", "/").classes("text-primary")
+                ui.label("尚無翻譯任務").classes("pk-text-xl pk-text")
+                ui.link("翻譯新文件", "/").classes("pk-link")
                 return
             engine_map = engine_labels or _engine_label_map()
             columns = [
@@ -128,8 +128,8 @@ def _history_page(
                     return
                 # 二次確認 dialog（破壞性操作——規格書 Further Notes 必做）
                 with ui.dialog() as dialog, ui.card().classes("p-4 gap-2"):
-                    ui.label(f"確定刪除 {len(ids)} 筆任務（含輸出檔）？").classes("text-lg")
-                    ui.label("此操作無法復原").classes("text-xs text-grey-6")
+                    ui.label(f"確定刪除 {len(ids)} 筆任務（含輸出檔）？").classes("pk-text-lg")
+                    ui.label("此操作無法復原").classes("pk-text-xs pk-muted")
                     with ui.row().classes("gap-2"):
                         ui.button("取消", on_click=dialog.close).props("outline")
                         ui.button(
@@ -182,7 +182,7 @@ def _history_page(
                 ui.button(
                     "批量下載 dual", on_click=lambda: _batch_download("dual")
                 ).props("outline color=teal")
-                ui.label("勾選表格列後操作；執行中任務無法刪除").classes("text-xs text-grey-6")
+                ui.label("勾選表格列後操作；執行中任務無法刪除").classes("pk-text-xs pk-muted")
 
 
 def register_batch_download_route(service: JobService) -> None:

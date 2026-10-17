@@ -22,7 +22,7 @@ def _debug_page(log_path: Path, settings: SettingsService) -> None:
         nav = [(l, p, _nav_active(p, "/debug")) for l, p in SIDEBAR_NAV]
         app_frame("🔍 Paper_Kit Debug Log", settings, nav)
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
-            ui.label(f"log 檔：{log_path}").classes("text-xs text-grey-6")
+            ui.label(f"log 檔：{log_path}").classes("pk-text-xs pk-muted")
             job_filter = ui.input("過濾任務 id（空白 = 全部）").classes("w-full")
             box = ui.column().classes("w-full gap-1")
 
@@ -33,9 +33,9 @@ def _debug_page(log_path: Path, settings: SettingsService) -> None:
                 )
                 with box:
                     if not entries:
-                        ui.label("（無 log）").classes("text-grey-6 text-sm")
+                        ui.label("（無 log）").classes("pk-muted pk-text-sm")
                     for entry in entries:
-                        ui.label(format_log_line(entry)).classes("text-xs font-mono")
+                        ui.label(format_log_line(entry)).classes("pk-text-xs font-mono")
 
             job_filter.on_value_change(lambda: render())
             ui.button("重新整理", on_click=render).props("outline")

@@ -81,7 +81,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
         with ui.row().classes("items-center justify-between w-full"):
             ui.label(spec.label).classes("font-semibold")
             ui.badge("已設定" if settings.api_key(eid) else "未設定 key")
-        ui.label(spec.card_desc).classes("text-xs text-grey-7")
+        ui.label(spec.card_desc).classes("pk-text-xs pk-muted")
         key_input = ui.input(
             "API key",
             value=_mask_key(settings.api_key(eid)),
@@ -141,7 +141,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
             # （term 旗標僅 siliconflow provider 發送，#83）；獨立 key
             # 避免共用主 key（可各自輪替、權限分離）。
             ui.label("術語提取 API key（自動術語提取專用；空白 = 沿用主 key）").classes(
-                "text-xs text-grey-7"
+                "pk-text-xs pk-muted"
             )
             term_input = ui.input(
                 "術語提取 API key",
@@ -173,7 +173,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
             # 「為什麼找不到」——N/A 由 tooltip 說明）。
             ui.label(
                 "雙模型（術語抽取獨立；空白 = 沿用主模型與端點）"
-            ).classes("text-xs text-grey-7").mark(f"term-model-label-{eid}")
+            ).classes("pk-text-xs pk-muted").mark(f"term-model-label-{eid}")
             term_model_input = ui.input(
                 "術語模型",
                 value=settings.term_model(eid),
@@ -214,7 +214,7 @@ def _render_engine_key_card(settings: SettingsService, eid: str) -> None:
             # deepseek-v4-flash 於 08-07 下線：registry 寫死的 model 會過期）——
             # 下拉（載入 API 最新清單）＋自訂輸入（with_input）雙軌，永遠不撞 EOL。
             ui.label("模型（下拉挑選或自行輸入；空白 = 官方預設）").classes(
-                "text-xs text-grey-7"
+                "pk-text-xs pk-muted"
             )
             saved_model = settings.engine_model(eid)
             default_model = spec.model
@@ -328,17 +328,17 @@ def _settings_page(
                 ui.label("引擎 API keys").classes("font-bold")
                 ui.label(
                     "各自用自己的 key（存本機 SQLite，不入 repo/log）；已存 key 僅顯示遮罩。"
-                ).classes("text-xs text-grey-6")
+                ).classes("pk-text-xs pk-muted")
                 # 2026-08-13（使用者要求「付費、免費不要混雜」）：分兩區——付費引擎
                 # 與免費 LLM（自備免費 key）各自成區、各有區標題；卡集合同 registry
                 # 單點（UI_ENGINE_IDS 付費／UI_FREE_KEY_ENGINE_IDS 免費）。
                 ui.label("🔑 付費引擎（自備 key）").classes(
-                    "text-sm font-semibold text-grey-7 mt-3"
+                    "pk-text-sm font-semibold pk-muted mt-3"
                 ).mark("paid-keys-section")
                 for eid in UI_ENGINE_IDS:
                     _render_engine_key_card(settings, eid)
                 ui.label("🎁 免費 LLM（自備免費 key）").classes(
-                    "text-sm font-semibold text-grey-7 mt-3"
+                    "pk-text-sm font-semibold pk-muted mt-3"
                 ).mark("free-keys-section")
                 for eid in UI_FREE_KEY_ENGINE_IDS:
                     _render_engine_key_card(settings, eid)
@@ -359,7 +359,7 @@ def _settings_page(
             with ui.card().classes("w-full"):
                 ui.label("引擎單價（USD / 1K tokens）").classes("font-bold")
                 ui.label("票 06：DeepSeek 漲價只需改這裡（單價是設定不是寫死）").classes(
-                    "text-xs text-grey-6"
+                    "pk-text-xs pk-muted"
                 )
                 ui.input(
                     "input 單價",
@@ -384,7 +384,7 @@ def _settings_page(
             with ui.card().classes("w-full"):
                 ui.label("術語表庫").classes("font-bold")
                 ui.label("票 05：多份術語表各自命名；翻譯前挑選套用哪些。CSV 標頭：source,target[,tgt_lng]").classes(
-                    "text-xs text-grey-6"
+                    "pk-text-xs pk-muted"
                 )
                 glossary_select = ui.select(
                     glossaries.list_glossaries(),
@@ -463,9 +463,9 @@ def _settings_page(
                     ui.label("翻譯快取").classes("font-bold")
                     ui.label(
                         "票 24：同一檔案＋引擎＋設定再次翻譯＝直接回傳快取結果（省錢不花錢）"
-                    ).classes("text-xs text-grey-6")
+                    ).classes("pk-text-xs pk-muted")
                     cache_stats_label = ui.label(_cache_stats_label(cache)).classes(
-                        "text-sm text-grey-7"
+                        "pk-text-sm pk-muted"
                     )
 
                     def _refresh_cache_stats() -> None:
@@ -676,7 +676,7 @@ def _render_entries(glossaries: GlossaryService, entries_box, name) -> None:
         shown = entries[:_DISPLAY_LIMIT]
         for i, (source, target) in enumerate(shown):
             with ui.row().classes("items-center w-full gap-2"):
-                ui.label(f"{source} → {target}").classes("flex-1 text-sm")
+                ui.label(f"{source} → {target}").classes("flex-1 pk-text-sm")
                 ui.button(
                     "✕",
                     on_click=lambda i=i: _delete_entry(glossaries, name, i, entries_box),
@@ -685,9 +685,9 @@ def _render_entries(glossaries: GlossaryService, entries_box, name) -> None:
             ui.label(
                 f"（詞表共 {len(entries)} 條，僅顯示前 {_DISPLAY_LIMIT} 條——"
                 "大詞表供翻譯使用，編輯請用小詞表或直接改 CSV 檔）"
-            ).classes("text-grey-6 text-sm")
+            ).classes("pk-muted pk-text-sm")
         if not entries:
-            ui.label("（空白術語表）").classes("text-grey-6 text-sm")
+            ui.label("（空白術語表）").classes("pk-muted pk-text-sm")
 
 
 def _delete_entry(

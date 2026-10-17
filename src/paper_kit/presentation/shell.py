@@ -73,7 +73,7 @@ def app_frame(
     dark = _enter_theme(settings)
     with ui.header().classes("items-center justify-between"):
         with ui.row().classes("items-center gap-3"):
-            ui.label(title).classes("text-2xl font-bold")
+            ui.label(title).classes("pk-text-2xl font-bold")
             if badge:
                 ui.badge(badge).props("outline")
         with ui.row().classes("items-center gap-3"):
@@ -81,13 +81,13 @@ def app_frame(
                 "🌙" if settings.dark_mode() else "☀️",
                 on_click=lambda: _toggle_theme(settings, dark, theme_btn),
             ).props("flat round")
-    with ui.left_drawer(value=True).classes("bg-grey-3"):
+    with ui.left_drawer(value=True).classes("pk-sidebar"):
         with ui.column().classes("w-full gap-1 p-2"):
             for label, path, active in nav:
                 # ui.link（真實 <a href>）：點擊即導航，不需手寫 on_click
                 link = ui.link(label, path).classes("w-full px-3 py-2 rounded")
                 if active:
-                    link.classes("bg-primary text-white")
+                    link.classes("pk-nav-active")
                 else:
-                    link.classes("hover:bg-grey-4")
-        ui.link("Debug", "/debug").classes("text-xs text-grey-6 px-4")
+                    link.classes("pk-nav-link")
+        ui.link("Debug", "/debug").classes("pk-text-xs pk-muted px-4")

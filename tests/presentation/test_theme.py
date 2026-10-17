@@ -10,8 +10,9 @@ from paper_kit.presentation.theme import THEME_CSS, apply_theme
 
 def test_theme_css_defines_central_variable_tokens():
     """CSS 變數集中管理：元件顏色一律 var(--pk-*)，不寫死色值。"""
-    for token in ("--pk-bg", "--pk-card-bg", "--pk-border", "--pk-text", "--pk-text-muted",
-                  "--pk-error", "--pk-progress"):
+    for token in ("--pk-color-bg", "--pk-color-surface", "--pk-color-border",
+                  "--pk-color-text", "--pk-color-text-muted",
+                  "--pk-color-error", "--pk-color-progress"):
         assert token in THEME_CSS
 
 
@@ -19,14 +20,14 @@ def test_theme_css_covers_dark_mode_via_quasar_class():
     """深色模式：NiceGUI/Quasar 的 body--dark class 重新定義全部變數（不殘留淺色）。"""
     assert "body--dark" in THEME_CSS
     dark_section = THEME_CSS.split("body--dark", 1)[1]
-    for token in ("--pk-bg", "--pk-card-bg", "--pk-text", "--pk-text-muted",
-                  "--pk-error", "--pk-progress"):
+    for token in ("--pk-color-bg", "--pk-color-surface", "--pk-color-text",
+                  "--pk-color-text-muted", "--pk-color-error", "--pk-color-progress"):
         assert token in dark_section
 
 
 def test_theme_css_body_uses_variables():
-    assert "var(--pk-bg)" in THEME_CSS
-    assert "var(--pk-text)" in THEME_CSS
+    assert "var(--pk-color-bg)" in THEME_CSS
+    assert "var(--pk-color-text)" in THEME_CSS
 
 
 def test_theme_css_has_card_beautification_classes():
@@ -58,8 +59,8 @@ def test_theme_css_defines_engine_card_rules():
     assert "height: 104px" not in card_section, (
         "固定高度＝靠截斷文字達成假等高；等高改由 row 的 items-stretch 負責"
     )
-    assert "var(--pk-border)" in card_section, "邊框用主題 token"
-    assert "var(--pk-radius)" in card_section, "圓角用主題 token"
+    assert "var(--pk-color-border)" in card_section, "邊框用主題 token"
+    assert "var(--pk-radius-md)" in card_section, "圓角用主題 token"
 
 
 def test_theme_css_engine_desc_not_truncated():

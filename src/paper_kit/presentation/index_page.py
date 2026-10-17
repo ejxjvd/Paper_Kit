@@ -119,11 +119,11 @@ def _render_single_engine_card(body: ui.column, eid: str) -> None:
     body.clear()
     with body:
         with ui.row().classes("items-center justify-between w-full"):
-            ui.label(spec.label).classes("font-semibold text-sm")
+            ui.label(spec.label).classes("font-semibold pk-text-sm")
             ui.icon("help_outline").props("size=16px").classes(
-                "text-grey-5"
+                "pk-muted"
             ).mark(f"info-engine-{eid}").tooltip(spec.info)
-        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+        ui.label(spec.card_desc).classes("pk-text-xs pk-muted pk-engine-desc")
 
 
 def _swap_single_engine_card(
@@ -225,7 +225,7 @@ def _render_card(
         with ui.row().classes("items-center justify-between w-full"):
             with ui.column().classes("gap-0"):
                 with ui.row().classes("items-center gap-2"):
-                    ui.label(view.file_name).classes("text-lg font-semibold")
+                    ui.label(view.file_name).classes("pk-text-lg font-semibold")
                     if view.sensitive:  # 票 10：機密標記顯示
                         ui.badge("🔒 機密").props("outline color=orange")
                     if view.ocr:  # 票 12：掃描件標記顯示
@@ -246,7 +246,7 @@ def _render_card(
                 meta = f"任務 {view.job_id[:8]} · {view.created_label}"
                 if view.engine_label:
                     meta += f" · {view.engine_label}"
-                ui.label(meta).classes("text-xs pk-meta")  # 票 11：muted 變數
+                ui.label(meta).classes("pk-text-xs pk-meta")  # 票 11：muted 變數
             ui.badge(view.status_label).props(f"color={BADGE_COLORS[view.status]}")
         # #72：排隊中＝還沒開始（不顯示進度條，與翻譯中明確區分——使用者要求
         # 「排隊中跟翻譯中完全不同」）；翻譯中＝有引擎進度顯示確定值、無則
@@ -263,16 +263,16 @@ def _render_card(
                 ui.linear_progress(
                     value=0.5, show_value=False
                 ).props("indeterminate").classes("w-full pk-progress")
-            ui.label(progress_label(view)).classes("text-xs pk-meta")
+            ui.label(progress_label(view)).classes("pk-text-xs pk-meta")
         elif view.status is JobStatus.COMPLETED:
             ui.linear_progress(value=1.0, show_value=False).classes("w-full pk-progress")
-            ui.label(progress_label(view)).classes("text-xs pk-meta")
+            ui.label(progress_label(view)).classes("pk-text-xs pk-meta")
         if view.error:
             ui.label(f"錯誤：{view.error}").classes("pk-error")  # 票 11：錯誤語意色走主題變數
         # 票 08 review：完成任務顯示「估算 vs 實際」，未完成顯示上傳時估價
         cost_label = view.usage_label or view.estimated_label
         if cost_label:
-            ui.label(cost_label).classes("text-sm pk-cost")  # 票 11：成本排版變數
+            ui.label(cost_label).classes("pk-text-sm pk-cost")  # 票 11：成本排版變數
         with ui.row().classes("items-center"):
             if view.can_retry:
                 ui.button(
@@ -412,19 +412,19 @@ def _index_page(
             "📄 Paper_Kit 論文翻譯器", settings, nav, badge="自建 UI · 免除線上工具綁架"
         )
         with ui.column().classes("w-full max-w-4xl mx-auto p-6 gap-4"):
-            ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("text-grey-8")
+            ui.label("拖放 PDF 上傳，自動翻譯成繁體中文（mono＋dual 並排）").classes("pk-text")
             # #85 切片D：免費額度資訊條（BabelDOC 風格；聚合已完成任務 tokens，1s 輪詢更新）
-            quota_label = ui.label(_quota_label(0)).classes("text-xs text-grey-7")
+            quota_label = ui.label(_quota_label(0)).classes("pk-text-xs pk-muted")
             # 票 10：上傳即提示「檔案將送雲端」＋機密確認（R18／隱私紅線）
             ui.label(
                 "⚠️ 上傳即代表同意：檔案內容將送雲端 API 翻譯。"
                 "機密文件（R18／隱私）請勾選 🔒——僅 DeepSeek 純文字引擎可處理"
-            ).classes("text-xs text-amber-7")
+            ).classes("pk-text-xs pk-warning")
             with ui.row().classes("items-center gap-2"):
                 sensitive_input = ui.checkbox("🔒 這是機密文件（只准純文字引擎，不上視覺模型）")
                 # 2026-08-13（使用者要求）：ⓘ 說明——hover 顯示機密紅線細節
                 ui.icon("help_outline").props("size=18px").classes(
-                    "text-grey-6 cursor-pointer"
+                    "pk-muted cursor-pointer"
                 ).mark("info-sensitive").tooltip(
                     "機密文件（R18／隱私）只能走 DeepSeek 純文字引擎，視覺模型不上雲。"
                     "勾選後引擎自動切 DeepSeek，視覺卡灰化禁用"
@@ -433,14 +433,14 @@ def _index_page(
             with ui.row().classes("items-center gap-2"):
                 ocr_input = ui.checkbox("🔍 掃描件（無文字層 PDF）——本機 OCR 預處理")
                 ui.icon("help_outline").props("size=18px").classes(
-                    "text-grey-6 cursor-pointer"
+                    "pk-muted cursor-pointer"
                 ).mark("info-ocr").tooltip(
                     "無文字層的掃描 PDF：先本機 OCR（RapidOCR，不上雲）抽出文字層再翻譯，"
                     "機密相容"
                 )
             # 2026-08-13（使用者認為「都不勾也能翻譯」是 bug）：勾選項是「特殊處理」
             # 開關——都不是＝一般 PDF 直接翻譯（勾了掃描件反而多跑 OCR 預處理）
-            ui.label("（都不勾選＝一般 PDF，直接翻譯）").classes("text-xs text-grey-6")
+            ui.label("（都不勾選＝一般 PDF，直接翻譯）").classes("pk-text-xs pk-muted")
             # 2026-08-13（使用者回報）：引擎三卡移到機密／掃描件勾選之下、任務清單之上
             # ——任務一多不再把引擎卡往下推（cards 容器最後建立，見頁尾）
             selected_engine = settings.engine_id()  # closure；預設尊重設定頁
@@ -502,12 +502,12 @@ def _index_page(
             # 迴圈自動涵蓋）；下拉換引擎＝換 dict key＋重建卡內容（_pick_engine
             # 同款守衛，被擋復原下拉值）。
             ui.label("付費引擎（自備 key）").classes(
-                "text-sm font-semibold text-grey-7 mt-2"
+                "pk-text-sm font-semibold pk-muted mt-2"
             ).mark("paid-key-engine-section")
             ui.label(
                 "品質最佳（DeepSeek／OpenAI／Gemini 等）——在設定頁填入各自的 API key；"
                 "機密文件請選 DeepSeek 等不訓練引擎"
-            ).classes("text-xs text-grey-6").mark("paid-key-engine-hint")
+            ).classes("pk-text-xs pk-muted").mark("paid-key-engine-hint")
             paid_key_eid = (
                 selected_engine if selected_engine in UI_ENGINE_IDS
                 else UI_ENGINE_IDS[0]
@@ -571,10 +571,10 @@ def _index_page(
             # engine_cards dict → ring 清除／_on_sensitive_change 禁用迴圈／
             # _pick_engine 機密阻擋全部自動涵蓋，無需特例分支。
             ui.label("免費翻譯（不需 API key）").classes(
-                "text-sm font-semibold text-grey-7 mt-2"
+                "pk-text-sm font-semibold pk-muted mt-2"
             ).mark("free-engine-section")
             ui.label("零成本翻譯（上游代理轉發）——品質低於付費引擎；機密文件請選 DeepSeek").classes(
-                "text-xs text-grey-6"
+                "pk-text-xs pk-muted"
             ).mark("free-engine-hint")
             # items-stretch（2026-10-16 D4）：另兩區（付費／免費 LLM）早有此 class，
             # 唯獨本區漏了——這正是「三卡不等高」最早的來源之一。補上後與其他兩列一致，
@@ -588,11 +588,11 @@ def _index_page(
                     )
                     with card:
                         with ui.row().classes("items-center justify-between w-full"):
-                            ui.label(spec.label).classes("font-semibold text-sm")
+                            ui.label(spec.label).classes("font-semibold pk-text-sm")
                             ui.icon("help_outline").props("size=16px").classes(
-                                "text-grey-5"
+                                "pk-muted"
                             ).mark(f"info-engine-{eid}").tooltip(spec.info)
-                        ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+                        ui.label(spec.card_desc).classes("pk-text-xs pk-muted pk-engine-desc")
                     engine_cards[eid] = card
                     card.on("click", _engine_picker(_pick_engine, eid))
 
@@ -603,12 +603,12 @@ def _index_page(
             # 目前顯示引擎——ring 清除／機密禁用迴圈自動涵蓋）；下拉換引擎＝換 dict
             # key＋重建卡內容（_pick_engine 同款守衛，被擋復原下拉值）。
             ui.label("免費 LLM（自備免費 key）").classes(
-                "text-sm font-semibold text-grey-7 mt-2"
+                "pk-text-sm font-semibold pk-muted mt-2"
             ).mark("free-key-engine-section")
             ui.label(
                 "免費大模型（NVIDIA/ModelScope 等，品質接近付費）——在設定頁填入各自的"
                 "免費 API key；機密文件請選 DeepSeek"
-            ).classes("text-xs text-grey-6").mark("free-key-engine-hint")
+            ).classes("pk-text-xs pk-muted").mark("free-key-engine-hint")
             # 下拉預設＝目前所選引擎（若為免費 LLM）或優先序首支；選項＝registry 單點
             free_key_eid = (
                 selected_engine if selected_engine in UI_FREE_KEY_ENGINE_IDS
@@ -656,12 +656,12 @@ def _index_page(
             # ⚠️ 卡面文案必須寫明「不是本機推論」：流量仍上行至上游（命名誠實）。
             if UI_LOCAL_GATEWAY_ENGINE_IDS:
                 ui.label("本機代理（需自行啟動閘道）").classes(
-                    "text-sm font-semibold text-grey-7 mt-2"
+                    "pk-text-sm font-semibold pk-muted mt-2"
                 ).mark("local-gateway-section")
                 ui.label(
                     "本機轉發閘道——⚠️ 不是本機推論，內容仍會上行至上游；"
                     "使用前請先啟動閘道，機密文件不可用"
-                ).classes("text-xs text-grey-6").mark("local-gateway-hint")
+                ).classes("pk-text-xs pk-muted").mark("local-gateway-hint")
                 with ui.row().classes("gap-2 w-full items-stretch"):
                     for eid in UI_LOCAL_GATEWAY_ENGINE_IDS:
                         spec = ENGINE_SPECS[eid]
@@ -671,11 +671,11 @@ def _index_page(
                         )
                         with card:
                             with ui.row().classes("items-center justify-between w-full"):
-                                ui.label(spec.label).classes("font-semibold text-sm")
+                                ui.label(spec.label).classes("font-semibold pk-text-sm")
                                 ui.icon("help_outline").props("size=16px").classes(
-                                    "text-grey-5"
+                                    "pk-muted"
                                 ).mark(f"info-engine-{eid}").tooltip(spec.info)
-                            ui.label(spec.card_desc).classes("text-xs text-grey-7 pk-engine-desc")
+                            ui.label(spec.card_desc).classes("pk-text-xs pk-muted pk-engine-desc")
                         engine_cards[eid] = card
                         card.on("click", _engine_picker(_pick_engine, eid))
 
@@ -708,8 +708,8 @@ def _index_page(
             # state 承接「哪一筆任務」：按確認才刪（非開啟當下快照，防競態）。
             delete_state: dict = {"job_id": None}
             with ui.dialog() as delete_dialog, ui.card().classes("p-4 gap-2"):
-                ui.label("確定刪除此任務（含輸出檔）？").classes("text-lg")
-                ui.label("此操作無法復原").classes("text-xs text-grey-6")
+                ui.label("確定刪除此任務（含輸出檔）？").classes("pk-text-lg")
+                ui.label("此操作無法復原").classes("pk-text-xs pk-muted")
                 with ui.row().classes("gap-2"):
                     ui.button("取消", on_click=delete_dialog.close).props("outline")
                     ui.button(
@@ -873,26 +873,26 @@ def _index_page(
                     multiple=True,
                     on_upload=_on_file_uploaded,
                 ).classes("w-full")
-                staged_label = ui.label("尚未選取檔案").classes("text-sm text-grey-8")
+                staged_label = ui.label("尚未選取檔案").classes("pk-text-sm pk-text")
                 with ui.row().classes("items-center gap-3 w-full"):
                     page_select = ui.select(
                         [], multiple=True, value=[],
                         label="頁面範圍（上傳後可選）",
                     ).classes("flex-1")
-                    range_counter = ui.label("已選 0 of 0 頁").classes("text-xs text-grey-7")
+                    range_counter = ui.label("已選 0 of 0 頁").classes("pk-text-xs pk-muted")
                 only_selected_input = ui.checkbox("僅翻譯選中頁面（未選頁原樣保留）", value=True)
                 # #85 切片C：babeldoc 進階選項——僅 babeldoc 引擎消費（點卡才顯示；
                 # 設定頁 global 引擎＝babeldoc 時初始即顯示）
                 advanced_box = ui.column().mark("babeldoc-advanced").classes("gap-1 w-full")
                 advanced_box.set_visibility(selected_engine == "babeldoc")
                 with advanced_box:
-                    ui.label("BabelDOC 進階選項").classes("text-sm font-semibold text-grey-8")
+                    ui.label("BabelDOC 進階選項").classes("pk-text-sm font-semibold pk-text")
                     # 2026-08-13（使用者要求「開啟 babeldoc 多了一堆選項，差別在哪」）：
                     # 每個選項旁 ⓘ 說明——hover 即看用途，不用猜
                     with ui.row().classes("items-center gap-1"):
                         enhance_compat_input = ui.checkbox("☑ 相容模式（版式較保守、錯位較少）", value=False)
                         ui.icon("help_outline").props("size=16px").classes(
-                            "text-grey-5 cursor-pointer"
+                            "pk-muted cursor-pointer"
                         ).mark("info-compat").tooltip(
                             "版面重排較保守：保留更多原始版式、減少文字錯位，"
                             "但段落重排效果較弱。適合數學／表格密集的 PDF。"
@@ -900,7 +900,7 @@ def _index_page(
                     with ui.row().classes("items-center gap-1"):
                         merge_lines_input = ui.checkbox("☑ 行號增強（合併交錯行號）", value=True)
                         ui.icon("help_outline").props("size=16px").classes(
-                            "text-grey-5 cursor-pointer"
+                            "pk-muted cursor-pointer"
                         ).mark("info-merge-lines").tooltip(
                             "把因欄位排版被拆成多行的「行號」合併回原行——"
                             "期刊／論文雙欄版面的行號不再散落成孤兒行。"
@@ -910,7 +910,7 @@ def _index_page(
                             "☑ 移除段落中的非公式線條", value=False
                         )
                         ui.icon("help_outline").props("size=16px").classes(
-                            "text-grey-5 cursor-pointer"
+                            "pk-muted cursor-pointer"
                         ).mark("info-remove-lines").tooltip(
                             "刪除圖表框線、分隔線等不屬於公式的直線物件——"
                             "版面雜訊較多的掃描文件建議開啟。"
@@ -922,7 +922,7 @@ def _index_page(
                             label="字體",
                         ).classes("w-48")
                         ui.icon("help_outline").props("size=16px").classes(
-                            "text-grey-5 cursor-pointer"
+                            "pk-muted cursor-pointer"
                         ).mark("info-font").tooltip(
                             "輸出的字型風格：serif（襯線，正式文件）／"
                             "sans-serif（無襯線，簡潔現代）／script（手寫風，裝飾用）。"
@@ -952,13 +952,13 @@ def _index_page(
                         "📂 瀏覽資料夾",
                         on_click=_browse_output_dir,
                     ).props("outline").mark("browse-output-dir")
-                    ui.label("輸出目錄為產出 mono/dual PDF 的位置（設定頁同步）").classes("text-xs text-grey-7")
+                    ui.label("輸出目錄為產出 mono/dual PDF 的位置（設定頁同步）").classes("pk-text-xs pk-muted")
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.button(
                         "📂 開始翻譯",
                         on_click=_start_staged,
-                    ).props("color=primary unelevated").classes("text-lg")
-                    ui.label("選擇檔案後按「開始翻譯」送出；拖放＝暫存不自動翻譯").classes("text-xs text-grey-7")
+                    ).props("color=primary unelevated").classes("pk-text-lg")
+                    ui.label("選擇檔案後按「開始翻譯」送出；拖放＝暫存不自動翻譯").classes("pk-text-xs pk-muted")
             # 2026-08-13（使用者回報「3 個引擎按鈕在任務歷史下方」）：任務清單容器
             # 最後建立——引擎卡固定在上方（勾選下方），任務一多不再把引擎卡往下推
             # #22（2026-08-13 修復）：容器必須留在 max-w-4xl 欄位內（本欄位的 with
